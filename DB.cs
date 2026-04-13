@@ -32,7 +32,6 @@ namespace SistemaGestion
         public int     IdFactura  { get; set; }
         public string  Codigo     { get; set; }
         public decimal Cantidad   { get; set; }
-        public decimal PrecioUnit { get; set; }
     }
 
     public class DetalleCompra
@@ -487,7 +486,7 @@ namespace SistemaGestion
 
     public static partial class DatabaseService
     {
-        private static string ConnStr => _testConnStr ?? SecurityService.CadenaConexion;
+        private static string ConnStr => SecurityService.CadenaConexion;
 
         private static SqliteConnection Conn()
         {
@@ -578,7 +577,6 @@ namespace SistemaGestion
                 IdFactura  INTEGER,
                 Codigo     TEXT,
                 Cantidad   REAL DEFAULT 0,
-                PrecioUnit REAL DEFAULT 0,
                 PRIMARY KEY(IdFactura, Codigo),
                 FOREIGN KEY(Codigo) REFERENCES Inventario(Codigo)
             );
@@ -1102,7 +1100,7 @@ namespace SistemaGestion
         // Nunca se modifica una migracion existente: si hay un error se agrega
         // una nueva migracion que lo corrija.
         // Version actual del esquema en codigo: 7
-        public  const int SCHEMA_VERSION = 9;
+        public  const int SCHEMA_VERSION = 7;
 
         private static void MigrarEsquema(SqliteConnection conn)
         {
@@ -1277,45 +1275,6 @@ namespace SistemaGestion
                     AlterTableSafe(conn, tx,
                         "ALTER TABLE DetallesNomina ADD COLUMN OtrasDeduccion REAL DEFAULT 0");
                     SetSchemaVersion(conn, tx, 7);
-                }
-
-                // ── v8: tablas de Cuentas por Pagar y sus pagos
-                if (versionActual < 8)
-                    EjecutarMigracion(conn, tx, 8, @"
-                        CREATE TABLE IF NOT EXISTS CuentasPagar (
-                            Id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                            CodigoProveedor TEXT,
-                            Proveedor       TEXT,
-                            Concepto        TEXT NOT NULL,
-                            NumFactura      TEXT,
-                            Monto           REAL DEFAULT 0,
-                            Pagado          REAL DEFAULT 0,
-                            FechaEmision    TEXT NOT NULL,
-                            FechaVence      TEXT NOT NULL,
-                            Estado          TEXT DEFAULT 'Pendiente',
-                            Observaciones   TEXT
-                        );
-                        CREATE TABLE IF NOT EXISTS PagosCxP (
-                            Id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                            IdCuenta      INTEGER NOT NULL,
-                            Fecha         TEXT NOT NULL,
-                            Monto         REAL DEFAULT 0,
-                            FormaPago     TEXT,
-                            Referencia    TEXT,
-                            Observaciones TEXT,
-                            FOREIGN KEY(IdCuenta) REFERENCES CuentasPagar(Id)
-                        );
-                        CREATE INDEX IF NOT EXISTS idx_cxp_estado
-                            ON CuentasPagar(Estado);
-                        CREATE INDEX IF NOT EXISTS idx_cxp_vence
-                            ON CuentasPagar(FechaVence)");
-
-                // ── v9: precio historico en detalles de factura
-                if (versionActual < 9)
-                {
-                    AlterTableSafe(conn, tx,
-                        "ALTER TABLE DetallesFactura ADD COLUMN PrecioUnit REAL DEFAULT 0");
-                    SetSchemaVersion(conn, tx, 9);
                 }
 
                 tx.Commit();
@@ -2178,7 +2137,7 @@ namespace SistemaGestion
         }
 
         /// <summary>
-        /// Registra una corrección en el Kardex sin borra ningún movimiento anterior.
+        /// Registra una corrección en el Kardex sin borrar ningún movimiento anterior.
         /// </summary>
         public static void RegistrarCorreccion(
             string codigoProducto,
@@ -2188,18 +2147,987 @@ namespace SistemaGestion
         {
             using var conn = new SqliteConnection(ConnStr);
             conn.Open();
-            var cmdStock = conn.CreateCommand();
-            cmdStock.CommandText = "SELECT Existencia FROM Inventario WHERE Codigo = $cod";
-            cmdStock.Parameters.AddWithValue("$cod", codigoProducto);
-            var obj = cmdStock.ExecuteScalar();
+            var cmdSaldo = conn.CreateCommand();
+            cmdSaldo.CommandText = "SELECT Existencia FROM Inventario WHERE Codigo = $cod";
+            cmdSaldo.Parameters.AddWithValue("$cod", codigoProducto);
+            var obj = cmdSaldo.ExecuteScalar();
             if (obj == null) throw new Exception($"Producto '{codigoProducto}' no encontrado.");
 
             decimal saldoActual = (decimal)(double)obj;
             decimal diferencia  = nuevoStockReal - saldoActual;
             string tipo = diferencia >= 0 ? "ENTRADA" : "SALIDA";
 
-            InsBitacoraKardex(conn, null, codigoProducto, tipo,
-                "AJUSTE/CORRECCIÓN: " + motivo, Math.Abs(diferencia), saldoActual, nuevoStockReal, "AJUSTE");
+            RegistrarMovimiento(
+                codigoProducto,
+                tipo,
+                Math.Abs(diferencia),
+                $"AJUSTE/CORRECCIÓN: {motivo}",
+                "AJUSTE",
+                usuario);
+        }
+
+                // ════════ USUARIOS ═══════════════════════════════════════════════════════
+        public static string HashPassword(string password)
+        {
+            using var sha = System.Security.Cryptography.SHA256.Create();
+            var bytes = System.Text.Encoding.UTF8.GetBytes(password + "SG_SALT_2024");
+            return Convert.ToHexString(sha.ComputeHash(bytes)).ToLower();
+        }
+
+        public static Usuario ValidarLogin(string nombreUsuario, string password)
+        {
+            var hash = HashPassword(password);
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = @"SELECT * FROM Usuarios
+                WHERE NombreUsuario=$u AND PasswordHash=$h AND Activo=1";
+            cmd.Parameters.AddWithValue("$u", nombreUsuario);
+            cmd.Parameters.AddWithValue("$h", hash);
+            using var r = cmd.ExecuteReader();
+            if (!r.Read()) return null;
+            var user = new Usuario
+            {
+                Id             = r.GetInt32(0),
+                NombreUsuario  = r.GetString(1),
+                NombreCompleto = r.GetString(2),
+                PasswordHash   = r.GetString(3),
+                Rol            = r.GetString(4),
+                Activo         = r.GetInt32(5) == 1,
+                FechaCreacion  = DateTime.Parse(r.GetString(6)),
+                UltimoAcceso   = r.IsDBNull(7) ? null : DateTime.Parse(r.GetString(7))
+            };
+            // Actualizar ultimo acceso
+            var cmdUpd = c.CreateCommand();
+            cmdUpd.CommandText = "UPDATE Usuarios SET UltimoAcceso=$ua WHERE Id=$id";
+            cmdUpd.Parameters.AddWithValue("$ua", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+            cmdUpd.Parameters.AddWithValue("$id", user.Id);
+            cmdUpd.ExecuteNonQuery();
+            return user;
+        }
+
+        public static System.Collections.Generic.List<Usuario> ObtenerUsuarios()
+        {
+            var list = new System.Collections.Generic.List<Usuario>();
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = "SELECT * FROM Usuarios ORDER BY NombreCompleto";
+            using var r = cmd.ExecuteReader();
+            while (r.Read())
+                list.Add(new Usuario
+                {
+                    Id             = r.GetInt32(0),
+                    NombreUsuario  = r.GetString(1),
+                    NombreCompleto = r.GetString(2),
+                    PasswordHash   = r.GetString(3),
+                    Rol            = r.GetString(4),
+                    Activo         = r.GetInt32(5) == 1,
+                    FechaCreacion  = DateTime.Parse(r.GetString(6)),
+                    UltimoAcceso   = r.IsDBNull(7) ? null : DateTime.Parse(r.GetString(7))
+                });
+            return list;
+        }
+
+        public static void InsertarUsuario(Usuario u)
+        {
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = @"INSERT INTO Usuarios
+                (NombreUsuario,NombreCompleto,PasswordHash,Rol,Activo,FechaCreacion)
+                VALUES ($u,$nc,$ph,$r,$a,$fc)";
+            cmd.Parameters.AddWithValue("$u",  u.NombreUsuario);
+            cmd.Parameters.AddWithValue("$nc", u.NombreCompleto);
+            cmd.Parameters.AddWithValue("$ph", u.PasswordHash);
+            cmd.Parameters.AddWithValue("$r",  u.Rol);
+            cmd.Parameters.AddWithValue("$a",  u.Activo ? 1 : 0);
+            cmd.Parameters.AddWithValue("$fc", u.FechaCreacion.ToString("yyyy-MM-dd HH:mm:ss"));
+            cmd.ExecuteNonQuery();
+            cmd.CommandText = "SELECT last_insert_rowid()";
+            u.Id = (int)(long)cmd.ExecuteScalar();
+        }
+
+        public static void ActualizarUsuario(Usuario u)
+        {
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = @"UPDATE Usuarios
+                SET NombreCompleto=$nc,PasswordHash=$ph,Rol=$r,Activo=$a
+                WHERE Id=$id";
+            cmd.Parameters.AddWithValue("$nc", u.NombreCompleto);
+            cmd.Parameters.AddWithValue("$ph", u.PasswordHash);
+            cmd.Parameters.AddWithValue("$r",  u.Rol);
+            cmd.Parameters.AddWithValue("$a",  u.Activo ? 1 : 0);
+            cmd.Parameters.AddWithValue("$id", u.Id);
+            cmd.ExecuteNonQuery();
+        }
+
+        public static void EliminarUsuario(int id)
+        {
+            using var c = Conn();
+            Exec(c, "DELETE FROM Usuarios WHERE Id=$id", ("$id", id));
+        }
+
+        /// <summary>Crea el admin por defecto si no existe ningún usuario.</summary>
+        public static void SeedAdminSiNoExiste()
+        {
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = "SELECT COUNT(*) FROM Usuarios";
+            var count = (long)cmd.ExecuteScalar();
+            if (count == 0)
+            {
+                InsertarUsuario(new Usuario
+                {
+                    NombreUsuario  = "admin",
+                    NombreCompleto = "Administrador",
+                    PasswordHash   = HashPassword("admin123"),
+                    Rol            = "Admin",
+                    Activo         = true,
+                    FechaCreacion  = DateTime.Now
+                });
+            }
+        }
+
+        // ════════ LOG DE AUDITORÍA ════════════════════════════════════════════
+        public static void RegistrarAuditoria(string accion, string tabla = "", string detalle = "")
+        {
+            try
+            {
+                using var c = Conn();
+                var cmd = c.CreateCommand();
+                cmd.CommandText = @"INSERT INTO LogAuditoria
+                    (FechaHora,Usuario,Accion,Tabla,Detalle)
+                    VALUES ($fh,$us,$ac,$ta,$de)";
+                cmd.Parameters.AddWithValue("$fh", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+                cmd.Parameters.AddWithValue("$us", Sesion.NombreUsuario ?? "Sistema");
+                cmd.Parameters.AddWithValue("$ac", accion);
+                cmd.Parameters.AddWithValue("$ta", tabla);
+                cmd.Parameters.AddWithValue("$de", detalle);
+                cmd.ExecuteNonQuery();
+            }
+            catch { /* No interrumpir el flujo si falla el log */ }
+        }
+
+        public static System.Collections.Generic.List<(DateTime FechaHora, string Usuario,
+            string Accion, string Tabla, string Detalle)> ObtenerAuditoria(int ultimas = 500)
+        {
+            var list = new System.Collections.Generic.List<(DateTime, string, string, string, string)>();
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = $"SELECT FechaHora,Usuario,Accion,Tabla,Detalle FROM LogAuditoria ORDER BY Id DESC LIMIT {ultimas}";
+            using var r = cmd.ExecuteReader();
+            while (r.Read())
+                list.Add((DateTime.Parse(r.GetString(0)), S(r,1), S(r,2), S(r,3), S(r,4)));
+            return list;
+        }
+
+
+        public static List<(int Id, DateTime FechaHora, string Usuario,
+            string Accion, string Tabla, string Detalle)> ObtenerAuditoriaFiltrada(
+            string usuario = null,
+            string accion  = null,
+            string tabla   = null,
+            DateTime? desde = null,
+            DateTime? hasta = null,
+            int limite = 1000)
+        {
+            var list = new List<(int, DateTime, string, string, string, string)>();
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+
+            var where = new List<string>();
+            if (!string.IsNullOrEmpty(usuario)) where.Add("lower(Usuario) LIKE $us");
+            if (!string.IsNullOrEmpty(accion))  where.Add("lower(Accion)  LIKE $ac");
+            if (!string.IsNullOrEmpty(tabla))    where.Add("lower(Tabla)   LIKE $ta");
+            if (desde.HasValue)                  where.Add("FechaHora >= $de");
+            if (hasta.HasValue)                  where.Add("FechaHora <= $ha");
+
+            cmd.CommandText = "SELECT Id,FechaHora,Usuario,Accion,Tabla,Detalle FROM LogAuditoria"
+                + (where.Count > 0 ? " WHERE " + string.Join(" AND ", where) : "")
+                + " ORDER BY Id DESC LIMIT " + limite;
+
+            if (!string.IsNullOrEmpty(usuario)) cmd.Parameters.AddWithValue("$us", "%" + usuario.ToLower() + "%");
+            if (!string.IsNullOrEmpty(accion))  cmd.Parameters.AddWithValue("$ac", "%" + accion.ToLower()  + "%");
+            if (!string.IsNullOrEmpty(tabla))    cmd.Parameters.AddWithValue("$ta", "%" + tabla.ToLower()   + "%");
+            if (desde.HasValue) cmd.Parameters.AddWithValue("$de", desde.Value.ToString("yyyy-MM-dd"));
+            if (hasta.HasValue) cmd.Parameters.AddWithValue("$ha", hasta.Value.ToString("yyyy-MM-dd") + " 23:59:59");
+
+            using var r = cmd.ExecuteReader();
+            while (r.Read())
+                list.Add((r.GetInt32(0), DateTime.Parse(r.GetString(1)),
+                    S(r,2), S(r,3), S(r,4), S(r,5)));
+            return list;
+        }
+
+        public static List<string> ObtenerUsuariosAuditoria()
+        {
+            var list = new List<string> { "Todos" };
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = "SELECT DISTINCT Usuario FROM LogAuditoria ORDER BY Usuario";
+            using var r = cmd.ExecuteReader();
+            while (r.Read()) if (!r.IsDBNull(0)) list.Add(r.GetString(0));
+            return list;
+        }
+
+        public static List<string> ObtenerAccionesAuditoria()
+        {
+            var list = new List<string> { "Todas" };
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = "SELECT DISTINCT Accion FROM LogAuditoria ORDER BY Accion";
+            using var r = cmd.ExecuteReader();
+            while (r.Read()) if (!r.IsDBNull(0)) list.Add(r.GetString(0));
+            return list;
+        }
+
+                public static List<LineaFactura> ObtenerDetallesFactura(int idFactura)
+        {
+            var list = new List<LineaFactura>();
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = @"
+                SELECT df.IdFactura, df.Codigo, COALESCE(i.Descripcion,''), df.Cantidad,
+                       COALESCE(i.Precio,0), 0
+                FROM DetallesFactura df
+                LEFT JOIN Inventario i ON i.Codigo = df.Codigo
+                WHERE df.IdFactura = $id";
+            cmd.Parameters.AddWithValue("$id", idFactura);
+            using var r = cmd.ExecuteReader();
+            while (r.Read())
+                list.Add(new LineaFactura
+                {
+                    IdFactura   = r.GetInt32(0),
+                    CodigoItem  = S(r, 1),
+                    Descripcion = S(r, 2),
+                    Cantidad    = D(r, 3),
+                    PrecioUnit  = D(r, 4),
+                    Descuento   = D(r, 5)
+                });
+            return list;
+        }
+
+        public static void EliminarDetallesFactura(int idFactura)
+        {
+            using var c = Conn();
+            Exec(c, "DELETE FROM DetallesFactura WHERE IdFactura=$id", ("$id", idFactura));
+        }
+
+        /// <summary>
+        /// Guarda los detalles de una factura Y registra cada linea como
+        /// SALIDA en el Kardex dentro de una unica transaccion.
+        /// Si cualquier linea falla (stock insuficiente) hace ROLLBACK completo.
+        /// </summary>
+        public static void GuardarDetallesYKardex(
+            int idFactura,
+            string numeroF,
+            List<LineaFactura> lineas,
+            bool esNueva)
+        {
+            using var conn = new SqliteConnection(ConnStr);
+            conn.Open();
+            using var tx = conn.BeginTransaction();
+            try
+            {
+                // 1. Borrar detalles anteriores (para edicion)
+                var cmdDel = conn.CreateCommand();
+                cmdDel.Transaction = tx;
+                cmdDel.CommandText = "DELETE FROM DetallesFactura WHERE IdFactura=$id";
+                cmdDel.Parameters.AddWithValue("$id", idFactura);
+                cmdDel.ExecuteNonQuery();
+
+                foreach (var linea in lineas)
+                {
+                    if (linea.Cantidad <= 0) continue;
+
+                    // 2. Insertar linea de detalle
+                    var cmdIns = conn.CreateCommand();
+                    cmdIns.Transaction = tx;
+                    cmdIns.CommandText = @"
+                        INSERT INTO DetallesFactura (IdFactura, Codigo, Cantidad)
+                        VALUES ($id, $cod, $qty)";
+                    cmdIns.Parameters.AddWithValue("$id",  idFactura);
+                    cmdIns.Parameters.AddWithValue("$cod", linea.CodigoItem);
+                    cmdIns.Parameters.AddWithValue("$qty", (double)linea.Cantidad);
+                    cmdIns.ExecuteNonQuery();
+
+                    // 3. Leer stock actual del producto
+                    var cmdStock = conn.CreateCommand();
+                    cmdStock.Transaction = tx;
+                    cmdStock.CommandText = "SELECT Existencia FROM Inventario WHERE Codigo=$cod";
+                    cmdStock.Parameters.AddWithValue("$cod", linea.CodigoItem);
+                    var stockObj = cmdStock.ExecuteScalar();
+                    if (stockObj == null) continue;   // producto no en inventario: omitir
+
+                    decimal saldoAnt  = (decimal)(double)stockObj;
+                    decimal nuevoSaldo = saldoAnt - linea.Cantidad;
+
+                    if (nuevoSaldo < 0)
+                        throw new Exception(
+                            "Stock insuficiente para " + linea.CodigoItem +
+                            ". Existencia: " + saldoAnt +
+                            ", solicitado: " + linea.Cantidad);
+
+                    // 4. Insertar movimiento en Kardex
+                    var cmdKardex = conn.CreateCommand();
+                    cmdKardex.Transaction = tx;
+                    cmdKardex.CommandText = @"
+                        INSERT INTO MovimientosInventario
+                            (FechaHora, CodigoProducto, TipoMovimiento, Concepto,
+                             Cantidad, SaldoAnterior, NuevoSaldo, Referencia, Usuario)
+                        VALUES ($fh,$cp,'SALIDA',$co,$ca,$sa,$ns,$ref,$us)";
+                    cmdKardex.Parameters.AddWithValue("$fh",  DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+                    cmdKardex.Parameters.AddWithValue("$cp",  linea.CodigoItem);
+                    cmdKardex.Parameters.AddWithValue("$co",  "Venta Factura " + numeroF);
+                    cmdKardex.Parameters.AddWithValue("$ca",  (double)linea.Cantidad);
+                    cmdKardex.Parameters.AddWithValue("$sa",  (double)saldoAnt);
+                    cmdKardex.Parameters.AddWithValue("$ns",  (double)nuevoSaldo);
+                    cmdKardex.Parameters.AddWithValue("$ref", numeroF);
+                    cmdKardex.Parameters.AddWithValue("$us",  Sesion.NombreUsuario ?? "Sistema");
+                    cmdKardex.ExecuteNonQuery();
+
+                    // 5. Actualizar stock en tabla maestra
+                    var cmdUpd = conn.CreateCommand();
+                    cmdUpd.Transaction = tx;
+                    cmdUpd.CommandText = @"
+                        UPDATE Inventario
+                        SET Existencia=$ns, UltimaActualz=$fecha
+                        WHERE Codigo=$cod";
+                    cmdUpd.Parameters.AddWithValue("$ns",    (double)nuevoSaldo);
+                    cmdUpd.Parameters.AddWithValue("$fecha", DateTime.Today.ToString("yyyy-MM-dd"));
+                    cmdUpd.Parameters.AddWithValue("$cod",   linea.CodigoItem);
+                    cmdUpd.ExecuteNonQuery();
+                }
+
+                tx.Commit();
+
+                RegistrarAuditoria(
+                    esNueva ? "FACTURA_NUEVA" : "FACTURA_EDIT",
+                    "Facturas",
+                    "Factura " + numeroF + " con " + lineas.Count + " lineas");
+            }
+            catch
+            {
+                tx.Rollback();
+                throw;
+            }
+        }
+
+                // ════════ RENTABILIDAD POR PRODUCTO ══════════════════════════════════
+        /// <summary>
+        /// Calcula la rentabilidad de cada producto cruzando:
+        ///   - Inventario (costo, precio, stock)
+        ///   - MovimientosInventario (unidades vendidas y compradas por periodo)
+        /// </summary>
+        public static List<RentabilidadProducto> ObtenerRentabilidad(
+            DateTime? desde = null,
+            DateTime? hasta = null)
+        {
+            var inventario = ObtenerInventario();
+            var kardex     = ObtenerKardex(null, desde, hasta);
+
+            // Agrupar movimientos por producto
+            var salidas  = kardex.Where(k => k.TipoMovimiento == "SALIDA")
+                                 .GroupBy(k => k.CodigoProducto)
+                                 .ToDictionary(g => g.Key,
+                                               g => g.Sum(k => k.Cantidad));
+
+            var entradas = kardex.Where(k => k.TipoMovimiento == "ENTRADA")
+                                 .GroupBy(k => k.CodigoProducto)
+                                 .ToDictionary(g => g.Key,
+                                               g => g.Sum(k => k.Cantidad));
+
+            var resultado = new List<RentabilidadProducto>();
+
+            foreach (var inv in inventario)
+            {
+                decimal vendidas  = salidas.ContainsKey(inv.Codigo)  ? salidas[inv.Codigo]  : 0;
+                decimal compradas = entradas.ContainsKey(inv.Codigo) ? entradas[inv.Codigo] : 0;
+
+                // Ingreso = unidades vendidas x precio de venta
+                decimal ingreso = vendidas * inv.Precio;
+                // Costo   = unidades vendidas x costo actual
+                decimal costo   = vendidas * inv.CostoActual;
+
+                // Rotacion: cuantos meses tarda en vender el stock actual
+                // Si no hay ventas en el periodo, rotacion = 0 (no se mueve)
+                decimal rotacion = 0;
+                if (vendidas > 0 && inv.Existencia > 0)
+                {
+                    // Promedio vendido por mes en el periodo
+                    int mesesPeriodo = desde.HasValue && hasta.HasValue
+                        ? Math.Max(1, (int)Math.Ceiling(
+                            (hasta.Value - desde.Value).TotalDays / 30.0))
+                        : 1;
+                    decimal ventasPorMes = vendidas / mesesPeriodo;
+                    rotacion = ventasPorMes > 0
+                        ? Math.Round(inv.Existencia / ventasPorMes, 1)
+                        : 0;
+                }
+
+                resultado.Add(new RentabilidadProducto
+                {
+                    Codigo            = inv.Codigo,
+                    Descripcion       = inv.Descripcion ?? "",
+                    Departamento      = inv.Departamento ?? "",
+                    Unidad            = inv.Unidad ?? "",
+                    CostoUnitario     = inv.CostoActual,
+                    PrecioVenta       = inv.Precio,
+                    UnidadesVendidas  = vendidas,
+                    UnidadesCompradas = compradas,
+                    IngresoTotal      = ingreso,
+                    CostoTotal        = costo,
+                    StockActual       = inv.Existencia,
+                    RotacionMeses     = rotacion
+                });
+            }
+
+            // Ordenar por utilidad bruta descendente
+            resultado.Sort((a, b) => b.UtilidadBruta.CompareTo(a.UtilidadBruta));
+            return resultado;
+        }
+
+                // ════════ MANTENIMIENTO DE MOLDES ════════════════════════════════════
+        public static List<RegistroMantenimiento> ObtenerRegistrosMant(string codigoMolde = null)
+        {
+            var list = new List<RegistroMantenimiento>();
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = "SELECT * FROM RegistrosMantenimiento"
+                + (codigoMolde != null ? " WHERE CodigoMolde=$cod" : "")
+                + " ORDER BY FechaRealizada DESC";
+            if (codigoMolde != null) cmd.Parameters.AddWithValue("$cod", codigoMolde);
+            using var r = cmd.ExecuteReader();
+            while (r.Read())
+                list.Add(new RegistroMantenimiento
+                {
+                    Id             = r.GetInt32(0),  CodigoMolde = S(r,1),
+                    FechaRealizada = DateTime.Parse(r.GetString(2)),
+                    TipoMant       = S(r,3),  Tecnico     = S(r,4),
+                    Descripcion    = S(r,5),  CostoMant   = D(r,6),
+                    DuracionHoras  = r.IsDBNull(7) ? 0 : r.GetInt32(7),
+                    Resultado      = S(r,8),  Observaciones = S(r,9),
+                    ProximoMant    = r.IsDBNull(10) ? DateTime.Today.AddDays(90)
+                                    : DateTime.Parse(r.GetString(10))
+                });
+            return list;
+        }
+
+        public static void InsertarRegistroMant(RegistroMantenimiento rm)
+        {
+            using var conn = new SqliteConnection(ConnStr);
+            conn.Open();
+            using var tx = conn.BeginTransaction();
+            try
+            {
+                // 1. Insertar registro
+                var cmd = conn.CreateCommand(); cmd.Transaction = tx;
+                cmd.CommandText = @"INSERT INTO RegistrosMantenimiento
+                    (CodigoMolde,FechaRealizada,TipoMant,Tecnico,Descripcion,
+                     CostoMant,DuracionHoras,Resultado,Observaciones,ProximoMant)
+                    VALUES($cm,$fr,$tm,$te,$de,$co,$dh,$re,$ob,$pm)";
+                BindRM(cmd, rm); cmd.ExecuteNonQuery();
+                cmd.CommandText = "SELECT last_insert_rowid()";
+                rm.Id = (int)(long)cmd.ExecuteScalar();
+
+                // 2. Actualizar FechaLastMant en TbMoldes
+                var cmdM = conn.CreateCommand(); cmdM.Transaction = tx;
+                cmdM.CommandText = @"UPDATE TbMoldes
+                    SET FechaLastMant=$fl, DescMant=$dm WHERE CodigoMold=$cod";
+                cmdM.Parameters.AddWithValue("$fl",  rm.FechaRealizada.ToString("yyyy-MM-dd"));
+                cmdM.Parameters.AddWithValue("$dm",  rm.Descripcion ?? "");
+                cmdM.Parameters.AddWithValue("$cod", rm.CodigoMolde);
+                cmdM.ExecuteNonQuery();
+
+                // 3. Actualizar programa si existe
+                var cmdP = conn.CreateCommand(); cmdP.Transaction = tx;
+                cmdP.CommandText = @"UPDATE ProgramasMantenimiento
+                    SET UltimoMant=$ul WHERE CodigoMolde=$cod";
+                cmdP.Parameters.AddWithValue("$ul",  rm.FechaRealizada.ToString("yyyy-MM-dd"));
+                cmdP.Parameters.AddWithValue("$cod", rm.CodigoMolde);
+                cmdP.ExecuteNonQuery();
+
+                tx.Commit();
+                RegistrarAuditoria("MANT_REGISTRADO", "TbMoldes",
+                    rm.CodigoMolde + " — " + rm.TipoMant);
+            }
+            catch { tx.Rollback(); throw; }
+        }
+
+        public static void ActualizarRegistroMant(RegistroMantenimiento rm)
+        {
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = @"UPDATE RegistrosMantenimiento SET
+                FechaRealizada=$fr,TipoMant=$tm,Tecnico=$te,Descripcion=$de,
+                CostoMant=$co,DuracionHoras=$dh,Resultado=$re,
+                Observaciones=$ob,ProximoMant=$pm WHERE Id=$id";
+            BindRM(cmd, rm);
+            cmd.Parameters.AddWithValue("$id", rm.Id);
+            cmd.ExecuteNonQuery();
+        }
+
+        public static void EliminarRegistroMant(int id)
+        {
+            using var c = Conn();
+            Exec(c, "DELETE FROM RegistrosMantenimiento WHERE Id=$id", ("$id", id));
+        }
+
+        private static void BindRM(SqliteCommand cmd, RegistroMantenimiento rm)
+        {
+            cmd.Parameters.AddWithValue("$cm", rm.CodigoMolde);
+            cmd.Parameters.AddWithValue("$fr", rm.FechaRealizada.ToString("yyyy-MM-dd"));
+            cmd.Parameters.AddWithValue("$tm", rm.TipoMant ?? "Preventivo");
+            cmd.Parameters.AddWithValue("$te", rm.Tecnico ?? "");
+            cmd.Parameters.AddWithValue("$de", rm.Descripcion ?? "");
+            cmd.Parameters.AddWithValue("$co", (double)rm.CostoMant);
+            cmd.Parameters.AddWithValue("$dh", rm.DuracionHoras);
+            cmd.Parameters.AddWithValue("$re", rm.Resultado ?? "Completado");
+            cmd.Parameters.AddWithValue("$ob", rm.Observaciones ?? "");
+            cmd.Parameters.AddWithValue("$pm", rm.ProximoMant.ToString("yyyy-MM-dd"));
+        }
+
+        // ── Programas de mantenimiento ────────────────────────────────────
+        public static List<ProgramaMant> ObtenerProgramas(bool soloActivos = false)
+        {
+            var list = new List<ProgramaMant>();
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = "SELECT p.*, m.Descripcion FROM ProgramasMantenimiento p"
+                + " LEFT JOIN TbMoldes m ON m.CodigoMold = p.CodigoMolde"
+                + (soloActivos ? " WHERE p.Activo=1" : "")
+                + " ORDER BY p.UltimoMant ASC";
+            using var r = cmd.ExecuteReader();
+            while (r.Read())
+                list.Add(new ProgramaMant
+                {
+                    Id             = r.GetInt32(0),  CodigoMolde    = S(r,1),
+                    DescMolde      = S(r,7),         TipoMant       = S(r,3),
+                    FrecuenciaDias = r.IsDBNull(4) ? 90 : r.GetInt32(4),
+                    UltimoMant     = DateTime.Parse(r.GetString(5)),
+                    Activo         = r.GetInt32(6) == 1
+                });
+            return list;
+        }
+
+        public static void GuardarPrograma(ProgramaMant p)
+        {
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = @"INSERT OR REPLACE INTO ProgramasMantenimiento
+                (CodigoMolde,DescMolde,TipoMant,FrecuenciaDias,UltimoMant,Activo)
+                VALUES($cm,$dm,$tm,$fd,$ul,$ac)";
+            cmd.Parameters.AddWithValue("$cm", p.CodigoMolde);
+            cmd.Parameters.AddWithValue("$dm", p.DescMolde ?? "");
+            cmd.Parameters.AddWithValue("$tm", p.TipoMant ?? "Preventivo");
+            cmd.Parameters.AddWithValue("$fd", p.FrecuenciaDias);
+            cmd.Parameters.AddWithValue("$ul", p.UltimoMant.ToString("yyyy-MM-dd"));
+            cmd.Parameters.AddWithValue("$ac", p.Activo ? 1 : 0);
+            cmd.ExecuteNonQuery();
+        }
+
+        public static void EliminarPrograma(int id)
+        {
+            using var c = Conn();
+            Exec(c, "DELETE FROM ProgramasMantenimiento WHERE Id=$id", ("$id", id));
+        }
+
+                // ════════ CONTROL DE CALIDAD ═════════════════════════════════════════
+        public static List<InspeccionCalidad> ObtenerInspecciones(int? idIngreso = null)
+        {
+            var list = new List<InspeccionCalidad>();
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = "SELECT * FROM InspeccionesCalidad"
+                + (idIngreso.HasValue ? " WHERE IdIngreso=$id" : "")
+                + " ORDER BY Id DESC";
+            if (idIngreso.HasValue) cmd.Parameters.AddWithValue("$id", idIngreso.Value);
+            using var r = cmd.ExecuteReader();
+            while (r.Read())
+                list.Add(new InspeccionCalidad
+                {
+                    Id = r.GetInt32(0), IdIngreso = r.GetInt32(1),
+                    Lote = S(r,2), ProductoCod = S(r,3),
+                    FechaInspeccion = DateTime.Parse(r.GetString(4)),
+                    Inspector = S(r,5),
+                    CantidadTotal    = D(r,6),  CantidadAprobada  = D(r,7),
+                    CantidadRechazada= D(r,8),  CantidadRetrabajo = D(r,9),
+                    PuntajeDimensiones = r.IsDBNull(10) ? 3 : r.GetInt32(10),
+                    PuntajeApariencia  = r.IsDBNull(11) ? 3 : r.GetInt32(11),
+                    PuntajeFuncional   = r.IsDBNull(12) ? 3 : r.GetInt32(12),
+                    PuntajeEtiquetado  = r.IsDBNull(13) ? 3 : r.GetInt32(13),
+                    Resultado = S(r,14), Observaciones = S(r,15),
+                    AccionCorrectiva = S(r,16)
+                });
+            return list;
+        }
+
+        public static void InsertarInspeccion(InspeccionCalidad ins)
+        {
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = @"INSERT INTO InspeccionesCalidad
+                (IdIngreso,Lote,ProductoCod,FechaInspeccion,Inspector,
+                 CantidadTotal,CantidadAprobada,CantidadRechazada,CantidadRetrabajo,
+                 PuntajeDimensiones,PuntajeApariencia,PuntajeFuncional,PuntajeEtiquetado,
+                 Resultado,Observaciones,AccionCorrectiva)
+                VALUES($ii,$lo,$pc,$fi,$in,$ct,$ca,$cr,$cre,$pd,$pa,$pf,$pe,$re,$ob,$ac)";
+            BindIns(cmd, ins);
+            cmd.ExecuteNonQuery();
+            cmd.CommandText = "SELECT last_insert_rowid()";
+            ins.Id = (int)(long)cmd.ExecuteScalar();
+        }
+
+        public static void ActualizarInspeccion(InspeccionCalidad ins)
+        {
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = @"UPDATE InspeccionesCalidad SET
+                Lote=$lo,ProductoCod=$pc,FechaInspeccion=$fi,Inspector=$in,
+                CantidadTotal=$ct,CantidadAprobada=$ca,CantidadRechazada=$cr,
+                CantidadRetrabajo=$cre,PuntajeDimensiones=$pd,PuntajeApariencia=$pa,
+                PuntajeFuncional=$pf,PuntajeEtiquetado=$pe,Resultado=$re,
+                Observaciones=$ob,AccionCorrectiva=$ac WHERE Id=$id";
+            BindIns(cmd, ins);
+            cmd.Parameters.AddWithValue("$id", ins.Id);
+            cmd.ExecuteNonQuery();
+        }
+
+        public static void EliminarInspeccion(int id)
+        {
+            using var c = Conn();
+            Exec(c, "DELETE FROM DefectosCalidad WHERE IdInspeccion=$id", ("$id", id));
+            Exec(c, "DELETE FROM InspeccionesCalidad WHERE Id=$id", ("$id", id));
+        }
+
+        private static void BindIns(SqliteCommand cmd, InspeccionCalidad i)
+        {
+            cmd.Parameters.AddWithValue("$ii",  i.IdIngreso);
+            cmd.Parameters.AddWithValue("$lo",  i.Lote ?? "");
+            cmd.Parameters.AddWithValue("$pc",  i.ProductoCod ?? "");
+            cmd.Parameters.AddWithValue("$fi",  i.FechaInspeccion.ToString("yyyy-MM-dd"));
+            cmd.Parameters.AddWithValue("$in",  i.Inspector ?? "");
+            cmd.Parameters.AddWithValue("$ct",  (double)i.CantidadTotal);
+            cmd.Parameters.AddWithValue("$ca",  (double)i.CantidadAprobada);
+            cmd.Parameters.AddWithValue("$cr",  (double)i.CantidadRechazada);
+            cmd.Parameters.AddWithValue("$cre", (double)i.CantidadRetrabajo);
+            cmd.Parameters.AddWithValue("$pd",  i.PuntajeDimensiones);
+            cmd.Parameters.AddWithValue("$pa",  i.PuntajeApariencia);
+            cmd.Parameters.AddWithValue("$pf",  i.PuntajeFuncional);
+            cmd.Parameters.AddWithValue("$pe",  i.PuntajeEtiquetado);
+            cmd.Parameters.AddWithValue("$re",  i.Resultado ?? "Aprobado");
+            cmd.Parameters.AddWithValue("$ob",  i.Observaciones ?? "");
+            cmd.Parameters.AddWithValue("$ac",  i.AccionCorrectiva ?? "");
+        }
+
+        // ── Defectos ──────────────────────────────────────────────────────
+        public static List<DefectoCalidad> ObtenerDefectos(int idInspeccion)
+        {
+            var list = new List<DefectoCalidad>();
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = "SELECT * FROM DefectosCalidad WHERE IdInspeccion=$id";
+            cmd.Parameters.AddWithValue("$id", idInspeccion);
+            using var r = cmd.ExecuteReader();
+            while (r.Read())
+                list.Add(new DefectoCalidad
+                {
+                    IdInspeccion = r.GetInt32(0), TipoDefecto = S(r,1),
+                    Cantidad = r.IsDBNull(2) ? 0 : r.GetInt32(2),
+                    Descripcion = S(r,3), Severidad = S(r,4)
+                });
+            return list;
+        }
+
+        public static void GuardarDefectos(int idInspeccion, List<DefectoCalidad> defectos)
+        {
+            using var c = Conn();
+            Exec(c, "DELETE FROM DefectosCalidad WHERE IdInspeccion=$id", ("$id", idInspeccion));
+            foreach (var d in defectos)
+            {
+                var cmd = c.CreateCommand();
+                cmd.CommandText = @"INSERT INTO DefectosCalidad
+                    (IdInspeccion,TipoDefecto,Cantidad,Descripcion,Severidad)
+                    VALUES($id,$td,$ca,$de,$se)";
+                cmd.Parameters.AddWithValue("$id", idInspeccion);
+                cmd.Parameters.AddWithValue("$td", d.TipoDefecto ?? "");
+                cmd.Parameters.AddWithValue("$ca", d.Cantidad);
+                cmd.Parameters.AddWithValue("$de", d.Descripcion ?? "");
+                cmd.Parameters.AddWithValue("$se", d.Severidad ?? "Menor");
+                cmd.ExecuteNonQuery();
+            }
+        }
+
+        /// <summary>Estadisticas de calidad por producto en un periodo.</summary>
+        public static (int TotalInsp, decimal PctAprobado, decimal PctRechazado,
+                       int DefectosCriticos, string DefectoMasFrecuente)
+            EstadisticasCalidad(string productoCod = null, DateTime? desde = null, DateTime? hasta = null)
+        {
+            var inspecciones = ObtenerInspecciones()
+                .Where(i => (productoCod == null || i.ProductoCod == productoCod)
+                         && (desde == null || i.FechaInspeccion >= desde)
+                         && (hasta == null || i.FechaInspeccion <= hasta))
+                .ToList();
+
+            if (inspecciones.Count == 0)
+                return (0, 0, 0, 0, "—");
+
+            decimal totalU    = inspecciones.Sum(i => i.CantidadTotal);
+            decimal aprobadas = inspecciones.Sum(i => i.CantidadAprobada);
+            decimal rechazadas= inspecciones.Sum(i => i.CantidadRechazada);
+            decimal pctAp     = totalU > 0 ? Math.Round(aprobadas  / totalU * 100, 1) : 0;
+            decimal pctRe     = totalU > 0 ? Math.Round(rechazadas / totalU * 100, 1) : 0;
+
+            var todosDefectos = new List<DefectoCalidad>();
+            foreach (var ins in inspecciones)
+                todosDefectos.AddRange(ObtenerDefectos(ins.Id));
+
+            int criticos = todosDefectos.Where(d => d.Severidad == "Critico").Sum(d => d.Cantidad);
+            string topDefecto = todosDefectos.Count > 0
+                ? todosDefectos.GroupBy(d => d.TipoDefecto)
+                               .OrderByDescending(g => g.Sum(d => d.Cantidad))
+                               .First().Key
+                : "—";
+
+            return (inspecciones.Count, pctAp, pctRe, criticos, topDefecto);
+        }
+
+                // ════════ ORDENES DE PRODUCCION ════════════════════════════════════════
+        public static List<OrdenProduccion> ObtenerOrdenes(string estado = null)
+        {
+            var list = new List<OrdenProduccion>();
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = "SELECT * FROM OrdenesProduccion"
+                + (estado != null ? " WHERE Estado=$e" : "")
+                + " ORDER BY Id DESC";
+            if (estado != null) cmd.Parameters.AddWithValue("$e", estado);
+            using var r = cmd.ExecuteReader();
+            while (r.Read())
+                list.Add(new OrdenProduccion
+                {
+                    Id            = r.GetInt32(0),
+                    NumOrden      = S(r,1), ProductoCod  = S(r,2),
+                    ProductoDesc  = S(r,3), CantidadPlan = D(r,4),
+                    CantidadReal  = D(r,5),
+                    FechaInicio   = DateTime.Parse(r.GetString(6)),
+                    FechaFin      = DateTime.Parse(r.GetString(7)),
+                    Estado        = S(r,8), Responsable   = S(r,9),
+                    Observaciones = S(r,10),
+                    FechaCreacion = DateTime.Parse(r.GetString(11))
+                });
+            return list;
+        }
+
+        public static void InsertarOrden(OrdenProduccion op)
+        {
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = @"INSERT INTO OrdenesProduccion
+                (NumOrden,ProductoCod,ProductoDesc,CantidadPlan,CantidadReal,
+                 FechaInicio,FechaFin,Estado,Responsable,Observaciones,FechaCreacion)
+                VALUES($no,$pc,$pd,$cp,$cr,$fi,$ff,$es,$re,$ob,$fc)";
+            BindOrden(cmd, op);
+            cmd.ExecuteNonQuery();
+            cmd.CommandText = "SELECT last_insert_rowid()";
+            op.Id = (int)(long)cmd.ExecuteScalar();
+        }
+
+        public static void ActualizarOrden(OrdenProduccion op)
+        {
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = @"UPDATE OrdenesProduccion SET
+                NumOrden=$no,ProductoCod=$pc,ProductoDesc=$pd,CantidadPlan=$cp,
+                CantidadReal=$cr,FechaInicio=$fi,FechaFin=$ff,Estado=$es,
+                Responsable=$re,Observaciones=$ob WHERE Id=$id";
+            BindOrden(cmd, op);
+            cmd.Parameters.AddWithValue("$id", op.Id);
+            cmd.ExecuteNonQuery();
+        }
+
+        public static void EliminarOrden(int id)
+        {
+            using var c = Conn();
+            Exec(c, "DELETE FROM LineasOrden WHERE IdOrden=$id", ("$id", id));
+            Exec(c, "DELETE FROM OrdenesProduccion WHERE Id=$id", ("$id", id));
+        }
+
+        private static void BindOrden(SqliteCommand cmd, OrdenProduccion op)
+        {
+            cmd.Parameters.AddWithValue("$no", op.NumOrden);
+            cmd.Parameters.AddWithValue("$pc", op.ProductoCod);
+            cmd.Parameters.AddWithValue("$pd", op.ProductoDesc ?? "");
+            cmd.Parameters.AddWithValue("$cp", (double)op.CantidadPlan);
+            cmd.Parameters.AddWithValue("$cr", (double)op.CantidadReal);
+            cmd.Parameters.AddWithValue("$fi", op.FechaInicio.ToString("yyyy-MM-dd"));
+            cmd.Parameters.AddWithValue("$ff", op.FechaFin.ToString("yyyy-MM-dd"));
+            cmd.Parameters.AddWithValue("$es", op.Estado);
+            cmd.Parameters.AddWithValue("$re", op.Responsable ?? "");
+            cmd.Parameters.AddWithValue("$ob", op.Observaciones ?? "");
+            cmd.Parameters.AddWithValue("$fc", op.FechaCreacion.ToString("yyyy-MM-dd HH:mm:ss"));
+        }
+
+        // ── Lineas (materias primas) ──────────────────────────────────────
+        public static List<LineaOrden> ObtenerLineasOrden(int idOrden)
+        {
+            var list = new List<LineaOrden>();
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = @"
+                SELECT lo.IdOrden, lo.MateriaCod,
+                       COALESCE(i.Descripcion, lo.MateriaDesc,''),
+                       lo.CantidadReq, lo.CantidadTot,
+                       COALESCE(i.Existencia, 0)
+                FROM LineasOrden lo
+                LEFT JOIN Inventario i ON i.Codigo = lo.MateriaCod
+                WHERE lo.IdOrden = $id";
+            cmd.Parameters.AddWithValue("$id", idOrden);
+            using var r = cmd.ExecuteReader();
+            while (r.Read())
+                list.Add(new LineaOrden
+                {
+                    IdOrden     = r.GetInt32(0), MateriaCod  = S(r,1),
+                    MateriaDesc = S(r,2),        CantidadReq = D(r,3),
+                    CantidadTot = D(r,4),        StockActual = D(r,5)
+                });
+            return list;
+        }
+
+        public static void GuardarLineasOrden(int idOrden, List<LineaOrden> lineas)
+        {
+            using var c = Conn();
+            Exec(c, "DELETE FROM LineasOrden WHERE IdOrden=$id", ("$id", idOrden));
+            foreach (var l in lineas)
+            {
+                var cmd = c.CreateCommand();
+                cmd.CommandText = @"INSERT INTO LineasOrden
+                    (IdOrden,MateriaCod,MateriaDesc,CantidadReq,CantidadTot)
+                    VALUES($id,$mc,$md,$cr,$ct)";
+                cmd.Parameters.AddWithValue("$id", idOrden);
+                cmd.Parameters.AddWithValue("$mc", l.MateriaCod);
+                cmd.Parameters.AddWithValue("$md", l.MateriaDesc ?? "");
+                cmd.Parameters.AddWithValue("$cr", (double)l.CantidadReq);
+                cmd.Parameters.AddWithValue("$ct", (double)l.CantidadTot);
+                cmd.ExecuteNonQuery();
+            }
+        }
+
+        /// <summary>
+        /// Cierra una orden: descuenta materias primas del inventario via Kardex
+        /// y agrega el producto terminado como ENTRADA. Todo en una transaccion.
+        /// </summary>
+        public static void CerrarOrden(OrdenProduccion op, decimal cantidadReal)
+        {
+            var lineas = ObtenerLineasOrden(op.Id);
+
+            using var conn = new SqliteConnection(ConnStr);
+            conn.Open();
+            using var tx = conn.BeginTransaction();
+            try
+            {
+                // 1. Descontar cada materia prima (proporcional a cantidad real)
+                decimal factor = op.CantidadPlan > 0 ? cantidadReal / op.CantidadPlan : 1;
+
+                foreach (var l in lineas)
+                {
+                    decimal consumo = Math.Round(l.CantidadTot * factor, 4);
+                    if (consumo <= 0) continue;
+
+                    // Leer stock actual
+                    var cmdStock = conn.CreateCommand();
+                    cmdStock.Transaction = tx;
+                    cmdStock.CommandText = "SELECT Existencia FROM Inventario WHERE Codigo=$cod";
+                    cmdStock.Parameters.AddWithValue("$cod", l.MateriaCod);
+                    var obj = cmdStock.ExecuteScalar();
+                    if (obj == null) continue;
+
+                    decimal saldoAnt  = (decimal)(double)obj;
+                    decimal nuevoSaldo = saldoAnt - consumo;
+                    if (nuevoSaldo < 0)
+                        throw new Exception(
+                            "Stock insuficiente: " + l.MateriaCod +
+                            " — Existencia: " + saldoAnt +
+                            ", requerido: " + consumo);
+
+                    // Kardex SALIDA materia prima
+                    InsBitacoraKardex(conn, tx, l.MateriaCod, "SALIDA",
+                        "Consumo OP " + op.NumOrden, consumo, saldoAnt, nuevoSaldo, op.NumOrden);
+
+                    // Actualizar stock
+                    UpdStock(conn, tx, l.MateriaCod, nuevoSaldo);
+                }
+
+                // 2. Agregar producto terminado (ENTRADA)
+                var cmdProd = conn.CreateCommand();
+                cmdProd.Transaction = tx;
+                cmdProd.CommandText = "SELECT Existencia FROM Inventario WHERE Codigo=$cod";
+                cmdProd.Parameters.AddWithValue("$cod", op.ProductoCod);
+                var objProd = cmdProd.ExecuteScalar();
+
+                if (objProd != null)
+                {
+                    decimal stockProd  = (decimal)(double)objProd;
+                    decimal nuevoStock = stockProd + cantidadReal;
+                    InsBitacoraKardex(conn, tx, op.ProductoCod, "ENTRADA",
+                        "Produccion OP " + op.NumOrden, cantidadReal, stockProd, nuevoStock, op.NumOrden);
+                    UpdStock(conn, tx, op.ProductoCod, nuevoStock);
+                }
+
+                // 3. Actualizar estado de la orden
+                var cmdOp = conn.CreateCommand();
+                cmdOp.Transaction = tx;
+                cmdOp.CommandText = @"UPDATE OrdenesProduccion
+                    SET Estado='Completada', CantidadReal=$cr WHERE Id=$id";
+                cmdOp.Parameters.AddWithValue("$cr", (double)cantidadReal);
+                cmdOp.Parameters.AddWithValue("$id", op.Id);
+                cmdOp.ExecuteNonQuery();
+
+                tx.Commit();
+
+                RegistrarAuditoria("ORDEN_CERRADA", "OrdenesProduccion",
+                    op.NumOrden + " — " + cantidadReal + " unidades producidas");
+            }
+            catch
+            {
+                tx.Rollback();
+                throw;
+            }
+        }
+
+        private static void InsBitacoraKardex(
+            SqliteConnection conn, SqliteTransaction tx,
+            string codigo, string tipo, string concepto,
+            decimal cantidad, decimal saldoAnt, decimal nuevoSaldo, string ref_)
+        {
+            var cmd = conn.CreateCommand();
+            cmd.Transaction = tx;
+            cmd.CommandText = @"INSERT INTO MovimientosInventario
+                (FechaHora,CodigoProducto,TipoMovimiento,Concepto,
+                 Cantidad,SaldoAnterior,NuevoSaldo,Referencia,Usuario)
+                VALUES($fh,$cp,$tm,$co,$ca,$sa,$ns,$re,$us)";
+            cmd.Parameters.AddWithValue("$fh", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+            cmd.Parameters.AddWithValue("$cp", codigo);
+            cmd.Parameters.AddWithValue("$tm", tipo);
+            cmd.Parameters.AddWithValue("$co", concepto);
+            cmd.Parameters.AddWithValue("$ca", (double)cantidad);
+            cmd.Parameters.AddWithValue("$sa", (double)saldoAnt);
+            cmd.Parameters.AddWithValue("$ns", (double)nuevoSaldo);
+            cmd.Parameters.AddWithValue("$re", ref_);
+            cmd.Parameters.AddWithValue("$us", Sesion.NombreUsuario ?? "Sistema");
+            cmd.ExecuteNonQuery();
+        }
+
+        private static void UpdStock(
+            SqliteConnection conn, SqliteTransaction tx, string codigo, decimal nuevoSaldo)
+        {
+            var cmd = conn.CreateCommand();
+            cmd.Transaction = tx;
+            cmd.CommandText = @"UPDATE Inventario
+                SET Existencia=$ns, UltimaActualz=$f WHERE Codigo=$cod";
+            cmd.Parameters.AddWithValue("$ns",  (double)nuevoSaldo);
+            cmd.Parameters.AddWithValue("$f",   DateTime.Today.ToString("yyyy-MM-dd"));
+            cmd.Parameters.AddWithValue("$cod", codigo);
+            cmd.ExecuteNonQuery();
         }
 
         /// <summary>Genera el siguiente numero de orden: OP-0001, OP-0002...</summary>
@@ -2941,8 +3869,8 @@ namespace SistemaGestion
 
             // Facturas
             var cmd4 = c.CreateCommand();
-            cmd4.CommandText = "SELECT NumeroF, Codigo, TotalF, Fecha"
-                + " FROM Facturas WHERE lower(NumeroF)||lower(coalesce(Codigo,'')) LIKE $q LIMIT 10";
+            cmd4.CommandText = @"SELECT NumeroF, Codigo, TotalF, Fecha
+                FROM Facturas WHERE lower(NumeroF)||lower(coalesce(Codigo,'')) LIKE $q LIMIT 10";
             cmd4.Parameters.AddWithValue("$q", "%" + q + "%");
             using (var rd = cmd4.ExecuteReader())
                 while (rd.Read())
@@ -2952,8 +3880,8 @@ namespace SistemaGestion
 
             // Compras
             var cmd5 = c.CreateCommand();
-            cmd5.CommandText = "SELECT CompraN, CodigoP, TotalC, FechaC"
-                + " FROM Compras WHERE lower(CompraN)||lower(coalesce(CodigoP,'')) LIKE $q LIMIT 10";
+            cmd5.CommandText = @"SELECT CompraN, CodigoP, TotalC, FechaC
+                FROM Compras WHERE lower(CompraN)||lower(coalesce(CodigoP,'')) LIKE $q LIMIT 10";
             cmd5.Parameters.AddWithValue("$q", "%" + q + "%");
             using (var rd = cmd5.ExecuteReader())
                 while (rd.Read())
@@ -2963,8 +3891,8 @@ namespace SistemaGestion
 
             // Ordenes de Produccion
             var cmd6 = c.CreateCommand();
-            cmd6.CommandText = "SELECT NumOrden, ProductoCod, Estado, CantidadPlan"
-                + " FROM OrdenesProduccion WHERE lower(NumOrden)||lower(coalesce(ProductoCod,'')) LIKE $q LIMIT 10";
+            cmd6.CommandText = @"SELECT NumOrden, ProductoCod, Estado, CantidadPlan
+                FROM OrdenesProduccion WHERE lower(NumOrden)||lower(coalesce(ProductoCod,'')) LIKE $q LIMIT 10";
             cmd6.Parameters.AddWithValue("$q", "%" + q + "%");
             using (var rd = cmd6.ExecuteReader())
                 while (rd.Read())
@@ -3010,6 +3938,119 @@ namespace SistemaGestion
         }
     }
 
+    // ════════════════════════════════════════════════════════════════════════
+    //  MODELOS FALTANTES
+    // ════════════════════════════════════════════════════════════════════════
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  KARDEX - MOVIMIENTOS DE INVENTARIO
+    // ════════════════════════════════════════════════════════════════════════
+    public class MovimientoInventario
+    {
+        public int      IdMovimiento  { get; set; }
+        public DateTime FechaHora     { get; set; }
+        public string   CodigoProducto{ get; set; }
+        public string   TipoMovimiento{ get; set; }  // ENTRADA / SALIDA
+        public string   Concepto      { get; set; }
+        public decimal  Cantidad      { get; set; }
+        public decimal  SaldoAnterior { get; set; }
+        public decimal  NuevoSaldo    { get; set; }
+        public string   Referencia    { get; set; }  // Nro Factura, Compra, etc.
+        public string   Usuario       { get; set; }
+    }
+
+    public class IngresoProduccion
+    {
+        public int      Id          { get; set; }
+        public string   Producto    { get; set; }
+        public string   Lote        { get; set; }
+        public int      Cantidad    { get; set; }
+        public string   Unidad      { get; set; }
+        public DateTime Fecha       { get; set; }
+        public string   Responsable { get; set; }
+        public string   Observacion { get; set; }
+        public string   Estado      { get; set; }
+    }
+
+    public class CuentaCobrar
+    {
+        public int      Id           { get; set; }
+        public string   Cliente      { get; set; }
+        public string   Concepto     { get; set; }
+        public decimal  Monto        { get; set; }
+        public decimal  Pagado       { get; set; }
+        public decimal  Saldo        => Monto - Pagado;
+        public DateTime FechaEmision { get; set; }
+        public DateTime FechaVence   { get; set; }
+        public string   Estado       { get; set; }
+    }
+
+    public class ProductoPrecio
+    {
+        public int      Id                  { get; set; }
+        public string   Codigo              { get; set; }
+        public string   Nombre              { get; set; }
+        public string   Categoria           { get; set; }
+        public decimal  CostoActual         { get; set; }
+        public decimal  PrecioActual        { get; set; }
+        public decimal  CostoNuevo          { get; set; }
+        public decimal  PrecioNuevo         { get; set; }
+        public DateTime UltimaActualizacion { get; set; }
+    }
+
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  FLUJO DE CAJA
+    // ════════════════════════════════════════════════════════════════════════
+    public class MovimientoCaja
+    {
+        public DateTime Fecha       { get; set; }
+        public string   Tipo        { get; set; }  // Ingreso / Egreso
+        public string   Categoria   { get; set; }  // CxC / Compra / Nomina / Gasto / Manual
+        public string   Concepto    { get; set; }
+        public decimal  MontoUSD    { get; set; }
+        public string   Referencia  { get; set; }
+        public bool     EsReal      { get; set; }  // true=real, false=proyectado
+    }
+
+    public class ResumenFlujoCaja
+    {
+        public decimal SaldoInicial      { get; set; }
+        public decimal IngreSos30        { get; set; }
+        public decimal Egresos30         { get; set; }
+        public decimal IngreSos60        { get; set; }
+        public decimal Egresos60         { get; set; }
+        public decimal IngreSos90        { get; set; }
+        public decimal Egresos90         { get; set; }
+        public decimal NetoAcum30        => IngreSos30 - Egresos30;
+        public decimal NetoAcum60        => IngreSos60 - Egresos60;
+        public decimal NetoAcum90        => IngreSos90 - Egresos90;
+        public decimal SaldoProyectado30 => SaldoInicial + NetoAcum30;
+        public decimal SaldoProyectado60 => SaldoInicial + NetoAcum30 + NetoAcum60;
+        public decimal SaldoProyectado90 => SaldoInicial + NetoAcum30 + NetoAcum60 + NetoAcum90;
+    }
+
+    // ── Clases remanentes para compatibilidad ────────────────────────────────
+    public class Gasto
+    {
+        public int      Id          { get; set; }
+        public string   Categoria   { get; set; }
+        public string   Descripcion { get; set; }
+        public decimal  Monto       { get; set; }
+        public DateTime Fecha       { get; set; }
+        public string   Proveedor   { get; set; }
+        public string   Estado      { get; set; }
+    }
+
+    public class ArchivoSistema
+    {
+        public int      Id      { get; set; }
+        public string   Nombre  { get; set; }
+        public string   Tipo    { get; set; }
+        public string   Ruta    { get; set; }
+        public DateTime Fecha   { get; set; }
+        public string   Usuario { get; set; }
+    }
     // ════════════════════════════════════════════════════════════════════════
     //  SESIÓN GLOBAL
     // ════════════════════════════════════════════════════════════════════════
