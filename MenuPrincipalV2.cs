@@ -1,0 +1,852 @@
+// ════════════════════════════════════════════════════════════════════════
+// ARCHIVO: MenuPrincipalV2.cs  →  raíz del proyecto
+//
+// Rediseno del MenuPrincipal alineado con el estilo C+B del Dashboard V2:
+//   - Header oscuro denso (32px) con logo + saludo + acciones
+//   - Strip de info (64px) con BCV/Paralelo + sello frescura + alertas resumidas
+//   - Centro: grid de modulos con tarjetas modernizadas (paleta clara,
+//     barra lateral de color por modulo, hover sutil)
+//   - Bottom bar con accesos secundarios (Reportes, Tasa, Sistema, Salir)
+//
+// Mantiene toda la funcionalidad del MenuPrincipal original:
+//   - Permisos por rol (Admin / Ventas / Almacen / Contabilidad)
+//   - Atajo F3 buscador, perfil, ayuda, cerrar sesion
+//   - Carga clientes de prueba si BD esta vacia
+//   - Backup al cerrar sesion
+// ════════════════════════════════════════════════════════════════════════
+
+#nullable enable
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Linq;
+using System.Windows.Forms;
+
+namespace SistemaGestion
+{
+    public class MenuPrincipalV2 : FormBase
+    {
+        // Paleta clara unificada con FrmDashboardV2
+        private static readonly Color CFondo    = Color.FromArgb(244, 246, 250);
+        private static readonly Color CSurf     = Color.White;
+        private static readonly Color CBorde    = Color.FromArgb(215, 222, 230);
+        private static readonly Color CTexto    = Color.FromArgb(30,  34,  51);
+        private static readonly Color CTextoTen = Color.FromArgb(122, 131, 149);
+        private static readonly Color CAzul     = Color.FromArgb(26,  74, 138);
+        private static readonly Color CAzulOsc  = Color.FromArgb(15,  45,  85);
+        private static readonly Color CAzulSec  = Color.FromArgb(45, 108, 192);
+        private static readonly Color CCyan     = Color.FromArgb(0,  180, 216);
+        private static readonly Color COk       = Color.FromArgb(15, 110,  86);
+        private static readonly Color CWarn     = Color.FromArgb(210, 153,  34);
+        private static readonly Color CDang     = Color.FromArgb(198,  40,  40);
+        private static readonly Color CMorado   = Color.FromArgb(83,  74, 183);
+
+        // Controles persistidos
+        private Label _lblBcv = null!, _lblPara = null!, _lblBcvSello = null!;
+        private Button _btnToggleNE = null!;
+        private Panel  _pnlBannerNE = null!;
+        private Label _lblAlertas = null!;
+        private Panel _pnlGrid = null!;
+
+        public MenuPrincipalV2()
+        {
+            Text          = "Sistema de Gestión";
+            Size          = new Size(1100, 720);
+            MinimumSize   = new Size(900, 600);
+            StartPosition = FormStartPosition.CenterScreen;
+            FormBorderStyle = FormBorderStyle.Sizable;
+            BackColor     = CFondo;
+
+            ConstruirUI();
+            VentanaPrefs.Restaurar(this);
+
+            var timerPrefs = new System.Windows.Forms.Timer { Interval = 800 };
+            timerPrefs.Tick     += (s, e) => { timerPrefs.Stop(); VentanaPrefs.Guardar(this); };
+            SizeChanged         += (s, e) => { timerPrefs.Stop(); timerPrefs.Start(); };
+            LocationChanged     += (s, e) => { timerPrefs.Stop(); timerPrefs.Start(); };
+            FormClosed          += (s, e) => { timerPrefs.Stop(); timerPrefs.Dispose(); };
+
+            KeyPreview = true;
+            KeyDown += (s, ev) => { if (ev.KeyCode == Keys.F3) new FrmBuscador().ShowDialog(); };
+
+            Load += (s, e) => RefrescarInfo();
+        }
+
+        // ── Construccion UI ─────────────────────────────────────────────────
+        private void ConstruirUI()
+        {
+            var root = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5,
+                BackColor = CFondo
+            };
+            root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 42f));   // navbar
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 28f));   // banner NE (oculto por default)
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 80f));   // strip info
+            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));   // grid
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 56f));   // bottom
+
+            root.Controls.Add(ConstruirNavbar(),    0, 0);
+            root.Controls.Add(ConstruirBannerNE(),  0, 1);
+            root.Controls.Add(ConstruirStripInfo(), 0, 2);
+            root.Controls.Add(ConstruirContenido(), 0, 3);
+            root.Controls.Add(ConstruirBottomBar(), 0, 4);
+            Controls.Add(root);
+
+            // Sincronizar el estado inicial del banner
+            ActualizarBannerNE();
+        }
+
+        // Banner permanente cuando MostrarNotasEntrega = true.
+        // Imposible olvidarlo encendido — está en cada pantalla, ámbar fuerte.
+        private Panel ConstruirBannerNE()
+        {
+            _pnlBannerNE = new Panel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = Color.FromArgb(210, 130, 30),  // ámbar advertencia
+                Visible = Sesion.MostrarNotasEntrega
+            };
+            _pnlBannerNE.Paint += (s, e) =>
+            {
+                var g = e.Graphics;
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                using var f = new Font("Segoe UI", 9.5f, FontStyle.Bold);
+                g.DrawString(
+                    "🔓  VISTA DE NOTAS DE ENTREGA ACTIVA — los reportes están INCLUYENDO documentos sin valor fiscal.  " +
+                    "Se desactiva sola al cerrar sesión.",
+                    f, Brushes.White, 12, 6);
+            };
+            return _pnlBannerNE;
+        }
+
+        private Panel ConstruirNavbar()
+        {
+            var p = new Panel { Dock = DockStyle.Fill, BackColor = CAzulOsc };
+
+            var lblLogo = new Label
+            {
+                Text = "  ⚙  SistemaGestion",
+                Font = new Font("Segoe UI", 11f, FontStyle.Bold),
+                ForeColor = Color.White, BackColor = CAzulOsc,
+                AutoSize = false, TextAlign = ContentAlignment.MiddleLeft,
+                Dock = DockStyle.Left, Width = 220
+            };
+
+            // Boton Cerrar sesion - Dock.Right primero (queda mas a la derecha)
+            var btnLogout = new Button
+            {
+                Text = "Cerrar sesión",
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(180, 50, 50),
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+                Cursor = Cursors.Hand,
+                Width = 120, Dock = DockStyle.Right,
+                Margin = new Padding(0)
+            };
+            btnLogout.FlatAppearance.BorderSize = 0;
+            btnLogout.FlatAppearance.MouseOverBackColor = Color.FromArgb(150, 30, 30);
+            btnLogout.Click += BtnCerrarSesion_Click;
+
+            // Label de usuario - Dock.Right despues (queda a la izq del boton)
+            var lblUser = new Label
+            {
+                Text = (Sesion.NombreCompleto ?? Sesion.NombreUsuario ?? "") +
+                       "  ·  " + (Sesion.Rol ?? "—") + "  ",
+                Font = new Font("Segoe UI", 9f),
+                ForeColor = Color.FromArgb(168, 177, 187), BackColor = CAzulOsc,
+                AutoSize = false, TextAlign = ContentAlignment.MiddleRight,
+                Padding = new Padding(0, 0, 12, 0),
+                Width = 240, Dock = DockStyle.Right
+            };
+
+            // Botones de acciones - centro
+            var pnlAcc = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Right, AutoSize = false,
+                FlowDirection = FlowDirection.LeftToRight,
+                BackColor = CAzulOsc, Padding = new Padding(0, 7, 8, 7),
+                WrapContents = false, Width = 320
+            };
+            pnlAcc.Controls.Add(BotonNav("F3 Buscar",   () => new FrmBuscador().ShowDialog()));
+            pnlAcc.Controls.Add(BotonNav("Mi perfil",   () => new FrmPerfil().ShowDialog()));
+            pnlAcc.Controls.Add(BotonNav("?  Ayuda",    () => AyudaService.Mostrar(this, "MenuPrincipal")));
+
+            // ── Toggle de visibilidad de Notas de Entrega (solo Admin) ────
+            // Cuando está OFF (default), reportes y dashboard ignoran las NE.
+            // Cuando está ON, se incluyen — pero el botón cambia a rojo y
+            // aparece un banner permanente debajo del navbar para que sea
+            // imposible olvidar que está activo.
+            if (Sesion.EsAdmin)
+            {
+                _btnToggleNE = BotonNav("Vista NE: OFF", null);
+                _btnToggleNE.Width = 110;
+                _btnToggleNE.Click += (s, e) => ToggleVistaNE();
+                pnlAcc.Controls.Add(_btnToggleNE);
+                pnlAcc.Width = 430;  // espacio para el botón extra
+                ActualizarBotonNE();
+            }
+
+            // En WinForms, con multiples Dock.Right, el ULTIMO agregado queda
+            // mas a la derecha. Orden deseado: [Logo] ... [pnlAcc] [user] [logout]
+            p.Controls.Add(lblLogo);   // Dock.Left
+            p.Controls.Add(pnlAcc);    // Dock.Right (primero -> mas a la izquierda del grupo derecho)
+            p.Controls.Add(lblUser);   // Dock.Right (intermedio)
+            p.Controls.Add(btnLogout); // Dock.Right (ultimo -> mas a la derecha) ✓
+            return p;
+        }
+
+        // accion es nullable: pasa null si vas a registrar el handler aparte
+        // (caso del botón Vista NE: ON/OFF que se engancha externamente).
+        private Button BotonNav(string texto, Action? accion)
+        {
+            var b = new Button
+            {
+                Text = texto, FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(31, 58, 95),
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 8.5f),
+                Cursor = Cursors.Hand,
+                Width = 96, Height = 26,
+                Margin = new Padding(3, 0, 3, 0),
+                TextAlign = ContentAlignment.MiddleCenter
+            };
+            b.FlatAppearance.BorderSize = 0;
+            b.FlatAppearance.MouseOverBackColor = Color.FromArgb(45, 80, 130);
+            if (accion != null) b.Click += (s, e) => accion();
+            return b;
+        }
+
+        // ── Toggle de visibilidad de Notas de Entrega ────────────────────
+        // El cambio se audita y aplica solo a la sesión actual. Al cerrar
+        // sesión vuelve a OFF automáticamente.
+        private void ToggleVistaNE()
+        {
+            if (!Sesion.EsAdmin) return;
+            bool nuevoValor = !Sesion.MostrarNotasEntrega;
+
+            string mensaje = nuevoValor
+                ? "¿Activar la visibilidad de Notas de Entrega?\n\n" +
+                  "MIENTRAS ESTÉ ACTIVA, los reportes, el dashboard, el P&L y " +
+                  "todos los agregados INCLUIRÁN las notas de entrega (que " +
+                  "normalmente quedan fuera por no tener valor fiscal).\n\n" +
+                  "Esta acción se registra en auditoría y se desactiva " +
+                  "automáticamente al cerrar sesión."
+                : "¿Desactivar la visibilidad de Notas de Entrega?\n\n" +
+                  "Los reportes vuelven a excluirlas como es normal.";
+
+            if (MessageBox.Show(this, mensaje,
+                "Visibilidad de Notas de Entrega",
+                MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+                return;
+
+            Sesion.SetMostrarNotasEntrega(nuevoValor);
+            ActualizarBotonNE();
+            ActualizarBannerNE();
+        }
+
+        private void ActualizarBotonNE()
+        {
+            if (_btnToggleNE == null) return;
+            if (Sesion.MostrarNotasEntrega)
+            {
+                _btnToggleNE.Text = "🔓 Vista NE: ON";
+                _btnToggleNE.BackColor = Color.FromArgb(180, 100, 30);
+                _btnToggleNE.FlatAppearance.MouseOverBackColor = Color.FromArgb(210, 130, 50);
+            }
+            else
+            {
+                _btnToggleNE.Text = "Vista NE: OFF";
+                _btnToggleNE.BackColor = Color.FromArgb(31, 58, 95);
+                _btnToggleNE.FlatAppearance.MouseOverBackColor = Color.FromArgb(45, 80, 130);
+            }
+        }
+
+        private void ActualizarBannerNE()
+        {
+            if (_pnlBannerNE == null) return;
+            _pnlBannerNE.Visible = Sesion.MostrarNotasEntrega;
+            _pnlBannerNE.Invalidate();
+        }
+
+        private Panel ConstruirStripInfo()
+        {
+            var p = new Panel { Dock = DockStyle.Fill, BackColor = CSurf };
+            p.Paint += (s, e) => e.Graphics.DrawLine(new Pen(CBorde),
+                0, p.Height - 1, p.Width, p.Height - 1);
+
+            var fila = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill, RowCount = 1, ColumnCount = 4,
+                BackColor = CSurf, Padding = new Padding(8, 4, 8, 4)
+            };
+            fila.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 320f));   // saludo + fecha
+            fila.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 300f));   // BCV/Paralelo
+            fila.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));    // alertas
+            fila.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180f));   // boton actualizar tasa
+
+            // Saludo + fecha
+            var pnlSaludo = new Panel { Dock = DockStyle.Fill, BackColor = CSurf,
+                Padding = new Padding(12, 4, 4, 4) };
+            var lblSaludo = new Label
+            {
+                Text = SaludoSegunHora() + ", " + (PrimerNombre() ?? "Admin"),
+                Font = new Font("Segoe UI", 12f, FontStyle.Bold),
+                ForeColor = CTexto, AutoSize = false, Dock = DockStyle.Top, Height = 26
+            };
+            var lblFecha = new Label
+            {
+                Text = DateTime.Now.ToString("dddd, d 'de' MMMM 'de' yyyy",
+                    new System.Globalization.CultureInfo("es-ES")),
+                Font = new Font("Segoe UI", 9f),
+                ForeColor = CTextoTen, AutoSize = false, Dock = DockStyle.Top, Height = 18
+            };
+            pnlSaludo.Controls.Add(lblFecha); pnlSaludo.Controls.Add(lblSaludo);
+            fila.Controls.Add(pnlSaludo, 0, 0);
+
+            // KPI BCV/Paralelo (mismo widget que el dashboard)
+            fila.Controls.Add(KpiBcvParalelo(), 1, 0);
+
+            // Alertas resumidas
+            var pnlA = new Panel { Dock = DockStyle.Fill, BackColor = CSurf,
+                Padding = new Padding(8, 4, 4, 4) };
+            var bar = new Panel { Dock = DockStyle.Left, Width = 3, BackColor = CWarn };
+            var lblTit = new Label { Text = "ALERTAS",
+                Font = new Font("Segoe UI", 7.5f, FontStyle.Bold),
+                ForeColor = CTextoTen, AutoSize = false, Dock = DockStyle.Top, Height = 14,
+                Padding = new Padding(8, 0, 0, 0) };
+            _lblAlertas = new Label
+            {
+                Text = "Sin alertas", Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
+                ForeColor = COk, AutoSize = false, Dock = DockStyle.Fill,
+                Padding = new Padding(8, 2, 0, 0), Cursor = Cursors.Hand
+            };
+            _lblAlertas.Click += (s, e) =>
+            {
+                try { new FrmAlertas(AlertasService.ObtenerAlertas()).ShowDialog(); }
+                catch (Exception ex) { MessageBox.Show(ex.Message); }
+            };
+            pnlA.Controls.Add(_lblAlertas); pnlA.Controls.Add(lblTit); pnlA.Controls.Add(bar);
+            fila.Controls.Add(pnlA, 2, 0);
+
+            // Boton "Actualizar tasa" — altura fija, anclado horizontal y centrado vertical
+            var btnTasa = new Button
+            {
+                Text = "↻  Actualizar tasa",
+                Anchor = AnchorStyles.Left | AnchorStyles.Right,
+                Height = 38,
+                FlatStyle = FlatStyle.Flat, BackColor = CAzul, ForeColor = Color.White,
+                Font = new Font("Segoe UI", 9.5f, FontStyle.Bold), Cursor = Cursors.Hand,
+                Margin = new Padding(6, 21, 12, 21),  // strip 80 - botón 38 = 42 / 2 = 21 cada lado
+                TextAlign = ContentAlignment.MiddleCenter
+            };
+            btnTasa.FlatAppearance.BorderSize = 0;
+            btnTasa.FlatAppearance.MouseOverBackColor = CAzulSec;
+            btnTasa.Click += (s, e) =>
+            {
+                try
+                {
+                    using var f = new FrmActualizarTasa(DatabaseService.ObtenerTasaHoy());
+                    if (f.ShowDialog() == DialogResult.OK) RefrescarInfo();
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(this, "Error: " + ex.Message,
+                        "Tasa", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            };
+            fila.Controls.Add(btnTasa, 3, 0);
+
+            p.Controls.Add(fila);
+            return p;
+        }
+
+        private Panel KpiBcvParalelo()
+        {
+            var p = new Panel { Dock = DockStyle.Fill, BackColor = CSurf,
+                Padding = new Padding(8, 4, 4, 4) };
+            var bar = new Panel { Dock = DockStyle.Left, Width = 3, BackColor = COk };
+
+            var fila = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill, RowCount = 2, ColumnCount = 4,
+                BackColor = CSurf
+            };
+            // Columnas internas mas anchas para que "BCV" y "PAR" no se partan
+            fila.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 50f));    // label BCV
+            fila.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));     // valor BCV
+            fila.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 50f));    // label PAR
+            fila.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));     // valor PAR
+            fila.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+            fila.RowStyles.Add(new RowStyle(SizeType.Absolute, 18f));
+
+            fila.Controls.Add(new Label { Text = "BCV",
+                Font = new Font("Segoe UI", 7.5f, FontStyle.Bold), ForeColor = CTextoTen,
+                Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft,
+                Padding = new Padding(8, 0, 0, 0) }, 0, 0);
+            _lblBcv = new Label { Text = "—",
+                Font = new Font("Segoe UI", 11f, FontStyle.Bold), ForeColor = CTexto,
+                Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
+            fila.Controls.Add(_lblBcv, 1, 0);
+
+            fila.Controls.Add(new Label { Text = "PAR",
+                Font = new Font("Segoe UI", 7.5f, FontStyle.Bold), ForeColor = CTextoTen,
+                Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 2, 0);
+            _lblPara = new Label { Text = "—",
+                Font = new Font("Segoe UI", 11f, FontStyle.Bold), ForeColor = CMorado,
+                Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
+            fila.Controls.Add(_lblPara, 3, 0);
+
+            _lblBcvSello = new Label { Text = "sin tasa",
+                Font = new Font("Segoe UI", 7.5f, FontStyle.Italic), ForeColor = CWarn,
+                Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft,
+                Padding = new Padding(8, 0, 0, 0) };
+            fila.SetColumnSpan(_lblBcvSello, 4);
+            fila.Controls.Add(_lblBcvSello, 0, 1);
+
+            p.Controls.Add(fila); p.Controls.Add(bar);
+            return p;
+        }
+
+        // ── Centro: grid de modulos ─────────────────────────────────────────
+        private Panel ConstruirContenido()
+        {
+            // Fondo MEDIO-oscuro de la zona: gris azulado claro pero
+            // notablemente distinto a los washes pastel de las tarjetas.
+            // Asi las pasteles destacan en lugar de camuflarse.
+            Color fondoZona = Color.FromArgb(208, 216, 230);
+            var p = new Panel { Dock = DockStyle.Fill, BackColor = fondoZona,
+                Padding = new Padding(20, 16, 20, 4) };
+
+            _pnlGrid = new Panel { Dock = DockStyle.Fill, BackColor = fondoZona };
+
+            // Pintar sombras bajo cada tarjeta antes de que las tarjetas
+            // se pinten encima. Da efecto de elevacion sin tocar las tarjetas.
+            _pnlGrid.Paint += (s, e) =>
+            {
+                var g = e.Graphics;
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                foreach (Control c in _pnlGrid.Controls)
+                {
+                    if (c is Panel card && card.Visible)
+                    {
+                        // 3 capas con alpha decreciente para sombra suave
+                        for (int off = 1; off <= 3; off++)
+                        {
+                            using var br = new SolidBrush(Color.FromArgb(8 - (off - 1) * 2,
+                                40, 60, 90));
+                            using var path = RoundRect(
+                                new Rectangle(card.Left + off, card.Top + off + 1,
+                                              card.Width, card.Height), 10);
+                            g.FillPath(br, path);
+                        }
+                    }
+                }
+            };
+
+            var modulos = new List<(string ico, string titulo, string sub, string perm,
+                                    Action accion, Color color)>
+            {
+                ("▣", "Dashboard",     "Resumen y KPIs del negocio",        "Reportes",
+                 () => new FrmDashboardV2().ShowDialog(),                CAzul),
+                ("◈", "Transacciones", "Facturas, CxC, precios",            "Transacciones",
+                 () => new FrmTransacciones().ShowDialog(),              CMorado),
+                ("◧", "Archivos",      "Inventario, clientes y más",        "Archivos",
+                 () => new FrmArchivos().ShowDialog(),                   Color.FromArgb(176, 100, 20)),
+                ("⊞", "Producción",    "Registro, kardex, moldes",          "IngresoProduccion",
+                 () => new FrmRegistroProduccionDia().ShowDialog(),      COk),
+                // FrmCompras viejo deprecado: las compras de MP ahora se hacen
+                // vía Transacciones → Egresos (categoría Materia Prima).
+                ("◎", "Nómina",        "Empleados y períodos",              "Nomina",
+                 () => new FrmNomina().ShowDialog(),                     Color.FromArgb(30, 90, 100)),
+            };
+
+            int cols = 3;
+            int gap  = 16;
+            var tarjetas = new List<Panel>();
+
+            foreach (var (ico, titulo, sub, perm, accion, color) in modulos)
+                tarjetas.Add(TarjetaModulo(ico, titulo, sub, perm, accion, color));
+
+            foreach (var t in tarjetas) _pnlGrid.Controls.Add(t);
+
+            void Reposicionar()
+            {
+                int n = tarjetas.Count;
+                int totalAncho = _pnlGrid.ClientSize.Width - 4;
+                int totalAlto  = _pnlGrid.ClientSize.Height - 4;
+                int w = (totalAncho - (cols - 1) * gap) / cols;
+                // Altura FIJA — las tarjetas no se estiran al alto disponible
+                // (antes salian cajas blancas gigantes con mucho aire vacio).
+                int h = 140;
+                int filas = (n + cols - 1) / cols;
+                int alturaUsada = filas * h + (filas - 1) * gap;
+                // Centrar verticalmente el bloque de tarjetas
+                int offY = Math.Max(0, (totalAlto - alturaUsada) / 2);
+                for (int i = 0; i < n; i++)
+                {
+                    int col = i % cols, row = i / cols;
+                    tarjetas[i].SetBounds(col * (w + gap), offY + row * (h + gap), w, h);
+                }
+            }
+            _pnlGrid.SizeChanged += (s, e) => Reposicionar();
+            _pnlGrid.HandleCreated += (s, e) => Reposicionar();
+
+            p.Controls.Add(_pnlGrid);
+            return p;
+        }
+
+        private Panel TarjetaModulo(string icono, string titulo, string subtitulo,
+            string permiso, Action accion, Color colorAcento)
+        {
+            bool tieneAcceso = Sesion.EsAdmin || Sesion.TienePermiso(permiso);
+
+            // Wash MUY claro del color del modulo: mezcla colorAcento al ~10%
+            // sobre blanco. Mucho mas amable que el color sólido y permite
+            // que el texto sea legible.
+            Color washCard = tieneAcceso
+                ? Mezclar(colorAcento, Color.White, 0.92f)
+                : Color.FromArgb(238, 240, 244);
+            // Borde mas saturado para que perimetro se note bien.
+            Color bordeCard = tieneAcceso
+                ? Mezclar(colorAcento, Color.White, 0.55f)
+                : Color.FromArgb(195, 200, 210);
+
+            var card = new Panel
+            {
+                BackColor = washCard,
+                Cursor = tieneAcceso ? Cursors.Hand : Cursors.Default
+            };
+            // Region clipped al RoundRect para esquinas perfectas.
+            card.Resize += (s, e) =>
+            {
+                using var path = RoundRect(new Rectangle(0, 0, card.Width, card.Height), 10);
+                card.Region = new Region(path);
+            };
+            card.Paint += (s, e) =>
+            {
+                var g = e.Graphics;
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                using var pen = new Pen(bordeCard, 1.2f);
+                using var path = RoundRect(new Rectangle(0, 0, card.Width - 1, card.Height - 1), 10);
+                g.DrawPath(pen, path);
+            };
+
+            // Barra lateral de color (codificacion por modulo)
+            var bar = new Panel { Dock = DockStyle.Left, Width = 4,
+                BackColor = tieneAcceso ? colorAcento : CTextoTen };
+
+            // Icono — circulo de fondo solido del color del modulo (mas saturado)
+            var pnlIco = new Panel
+            {
+                Size = new Size(52, 52),
+                Location = new Point(20, 22),
+                BackColor = washCard
+            };
+            // Fondo del icono: blanco solido para que el glifo destaque
+            // contra el wash de la tarjeta.
+            Color fondoIco = tieneAcceso
+                ? Mezclar(colorAcento, Color.White, 0.78f)   // mas saturado que el wash de la card
+                : Color.FromArgb(228, 230, 236);
+            pnlIco.Paint += (s, e) =>
+            {
+                var g = e.Graphics;
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                using var br = new SolidBrush(fondoIco);
+                g.FillEllipse(br, 0, 0, pnlIco.Width - 1, pnlIco.Height - 1);
+            };
+            var lblIco = new Label
+            {
+                Text = icono,
+                Font = new Font("Segoe UI", 22f, FontStyle.Bold),
+                ForeColor = tieneAcceso ? colorAcento : CTextoTen,
+                Dock = DockStyle.Fill,
+                TextAlign = ContentAlignment.MiddleCenter,
+                BackColor = Color.Transparent
+            };
+            pnlIco.Controls.Add(lblIco);
+
+            // Titulo
+            var lblT = new Label
+            {
+                Text = titulo,
+                Font = new Font("Segoe UI", 13f, FontStyle.Bold),
+                ForeColor = tieneAcceso ? CTexto : CTextoTen,
+                AutoSize = false, Location = new Point(86, 26),
+                Size = new Size(260, 24),
+                BackColor = washCard
+            };
+
+            // Subtitulo
+            var lblS = new Label
+            {
+                Text = subtitulo,
+                Font = new Font("Segoe UI", 9.5f),
+                ForeColor = CTextoTen,
+                AutoSize = false, Location = new Point(86, 52),
+                Size = new Size(280, 20),
+                BackColor = washCard
+            };
+
+            // Footer de la tarjeta: ancla al fondo
+            var pnlFooter = new Panel
+            {
+                Dock = DockStyle.Bottom, Height = 36,
+                BackColor = washCard
+            };
+            if (!tieneAcceso)
+            {
+                pnlFooter.Controls.Add(new Label
+                {
+                    Text = "  Sin acceso  ",
+                    Font = new Font("Segoe UI", 7.5f, FontStyle.Bold),
+                    ForeColor = CTextoTen,
+                    BackColor = Color.FromArgb(238, 240, 245),
+                    AutoSize = true, Location = new Point(20, 10)
+                });
+            }
+            else
+            {
+                pnlFooter.Controls.Add(new Label
+                {
+                    Text = "Abrir  →",
+                    Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
+                    ForeColor = colorAcento,
+                    AutoSize = true, Location = new Point(20, 10),
+                    BackColor = washCard
+                });
+            }
+
+            card.Controls.Add(pnlFooter);
+            card.Controls.Add(lblS);
+            card.Controls.Add(lblT);
+            card.Controls.Add(pnlIco);
+            card.Controls.Add(bar);
+
+            // Hover + click recursivo (los paneles anidados tambien necesitan
+            // el cambio de color para que el hover se vea uniforme)
+            if (tieneAcceso)
+            {
+                // Hover: wash MAS saturado del color del modulo
+                // (perceptiblemente mas intenso que el reposo).
+                Color colorHover = Mezclar(colorAcento, Color.White, 0.85f);
+                void Pintar(Control c, Color bg)
+                {
+                    // bar (lateral) y fondo del icono mantienen su propio color
+                    if (c == bar) return;
+                    if (c == pnlIco) return;
+                    if (c.BackColor == Color.Transparent) { /* nada */ }
+                    else if (c is Label || c is Panel) c.BackColor = bg;
+                    foreach (Control h in c.Controls) Pintar(h, bg);
+                }
+                void EnterHandler(object? s, EventArgs e) => Pintar(card, colorHover);
+                void LeaveHandler(object? s, EventArgs e) => Pintar(card, washCard);
+                void EngancharRec(Control c, MouseEventHandler? me, EventHandler enter, EventHandler leave, EventHandler clk)
+                {
+                    c.MouseEnter += enter;
+                    c.MouseLeave += leave;
+                    c.Click      += clk;
+                    foreach (Control h in c.Controls) EngancharRec(h, me, enter, leave, clk);
+                }
+                EventHandler clkH = (s, e) => { try { accion(); } catch (Exception ex) { MessageBox.Show(this, ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error); } };
+                EngancharRec(card, null, EnterHandler, LeaveHandler, clkH);
+            }
+
+            return card;
+        }
+
+        /// <summary>
+        /// Mezcla dos colores. ratio = peso del SEGUNDO color (0..1).
+        /// Mezclar(azul, blanco, 0.92) = blanco con 8% de azul = wash muy claro.
+        /// </summary>
+        private static Color Mezclar(Color c1, Color c2, float ratio)
+        {
+            ratio = Math.Max(0f, Math.Min(1f, ratio));
+            float a = 1f - ratio;
+            return Color.FromArgb(
+                (int)(c1.R * a + c2.R * ratio),
+                (int)(c1.G * a + c2.G * ratio),
+                (int)(c1.B * a + c2.B * ratio));
+        }
+
+        private static GraphicsPath RoundRect(Rectangle r, int rad)
+        {
+            var p = new GraphicsPath();
+            p.AddArc(r.X, r.Y, rad * 2, rad * 2, 180, 90);
+            p.AddArc(r.Right - rad * 2, r.Y, rad * 2, rad * 2, 270, 90);
+            p.AddArc(r.Right - rad * 2, r.Bottom - rad * 2, rad * 2, rad * 2, 0, 90);
+            p.AddArc(r.X, r.Bottom - rad * 2, rad * 2, rad * 2, 90, 90);
+            p.CloseFigure();
+            return p;
+        }
+
+        // ── Bottom bar — CLARO con buen contraste (estilo unificado) ────────
+        // Antes era carbón profundo y los botones se confundían con el fondo.
+        // Ahora fondo claro, botones azules sólidos para acciones de navegación
+        // y rojo para Salir. Línea superior tenue como separador.
+        private Panel ConstruirBottomBar()
+        {
+            var p = new Panel { Dock = DockStyle.Fill, BackColor = UITheme.FondoCard };
+            p.Paint += (s, e) =>
+            {
+                using var pen = new Pen(UITheme.Borde, 1f);
+                e.Graphics.DrawLine(pen, 0, 0, p.Width, 0);
+            };
+
+            var fila = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight,
+                BackColor = UITheme.FondoCard, Padding = new Padding(20, 8, 20, 8),
+                AutoSize = false, WrapContents = false
+            };
+
+            fila.Controls.Add(BotonInferior("▤  Reportes",       () => new FrmReportes().ShowDialog()));
+            fila.Controls.Add(BotonInferior("$  Tasa de cambio", () => new FrmTasaCambio().ShowDialog()));
+            fila.Controls.Add(BotonInferior("⚙  Sistema",        () => new FrmSistema().ShowDialog()));
+
+            // Spacer
+            fila.Controls.Add(new Panel { Width = 30, Height = 1, BackColor = UITheme.FondoCard });
+
+            // Salir — rojo sólido para destacar acción destructiva
+            var btnSalir = new Button
+            {
+                Text = "✕  Salir",
+                Width = 130, Height = 36,
+                FlatStyle = FlatStyle.Flat,
+                BackColor = UITheme.Rojo,
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 10f, FontStyle.Bold),
+                Cursor = Cursors.Hand,
+                Margin = new Padding(8, 0, 0, 0)
+            };
+            btnSalir.FlatAppearance.BorderSize = 0;
+            btnSalir.FlatAppearance.MouseOverBackColor = Color.FromArgb(150, 30, 30);
+            btnSalir.Click += BtnSalir_Click;
+            fila.Controls.Add(btnSalir);
+
+            p.Controls.Add(fila);
+            return p;
+        }
+
+        private Button BotonInferior(string texto, Action accion)
+        {
+            // Botón primario azul sólido — buen contraste sobre fondo claro
+            var b = new Button
+            {
+                Text = texto, Width = 160, Height = 36,
+                FlatStyle = FlatStyle.Flat,
+                BackColor = UITheme.Azul,
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 10f, FontStyle.Bold),
+                Cursor = Cursors.Hand,
+                Margin = new Padding(0, 0, 8, 0)
+            };
+            b.FlatAppearance.BorderSize = 0;
+            b.FlatAppearance.MouseOverBackColor = UITheme.AzulHover;
+            b.FlatAppearance.MouseDownBackColor = UITheme.AzulOscuro;
+            b.Click += (s, e) => { try { accion(); } catch (Exception ex) { MessageBox.Show(this, ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error); } };
+            return b;
+        }
+
+        // ── Refresco de info dinamica ───────────────────────────────────────
+        private void RefrescarInfo()
+        {
+            try
+            {
+                var t = DatabaseService.ObtenerTasaHoy();
+                if (t != null)
+                {
+                    _lblBcv.Text  = t.TasaBCV.ToString("N2");
+                    _lblPara.Text = t.TasaParalelo > 0 ? t.TasaParalelo.ToString("N2") : "—";
+                    int dias = (DateTime.Today - t.Fecha.Date).Days;
+                    if (dias == 0)      { _lblBcvSello.Text = "● actualizada hoy";      _lblBcvSello.ForeColor = COk; }
+                    else if (dias <= 2) { _lblBcvSello.Text = "● " + dias + " día(s) atrás"; _lblBcvSello.ForeColor = CWarn; }
+                    else                { _lblBcvSello.Text = "● " + dias + " días atrás";   _lblBcvSello.ForeColor = CDang; }
+                }
+                else
+                {
+                    _lblBcv.Text = "—"; _lblPara.Text = "—";
+                    _lblBcvSello.Text = "sin tasa registrada";
+                    _lblBcvSello.ForeColor = CDang;
+                }
+            }
+            catch { }
+
+            try
+            {
+                var alertas = AlertasService.ObtenerAlertas();
+                if (alertas.TieneAlertas)
+                {
+                    var partes = new List<string>();
+                    if (alertas.StockBajo.Count   > 0) partes.Add(alertas.StockBajo.Count + " stock");
+                    if (alertas.CxCVencidas.Count > 0) partes.Add(alertas.CxCVencidas.Count + " CxC");
+                    if (alertas.MantVencido.Count  > 0) partes.Add(alertas.MantVencido.Count + " mant");
+                    _lblAlertas.Text = "● " + string.Join(" · ", partes) + "  ›";
+                    _lblAlertas.ForeColor = alertas.CxCVencidas.Count > 0 ? CDang : CWarn;
+                }
+                else
+                {
+                    _lblAlertas.Text = "● Sin alertas";
+                    _lblAlertas.ForeColor = COk;
+                }
+            }
+            catch { }
+
+            // Clientes de prueba (legacy, se mantiene del original)
+            try
+            {
+                string cs = "Data Source=SistemaGestion.db";
+                if (CargarClientesHelper.ContarClientesExistentes(cs) == 0)
+                {
+                    CargarClientesHelper.InsertarClientesDePrueba(cs);
+                }
+            }
+            catch { }
+        }
+
+        // ── Helpers ─────────────────────────────────────────────────────────
+        private static string SaludoSegunHora()
+        {
+            int h = DateTime.Now.Hour;
+            return h < 12 ? "Buenos días" : (h < 19 ? "Buenas tardes" : "Buenas noches");
+        }
+        private static string? PrimerNombre()
+        {
+            var n = Sesion.NombreCompleto ?? Sesion.NombreUsuario;
+            return n?.Split(' ').FirstOrDefault();
+        }
+
+        // ── Handlers ────────────────────────────────────────────────────────
+        private void BtnCerrarSesion_Click(object? sender, EventArgs e)
+        {
+            if (MessageBox.Show("¿Cerrar sesión?", "Confirmar",
+                MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+            try { BackupService.HacerRespaldo(manual: false); } catch { }
+            try { DatabaseService.RegistrarAuditoria("LOGOUT", "Usuarios"); } catch { }
+            Sesion.Cerrar();
+            Hide();
+            using var login = new FrmLogin();
+            if (login.ShowDialog() == DialogResult.OK)
+            {
+                Controls.Clear();
+                ConstruirUI();
+                RefrescarInfo();
+                Show();
+            }
+            else Application.Exit();
+        }
+
+        private void BtnSalir_Click(object? sender, EventArgs e)
+        {
+            if (MessageBox.Show("¿Desea salir del sistema?", "Confirmar salida",
+                MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
+            {
+                try { DatabaseService.RegistrarAuditoria("SALIDA", "Sistema"); } catch { }
+                Application.Exit();
+            }
+        }
+    }
+}
