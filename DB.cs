@@ -1201,7 +1201,7 @@ namespace SistemaGestion
         // Nunca se modifica una migracion existente: si hay un error se agrega
         // una nueva migracion que lo corrija.
         // Version actual del esquema en codigo: 7
-        public  const int SCHEMA_VERSION = 22;  // v22: TipoDocumento (Factura/NotaEntrega/Exportacion)
+        public  const int SCHEMA_VERSION = 23;  // v23: Camaras + PermisosCamara (vigilancia EZVIZ)
 
         private static void MigrarEsquema(SqliteConnection conn)
         {
@@ -1609,6 +1609,16 @@ namespace SistemaGestion
                 {
                     EjecutarMigracionV22(conn, tx);
                     SetSchemaVersion(conn, tx, 22);
+                }
+
+                // ── MIGRACIÓN v23: Cámaras de vigilancia (EZVIZ) ──────────────
+                //   Tablas Camaras (catálogo con clave RTSP cifrada DPAPI) y
+                //   PermisosCamara (qué cámaras ve cada usuario). Admin ve
+                //   todas; otros usuarios solo las que tengan asignadas.
+                if (versionActual < 23)
+                {
+                    EjecutarMigracionV23(conn, tx);
+                    SetSchemaVersion(conn, tx, 23);
                 }
 
                 tx.Commit();
