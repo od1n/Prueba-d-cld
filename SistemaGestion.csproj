@@ -15,4 +15,17 @@
     <PackageReference Include="QuestPDF" Version="2024.3.4" />
   </ItemGroup>
 
+  <!-- Excluir el subproyecto API: comparte carpeta raíz pero es un csproj
+       independiente. Sin esto, el SDK incluye sus .cs y obj/ en este build. -->
+  <ItemGroup>
+    <Compile      Remove="SistemaGestion.Api\**" />
+    <Content      Remove="SistemaGestion.Api\**" />
+    <EmbeddedResource Remove="SistemaGestion.Api\**" />
+    <None         Remove="SistemaGestion.Api\**" />
+    <Compile      Remove="RepositorioNuevo\**" />
+    <Content      Remove="RepositorioNuevo\**" />
+    <EmbeddedResource Remove="RepositorioNuevo\**" />
+    <None         Remove="RepositorioNuevo\**" />
+  </ItemGroup>
+
 </Project>
