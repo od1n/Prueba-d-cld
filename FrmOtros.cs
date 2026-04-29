@@ -1625,6 +1625,14 @@ Controls.AddRange(new Control[] { tabs, hdr, footer });
                 btnUsrs.FlatAppearance.BorderSize = 0;
                 btnUsrs.Click += (s2, e2) => new FrmUsuarios().ShowDialog();
                 Controls.Add(btnUsrs); y += 50;
+
+                var btnCam = new Button { Text = "Gestión de Cámaras",
+                    Location = new Point(100, y), Size = new Size(220, 36),
+                    BackColor = Color.FromArgb(150, 60, 60), ForeColor = Color.White,
+                    FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 10f, FontStyle.Bold) };
+                btnCam.FlatAppearance.BorderSize = 0;
+                btnCam.Click += (s2, e2) => new FrmCamarasAdmin().ShowDialog();
+                Controls.Add(btnCam); y += 50;
             }
 
             var btnGuardar = new Button { Text = "Guardar cambios", Location = new Point(100, y),
