@@ -5,7 +5,7 @@ using System.Windows.Forms;
 
 namespace SistemaGestion
 {
-    public class FrmGastos : Form
+    public class FrmGastos : FormBase
     {
         private DataGridView dgv;
         private Label lblTotal;

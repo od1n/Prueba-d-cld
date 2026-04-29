@@ -4,7 +4,7 @@ using System.Windows.Forms;
 
 namespace SistemaGestion
 {
-    public class DlgConceptoPE : Form
+    public class DlgConceptoPE : FormBase
     {
         public DatoPE Resultado { get; private set; }
 

@@ -7,7 +7,7 @@ using System.Windows.Forms;
 
 namespace SistemaGestion
 {
-    public class FrmFlujoCaja : Form
+    public class FrmFlujoCaja : FormBase
     {
         // ── Controles ─────────────────────────────────────────────────────
         private NumericUpDown  numSaldo;
@@ -52,11 +52,39 @@ namespace SistemaGestion
                 Font      = new Font("Segoe UI", 12f, FontStyle.Bold),
                 AutoSize  = true, Location = new Point(14, 13)
             });
-            var btnPdf = Btn("Exportar PDF", Color.FromArgb(180, 60, 20), new Point(1060, 9), 110);
+            var btnPdf    = Btn("Exportar PDF", Color.FromArgb(180, 60, 20), 110);
             btnPdf.Click += (s, e) => ExportarPdf();
-            var btnCerrar = Btn("Cerrar", Color.FromArgb(100, 100, 120), new Point(1180, 9));
+            var btnCerrar = Btn("Cerrar", Color.FromArgb(100, 100, 120));
             btnCerrar.Click += (s, e) => Close();
-            hdr.Controls.AddRange(new Control[] { btnPdf, btnCerrar });
+
+            var pnlRight = new FlowLayoutPanel {
+                Dock = DockStyle.Right, AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false, BackColor = Color.Transparent,
+                Padding = new Padding(0, 9, 8, 0)
+            };
+            pnlRight.Controls.AddRange(new Control[] { btnPdf, btnCerrar });
+            hdr.Controls.Add(pnlRight);
+
+            var _tipA = AyudaService.CrearTooltip();
+            var _btnHelp = new Button {
+                Text = "? Ayuda", Size = new Size(80, 28),
+                BackColor = Color.FromArgb(80, 50, 150), ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+                Cursor = Cursors.Hand
+            };
+            _btnHelp.FlatAppearance.BorderSize = 0;
+            _btnHelp.Click += (s, e) => AyudaService.Mostrar(this, "FrmFlujoCaja");
+            AyudaService.Tip(_tipA, btnPdf, "Exportar la proyección de flujo de caja a PDF");
+            AyudaService.Tip(_tipA, btnCerrar, "Cerrar esta ventana");
+            AyudaService.Tip(_tipA, _btnHelp, "Abrir guía de ayuda");
+            VentanaPrefs.Restaurar(this);
+            var _tp = new System.Windows.Forms.Timer { Interval = 800 };
+            _tp.Tick        += (s, e) => { _tp.Stop(); VentanaPrefs.Guardar(this); };
+            SizeChanged     += (s, e) => { _tp.Stop(); _tp.Start(); };
+            LocationChanged += (s, e) => { _tp.Stop(); _tp.Start(); };
+            FormClosed      += (s, e) => { _tp.Stop(); _tp.Dispose(); };
 
             // ── Barra de parametros ───────────────────────────────────────
             var pnlParam = new Panel { Dock = DockStyle.Top, Height = 48,
@@ -530,6 +558,14 @@ namespace SistemaGestion
                 Font = new Font("Segoe UI", 8.5f, FontStyle.Bold), Cursor = Cursors.Hand };
             b.FlatAppearance.BorderSize = 0; return b;
         }
+        private Button Btn(string t, Color c, int w = 90)
+        {
+            var b = new Button { Text = t, Size = new Size(w, 32),
+                BackColor = c, ForeColor = Color.White, FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 8.5f, FontStyle.Bold), Cursor = Cursors.Hand,
+                Margin = new Padding(0, 0, 4, 0) };
+            b.FlatAppearance.BorderSize = 0; return b;
+        }
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -543,7 +579,7 @@ namespace SistemaGestion
         {
             Text = "Agregar movimiento manual";
             Size = new Size(400, 300); StartPosition = FormStartPosition.CenterParent;
-            FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = MinimizeBox = false;
+            FormBorderStyle = FormBorderStyle.Sizable; MaximizeBox = MinimizeBox = false;
             BackColor = Color.FromArgb(245, 248, 252);
 
             var banner = new Panel { Dock = DockStyle.Top, Height = 38,

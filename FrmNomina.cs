@@ -9,77 +9,105 @@ namespace SistemaGestion
     // ══════════════════════════════════════════════════════════════════════════
     //  SUBMENU NOMINA
     // ══════════════════════════════════════════════════════════════════════════
-    public class FrmNomina : Form
+    public class FrmNomina : FormBase
     {
         public FrmNomina()
         {
-            Text = "Nomina";
-            Size = new Size(640, 520);
+            Text = "Nómina";
+            Size = new Size(560, 420);
             StartPosition = FormStartPosition.CenterParent;
-            FormBorderStyle = FormBorderStyle.FixedDialog;
-            MaximizeBox = false;
-            BackColor = Color.FromArgb(236, 236, 240);
+            FormBorderStyle = FormBorderStyle.Sizable;
+            MaximizeBox = true;
+            BackColor = Color.FromArgb(240, 244, 250);
 
-            var lblTitulo = new Label
-            {
-                Text = "MODULO DE NOMINA",
+            // ── Header ────────────────────────────────────────────────────
+            var hdr = new Panel { Dock = DockStyle.Top, Height = 50, BackColor = Color.FromArgb(26, 74, 138) };
+            hdr.Controls.Add(new Label {
+                Text = "Módulo de Nómina", ForeColor = Color.White,
                 Font = new Font("Segoe UI", 12f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(40, 50, 100),
-                AutoSize = false, TextAlign = ContentAlignment.MiddleCenter,
-                Dock = DockStyle.Top, Height = 44,
-                BackColor = Color.FromArgb(215, 220, 245)
+                AutoSize = true, Location = new Point(16, 13) });
+
+            // ── Grid 2×2 de módulos ───────────────────────────────────────
+            var items = new (string ico, string titulo, string sub, Color color, Action accion)[] {
+                ("◎", "Empleados",        "Catálogo y altas",      Color.FromArgb(40,  80,160), () => new FrmEmpleados().ShowDialog()),
+                ("▣", "Procesar Nómina",  "Nómina semanal",        Color.FromArgb(26,  74,138), () => new FrmProcesarNomina().ShowDialog()),
+                ("◫", "Préstamos",        "Préstamos internos",    Color.FromArgb(140, 80, 20), () => new FrmPrestamos().ShowDialog()),
+                ("◈", "Beneficios LOTTT", "Utilidades y prestaciones", Color.FromArgb(100,40,150), () => new FrmBeneficiosLOTTT().ShowDialog()),
             };
 
-            var btnEmpleados  = Btn("Empleados",             Color.FromArgb(40, 80, 160),  new Point(60,  70));
-            var btnProcesar   = Btn("Procesar Nomina\nSemanal", Color.FromArgb(30, 120, 60), new Point(310, 70));
-            var btnPrestamos  = Btn("Prestamos\nInternos",   Color.FromArgb(140, 80, 20),  new Point(60, 250));
-            var btnBeneficios = Btn("Beneficios\nLOTTT",    Color.FromArgb(100, 40, 150), new Point(310, 250));
+            
+            var _menuTip = AyudaService.CrearTooltip();
+            var pnlGrid = new Panel { BackColor = Color.FromArgb(240, 244, 250) };
+            int cols = 2, btnW = 220, btnH = 110, gap = 12, padX = 24, padY = 16;
+            pnlGrid.Size = new Size(cols * btnW + gap + padX * 2, 2 * btnH + gap + padY * 2);
+            pnlGrid.Location = new Point(0, 50);
+            pnlGrid.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
 
-            var footer = new Panel { Dock = DockStyle.Bottom, Height = 70,
-                BackColor = Color.FromArgb(210, 210, 220) };
-            var btnCerrar = new Button
+            for (int i = 0; i < items.Length; i++)
             {
-                Text = "Cerrar", Size = new Size(120, 40), Location = new Point(250, 15),
-                BackColor = Color.FromArgb(180, 60, 60), ForeColor = Color.White,
-                FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9f, FontStyle.Bold)
-            };
+                var (ico, titulo, sub, color, accion) = items[i];
+                int col = i % cols, row = i / cols;
+                var card = new Panel {
+                    Size = new Size(btnW, btnH),
+                    Location = new Point(padX + col * (btnW + gap), padY + row * (btnH + gap)),
+                    BackColor = Color.White, Cursor = Cursors.Hand
+                };
+                var lIco = new Label { Text = ico, Font = new Font("Segoe UI", 20f),
+                    ForeColor = color, AutoSize = false, Size = new Size(40, 40), Location = new Point(12, 12) };
+                var lTit = new Label { Text = titulo, Font = new Font("Segoe UI", 10f, FontStyle.Bold),
+                    ForeColor = Color.FromArgb(30, 41, 59), AutoSize = true, Location = new Point(56, 18) };
+                var lSub = new Label { Text = sub, Font = new Font("Segoe UI", 8f),
+                    ForeColor = Color.FromArgb(100, 116, 139), AutoSize = true, Location = new Point(56, 38) };
+                var acc = accion;
+                card.Controls.AddRange(new Control[] { lIco, lTit, lSub });
+                card.Click  += (s, e) => acc();
+                lIco.Click  += (s, e) => acc();
+                lTit.Click  += (s, e) => acc();
+                lSub.Click  += (s, e) => acc();
+                card.MouseEnter += (s, e) => { card.BackColor = Color.FromArgb(232, 240, 250); };
+                card.MouseLeave += (s, e) => { card.BackColor = Color.White; };
+                card.Paint += (s, e) => {
+                    e.Graphics.DrawRectangle(new Pen(Color.FromArgb(220, 230, 245), 1f),
+                        0, 0, card.Width - 1, card.Height - 1);
+                };
+                switch (titulo) {
+                case "Empleados": AyudaService.Tip(_menuTip, card, "Ver y gestionar el catálogo de empleados"); break;
+                case "Procesar Nómina": AyudaService.Tip(_menuTip, card, "Calcular y cerrar la nómina semanal"); break;
+                case "Préstamos": AyudaService.Tip(_menuTip, card, "Gestionar préstamos internos a empleados"); break;
+                case "Beneficios LOTTT": AyudaService.Tip(_menuTip, card, "Calcular utilidades y prestaciones sociales"); break;
+                }
+                pnlGrid.Controls.Add(card);
+            }
+
+            // ── Footer ────────────────────────────────────────────────────
+            var footer = new Panel { Dock = DockStyle.Bottom, Height = 46, BackColor = Color.FromArgb(240, 244, 250) };
+            footer.Paint += (s, e) => e.Graphics.DrawLine(new Pen(Color.FromArgb(220, 230, 245)),
+                0, 0, footer.Width, 0);
+            var btnCerrar = new Button {
+                Text = "Cerrar", Size = new Size(110, 30),
+                Location = new Point(this.ClientSize.Width / 2 - 55, 8),
+                Anchor = AnchorStyles.Top, BackColor = Color.FromArgb(100, 116, 139),
+                ForeColor = Color.White, FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 9f, FontStyle.Bold) };
             btnCerrar.FlatAppearance.BorderSize = 0;
             btnCerrar.Click += (s, e) => Close();
             footer.Controls.Add(btnCerrar);
 
-            btnEmpleados.Click  += (s, e) => new FrmEmpleados().ShowDialog();
-            btnProcesar.Click   += (s, e) => new FrmProcesarNomina().ShowDialog();
-            btnPrestamos.Click  += (s, e) => new FrmPrestamos().ShowDialog();
-            btnBeneficios.Click += (s, e) => new FrmBeneficiosLOTTT().ShowDialog();
+            Controls.AddRange(new Control[] { pnlGrid, hdr, footer });
 
-            Hover(btnEmpleados,  Color.FromArgb(60, 100, 190),  Color.FromArgb(40, 80, 160));
-            Hover(btnProcesar,   Color.FromArgb(50, 150, 80),   Color.FromArgb(30, 120, 60));
-            Hover(btnPrestamos,  Color.FromArgb(170, 100, 40),  Color.FromArgb(140, 80, 20));
-            Hover(btnBeneficios, Color.FromArgb(130, 60, 180),  Color.FromArgb(100, 40, 150));
+            // Ajustar tamaño al grid
+            ClientSize = new Size(cols * btnW + gap + padX * 2,
+                50 + 2 * btnH + gap + padY * 2 + 46);
 
-            Controls.AddRange(new Control[]
-                { lblTitulo, btnEmpleados, btnProcesar, btnPrestamos, btnBeneficios, footer });
+            VentanaPrefs.Restaurar(this);
+            var _tpVP = new System.Windows.Forms.Timer { Interval = 800 };
+            _tpVP.Tick      += (s, e) => { _tpVP.Stop(); VentanaPrefs.Guardar(this); };
+            SizeChanged     += (s, e) => { _tpVP.Stop(); _tpVP.Start(); };
+            LocationChanged += (s, e) => { _tpVP.Stop(); _tpVP.Start(); };
+            FormClosed      += (s, e) => { _tpVP.Stop(); _tpVP.Dispose(); };
+
         }
-
-        private Button Btn(string t, Color c, Point p)
-        {
-            var b = new Button
-            {
-                Text = t, Size = new Size(200, 150), Location = p,
-                BackColor = c, ForeColor = Color.White, FlatStyle = FlatStyle.Flat,
-                Font = new Font("Segoe UI", 10f, FontStyle.Bold),
-                TextAlign = ContentAlignment.MiddleCenter, Cursor = Cursors.Hand
-            };
-            b.FlatAppearance.BorderSize = 0;
-            return b;
-        }
-
-        private void Hover(Button b, Color on, Color off)
-        {
-            b.MouseEnter += (s, e) => b.BackColor = on;
-            b.MouseLeave += (s, e) => b.BackColor = off;
-        }
-    }
+    }  // fin FrmNomina
 
     // ══════════════════════════════════════════════════════════════════════════
     //  CATALOGO DE EMPLEADOS
@@ -97,11 +125,21 @@ namespace SistemaGestion
             StartPosition = FormStartPosition.CenterParent;
             BackColor = Color.FromArgb(245, 247, 255);
 
-            var hdr = Hdr("Empleados", Color.FromArgb(40, 80, 160));
-            var btnN = Btn("+ Nuevo",   Color.FromArgb(40, 160, 80),  new Point(680, 8));
-            var btnE = Btn("Editar",    Color.FromArgb(60, 110, 190), new Point(778, 8));
-            var btnD = Btn("Dar de baja", Color.FromArgb(180, 50, 50), new Point(876, 8), 100);
-            hdr.Controls.AddRange(new Control[] { btnN, btnE, btnD });
+            var hdr = Hdr("Empleados", Color.FromArgb(26, 74, 138));
+            var btnN = Btn("+ Nuevo",     Color.FromArgb(40, 160, 80));
+            var btnE = Btn("Editar",      Color.FromArgb(60, 110, 190));
+            var btnD = Btn("Dar de baja", Color.FromArgb(180, 50, 50));
+            btnD.Width = 100;
+
+            var pnlHdrRight = new FlowLayoutPanel {
+                Dock = DockStyle.Right, AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false, BackColor = Color.Transparent,
+                Padding = new Padding(0, 9, 8, 0)
+            };
+            pnlHdrRight.Controls.AddRange(new Control[] { btnN, btnE, btnD });
+            hdr.Controls.Add(pnlHdrRight);
 
             var toolBar = new Panel { Dock = DockStyle.Top, Height = 36,
                 BackColor = Color.FromArgb(228, 232, 248) };
@@ -196,6 +234,14 @@ namespace SistemaGestion
                 Font = new Font("Segoe UI", 8f, FontStyle.Bold), Cursor = Cursors.Hand };
             b.FlatAppearance.BorderSize = 0; return b;
         }
+        private Button Btn(string t, Color c)
+        {
+            var b = new Button { Text = t, Size = new Size(90, 32), BackColor = c,
+                ForeColor = Color.White, FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 8f, FontStyle.Bold), Cursor = Cursors.Hand,
+                Margin = new Padding(0, 0, 4, 0) };
+            b.FlatAppearance.BorderSize = 0; return b;
+        }
         private Button BtnFooter(string t, Point p, Panel footer)
         {
             var b = new Button { Text = t, Size = new Size(90, 26), Location = p,
@@ -242,11 +288,11 @@ namespace SistemaGestion
             bool nuevo = e == null;
             Text = nuevo ? "Nuevo Empleado" : "Editar — " + e?.NombreCompleto;
             Size = new Size(520, 560); StartPosition = FormStartPosition.CenterParent;
-            FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = MinimizeBox = false;
-            BackColor = Color.FromArgb(245, 247, 255);
+            FormBorderStyle = FormBorderStyle.Sizable; MaximizeBox = true; MinimizeBox = false;
+            BackColor = Color.FromArgb(240, 244, 250);
 
             var banner = new Panel { Dock = DockStyle.Top, Height = 38,
-                BackColor = Color.FromArgb(40, 80, 160) };
+                BackColor = Color.FromArgb(26, 74, 138) };
             banner.Controls.Add(new Label { Text = Text, ForeColor = Color.White,
                 Font = new Font("Segoe UI", 10f, FontStyle.Bold), AutoSize = true, Location = new Point(12, 9) });
             Controls.Add(banner);
@@ -308,7 +354,7 @@ namespace SistemaGestion
             Controls.Add(chkActivo); y += 44;
 
             var bOk = new Button { Text = "Guardar empleado", Location = new Point(120, y),
-                Size = new Size(170, 33), BackColor = Color.FromArgb(40, 80, 160),
+                Size = new Size(170, 33), BackColor = Color.FromArgb(30, 130, 70),
                 ForeColor = Color.White, FlatStyle = FlatStyle.Flat,
                 Font = new Font("Segoe UI", 9.5f, FontStyle.Bold) };
             bOk.FlatAppearance.BorderSize = 0;
@@ -316,6 +362,17 @@ namespace SistemaGestion
                 Location = new Point(308, y), Size = new Size(110, 33),
                 BackColor = Color.FromArgb(120, 120, 130), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
             bCan.FlatAppearance.BorderSize = 0;
+            
+            
+            var _dlgTip = AyudaService.CrearTooltip();
+            if (txtCedula != null) AyudaService.Tip(_dlgTip, txtCedula, "Número de cédula de identidad");
+            if (txtNombre != null) AyudaService.Tip(_dlgTip, txtNombre, "Primer nombre del empleado");
+            if (txtApellido != null) AyudaService.Tip(_dlgTip, txtApellido, "Primer apellido del empleado");
+            if (txtCargo != null) AyudaService.Tip(_dlgTip, txtCargo, "Cargo o puesto de trabajo");
+            if (numSueldo != null) AyudaService.Tip(_dlgTip, numSueldo, "Salario diario en USD (base para cálculo de nómina)");
+            if (numTarPieza != null) AyudaService.Tip(_dlgTip, numTarPieza, "Pago por pieza de primera calidad producida (solo Producción)");
+            // Recordar posición y tamaño
+            VentanaPrefs.Restaurar(this);
             Controls.AddRange(new Control[] { bOk, bCan });
 
             // Mostrar/ocultar tarifas segun tipo
@@ -323,6 +380,8 @@ namespace SistemaGestion
             ActualizarVisibilidad();
 
             bOk.Click += (s, ev) => Guardar(e);
+        
+            VentanaPrefs.Restaurar(this);
         }
 
         private void ActualizarVisibilidad()

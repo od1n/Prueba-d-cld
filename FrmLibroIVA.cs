@@ -10,7 +10,7 @@ namespace SistemaGestion
     /// Libro de Ventas y Compras IVA — formato SENIAT Venezuela.
     /// Se abre desde FrmReportes via TabLibroIVA().
     /// </summary>
-    public class FrmLibroIVA : Form
+    public class FrmLibroIVA : FormBase
     {
         // Controles
         private TabControl tabLibros;
@@ -436,6 +436,24 @@ namespace SistemaGestion
             var vTot = new Label { Text = "$ 0.00", ForeColor = Color.White, AutoSize = true, Location = new Point(500, 10), Font = new Font("Segoe UI", 10f, FontStyle.Bold) };
 
             pnl.Controls.AddRange(new Control[] { lBase, vBase, lIva, vIva, lTot, vTot });
+
+            VentanaPrefs.Restaurar(this);
+            var _vpT = new System.Windows.Forms.Timer { Interval = 800 };
+            _vpT.Tick        += (s, e) => { _vpT.Stop(); VentanaPrefs.Guardar(this); };
+            SizeChanged     += (s, e) => { _vpT.Stop(); _vpT.Start(); };
+            LocationChanged += (s, e) => { _vpT.Stop(); _vpT.Start(); };
+            FormClosed      += (s, e) => { _vpT.Stop(); _vpT.Dispose(); };
+
+            
+            var _btnHlp = new Button {
+                Text = "? Ayuda", Size = new Size(80, 28),
+                BackColor = Color.FromArgb(80, 50, 150), ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+                Cursor = Cursors.Hand
+            };
+            _btnHlp.FlatAppearance.BorderSize = 0;
+            _btnHlp.Click += (s, e) => AyudaService.Mostrar(this, "FrmLibroIVA");
+            Controls.AddRange(new Control[] { lBase, vBase, lIva, vIva, lTot, vTot });
 
             lblBase = vBase;
             lblIva  = vIva;

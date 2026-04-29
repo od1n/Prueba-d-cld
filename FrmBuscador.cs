@@ -7,7 +7,7 @@ using System.Windows.Forms;
 
 namespace SistemaGestion
 {
-    public class FrmBuscador : Form
+    public class FrmBuscador : FormBase
     {
         private TextBox  txtBuscar;
         private Panel    pnlResultados;

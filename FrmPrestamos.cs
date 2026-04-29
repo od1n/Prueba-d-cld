@@ -5,7 +5,7 @@ using System.Windows.Forms;
 
 namespace SistemaGestion
 {
-    public class FrmPrestamos : Form
+    public class FrmPrestamos : FormBase
     {
         private DataGridView dgv;
         private Label        lblRes;
@@ -14,18 +14,40 @@ namespace SistemaGestion
         {
             Text = "Prestamos Internos a Empleados";
             Size = new Size(1000, 540); StartPosition = FormStartPosition.CenterParent;
-            BackColor = Color.FromArgb(245, 248, 250);
+            BackColor = Color.FromArgb(240, 244, 250);
 
             var hdr = new Panel { Dock = DockStyle.Top, Height = 50,
-                BackColor = Color.FromArgb(140, 80, 20) };
+                BackColor = Color.FromArgb(26, 74, 138) };
             hdr.Controls.Add(new Label { Text = "Prestamos a Empleados",
                 ForeColor = Color.White, Font = new Font("Segoe UI", 12f, FontStyle.Bold),
                 AutoSize = true, Location = new Point(12, 13) });
 
-            var btnN = Btn("+ Nuevo",   Color.FromArgb(40, 160, 80),  new Point(680, 8));
-            var btnAb= Btn("Abonar",    Color.FromArgb(60, 110, 190), new Point(778, 8));
-            var btnC = Btn("Cancelar",  Color.FromArgb(180, 50, 50),  new Point(876, 8));
-            hdr.Controls.AddRange(new Control[] { btnN, btnAb, btnC });
+            var btnN = Btn("+ Nuevo",   Color.FromArgb(40, 160, 80));
+            var btnAb= Btn("Abonar",    Color.FromArgb(60, 110, 190));
+            var btnC = Btn("Cancelar",  Color.FromArgb(180, 50, 50));
+            
+            var _btnAy = new Button {
+                Text = "? Ayuda", Size = new Size(80, 32),
+                BackColor = Color.FromArgb(80, 50, 150), ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+                Cursor = Cursors.Hand, Margin = new Padding(0, 0, 4, 0)
+            };
+            _btnAy.FlatAppearance.BorderSize = 0;
+            _btnAy.Click += (s, e) => AyudaService.Mostrar(this, "FrmPrestamos");
+            var pnlHdr = new FlowLayoutPanel {
+                Dock = DockStyle.Right, AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false, BackColor = Color.Transparent,
+                Padding = new Padding(0, 9, 8, 0)
+            };
+            pnlHdr.Controls.AddRange(new Control[] { _btnAy, btnN, btnAb, btnC });
+            hdr.Controls.Add(pnlHdr);
+            var _tipF = AyudaService.CrearTooltip();
+            AyudaService.Tip(_tipF, _btnAy, "Abrir guía de ayuda de este módulo");
+            AyudaService.Tip(_tipF, btnN, "Registrar un nuevo préstamo a un empleado");
+            AyudaService.Tip(_tipF, btnAb, "Registrar un abono manual al préstamo seleccionado");
+            AyudaService.Tip(_tipF, btnC, "Cancelar el préstamo seleccionado");
 
             dgv = new DataGridView
             {
@@ -60,6 +82,14 @@ namespace SistemaGestion
             btnN.Click  += (s, e) => NuevoPrestamo();
             btnAb.Click += (s, e) => AbonarManual();
             btnC.Click  += (s, e) => CancelarPrestamo();
+
+            
+            VentanaPrefs.Restaurar(this);
+            var _vpT = new System.Windows.Forms.Timer { Interval = 800 };
+            _vpT.Tick        += (s, e) => { _vpT.Stop(); VentanaPrefs.Guardar(this); };
+            SizeChanged     += (s, e) => { _vpT.Stop(); _vpT.Start(); };
+            LocationChanged += (s, e) => { _vpT.Stop(); _vpT.Start(); };
+            FormClosed      += (s, e) => { _vpT.Stop(); _vpT.Dispose(); };
 
             Cargar();
         }
@@ -131,21 +161,25 @@ namespace SistemaGestion
         {
             if (dgv.CurrentRow == null) return;
             int id = (int)dgv.CurrentRow.Cells["Id"].Value;
-            if (MessageBox.Show("Cancelar este prestamo?", "Confirmar",
+            if (MessageBox.Show("¿Cancelar este préstamo?", "Confirmar",
                 MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes)
             {
-                var pr = DatabaseService.ObtenerPrestamos().Find(p => p.Id == id);
-                if (pr == null) return;
-                pr.Estado = "Cancelado";
-                // Update via direct SQL
-                using var c = new Microsoft.Data.Sqlite.SqliteConnection(
-                    SecurityService.CadenaConexion);
-                c.Open();
-                var cmd = c.CreateCommand();
-                cmd.CommandText = "UPDATE PrestamosEmpleado SET Estado='Cancelado' WHERE Id=$id";
-                cmd.Parameters.AddWithValue("$id", id);
-                cmd.ExecuteNonQuery();
-                Cargar();
+                try
+                {
+                    // ALTA-3 FIX: Usar DatabaseService centralizado con auditoría y control de permisos
+                    DatabaseService.CancelarPrestamo(id);
+                    Cargar();
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    MessageBox.Show("Solo el administrador puede cancelar préstamos.",
+                        "Sin permiso", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Error al cancelar: {ex.Message}", "Error",
+                        MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
             }
         }
 
@@ -156,6 +190,15 @@ namespace SistemaGestion
                 Font = new Font("Segoe UI", 8.5f, FontStyle.Bold), Cursor = Cursors.Hand };
             b.FlatAppearance.BorderSize = 0; return b;
         }
+        private Button Btn(string t, Color c)
+        {
+            var b = new Button { Text = t, Size = new Size(90, 33), BackColor = c,
+                ForeColor = Color.White, FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 8.5f, FontStyle.Bold), Cursor = Cursors.Hand };
+            b.Margin = new Padding(0, 0, 4, 0);
+            b.FlatAppearance.BorderSize = 0; return b;
+        }
+
     }
 
     public class DlgNuevoPrestamo : Form
@@ -166,10 +209,10 @@ namespace SistemaGestion
         {
             Text = "Nuevo Prestamo Interno";
             Size = new Size(420, 340); StartPosition = FormStartPosition.CenterParent;
-            FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = MinimizeBox = false;
-            BackColor = Color.FromArgb(245, 248, 250);
+            FormBorderStyle = FormBorderStyle.Sizable; MaximizeBox = true; MinimizeBox = false;
+            BackColor = Color.FromArgb(240, 244, 250);
 
-            var banner = new Panel { Dock = DockStyle.Top, Height = 38, BackColor = Color.FromArgb(140, 80, 20) };
+            var banner = new Panel { Dock = DockStyle.Top, Height = 38, BackColor = Color.FromArgb(26, 74, 138) };
             banner.Controls.Add(new Label { Text = Text, ForeColor = Color.White,
                 Font = new Font("Segoe UI", 10f, FontStyle.Bold), AutoSize = true, Location = new Point(12, 9) });
             Controls.Add(banner);
@@ -201,7 +244,7 @@ namespace SistemaGestion
             Controls.Add(txtDesc); y += 44;
 
             var bOk = new Button { Text = "Registrar prestamo", Location = new Point(60, y), Size = new Size(170, 33),
-                BackColor = Color.FromArgb(140, 80, 20), ForeColor = Color.White,
+                BackColor = Color.FromArgb(30, 130, 70), ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9f, FontStyle.Bold) };
             bOk.FlatAppearance.BorderSize = 0;
             var bCan = new Button { Text = "Cancelar", DialogResult = DialogResult.Cancel,
@@ -223,7 +266,17 @@ namespace SistemaGestion
                 };
                 DialogResult = DialogResult.OK;
             };
+            
+            
+            var _dlgTip = AyudaService.CrearTooltip();
+            if (numMonto != null) AyudaService.Tip(_dlgTip, numMonto, "Monto total del préstamo en USD");
+            if (numCuota != null) AyudaService.Tip(_dlgTip, numCuota, "Cuota semanal que se descontará de la nómina");
+            if (txtDesc != null) AyudaService.Tip(_dlgTip, txtDesc, "Motivo o descripción del préstamo");
+            // Recordar posición y tamaño
+            VentanaPrefs.Restaurar(this);
             Controls.AddRange(new Control[] { bOk, bCan });
+        
+            VentanaPrefs.Restaurar(this);
         }
     }
 
@@ -235,10 +288,10 @@ namespace SistemaGestion
         {
             Text = "Abono a prestamo — " + pr.NombreEmpleado;
             Size = new Size(360, 210); StartPosition = FormStartPosition.CenterParent;
-            FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = MinimizeBox = false;
-            BackColor = Color.FromArgb(245, 248, 245);
+            FormBorderStyle = FormBorderStyle.Sizable; MaximizeBox = true; MinimizeBox = false;
+            BackColor = Color.FromArgb(240, 244, 250);
 
-            var banner = new Panel { Dock = DockStyle.Top, Height = 38, BackColor = Color.FromArgb(40, 120, 60) };
+            var banner = new Panel { Dock = DockStyle.Top, Height = 38, BackColor = Color.FromArgb(26, 74, 138) };
             banner.Controls.Add(new Label { Text = "Abono a prestamo", ForeColor = Color.White,
                 Font = new Font("Segoe UI", 10f, FontStyle.Bold), AutoSize = true, Location = new Point(12, 9) });
             Controls.Add(banner);
@@ -253,7 +306,7 @@ namespace SistemaGestion
             Controls.Add(num);
 
             var bOk = new Button { Text = "Registrar abono", Location = new Point(50, 135),
-                Size = new Size(150, 32), BackColor = Color.FromArgb(40, 120, 60),
+                Size = new Size(150, 32), BackColor = Color.FromArgb(30, 130, 70),
                 ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9f, FontStyle.Bold) };
             bOk.FlatAppearance.BorderSize = 0;
             bOk.Click += (s, e) => { Monto = num.Value; DialogResult = DialogResult.OK; };
@@ -261,6 +314,12 @@ namespace SistemaGestion
                 Location = new Point(215, 135), Size = new Size(100, 32),
                 BackColor = Color.FromArgb(120, 120, 130), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
             bCan.FlatAppearance.BorderSize = 0;
+            
+            
+            var _dlgTip = AyudaService.CrearTooltip();
+            if (num != null) AyudaService.Tip(_dlgTip, num, "Monto a abonar en USD (no puede superar el saldo pendiente)");
+            // Recordar posición y tamaño
+            VentanaPrefs.Restaurar(this);
             Controls.AddRange(new Control[] { bOk, bCan });
         }
     }

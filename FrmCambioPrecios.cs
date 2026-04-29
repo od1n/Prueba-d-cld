@@ -5,7 +5,7 @@ using System.Windows.Forms;
 
 namespace SistemaGestion
 {
-    public class FrmCambioPrecios : Form
+    public class FrmCambioPrecios : FormBase
     {
         private DataGridView dgv;
         private Label lblResumen;
@@ -15,17 +15,40 @@ namespace SistemaGestion
             Text = "Cambio de Precios y Costos";
             Size = new Size(1000, 560);
             StartPosition = FormStartPosition.CenterParent;
-            BackColor = Color.FromArgb(255, 249, 240);
+            BackColor = Color.FromArgb(240, 244, 250);
 
-            var hdr = new Panel { Dock = DockStyle.Top, Height = 50, BackColor = Color.FromArgb(180, 110, 30) };
+            var hdr = new Panel { Dock = DockStyle.Top, Height = 50, BackColor = Color.FromArgb(26, 74, 138) };
             hdr.Controls.Add(new Label { Text = "Cambio de Precios y Costos", ForeColor = Color.White,
                 Font = new Font("Segoe UI", 12f, FontStyle.Bold), AutoSize = true, Location = new Point(12, 13) });
 
-            var btnNuevo   = Btn("+ Producto",  Color.FromArgb(40, 160, 80),  new Point(570, 8));
-            var btnEditar  = Btn("Editar",      Color.FromArgb(60, 100, 180), new Point(670, 8));
-            var btnAplicar = Btn("Aplicar",     Color.FromArgb(140, 80, 20),  new Point(770, 8));
-            var btnElim    = Btn("Eliminar",    Color.FromArgb(180, 60, 60),  new Point(870, 8));
-            hdr.Controls.AddRange(new Control[] { btnNuevo, btnEditar, btnAplicar, btnElim });
+            var btnNuevo   = Btn("+ Producto",  Color.FromArgb(40, 160, 80));
+            var btnEditar  = Btn("Editar",      Color.FromArgb(60, 100, 180));
+            var btnAplicar = Btn("Aplicar",     Color.FromArgb(140, 80, 20));
+            var btnElim    = Btn("Eliminar",    Color.FromArgb(180, 60, 60));
+            
+            var _btnAy = new Button {
+                Text = "? Ayuda", Size = new Size(80, 32),
+                BackColor = Color.FromArgb(80, 50, 150), ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+                Cursor = Cursors.Hand, Margin = new Padding(0, 0, 4, 0)
+            };
+            _btnAy.FlatAppearance.BorderSize = 0;
+            _btnAy.Click += (s, e) => AyudaService.Mostrar(this, "FrmCambioPrecios");
+            var pnlHdr = new FlowLayoutPanel {
+                Dock = DockStyle.Right, AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false, BackColor = Color.Transparent,
+                Padding = new Padding(0, 9, 8, 0)
+            };
+            pnlHdr.Controls.AddRange(new Control[] { _btnAy, btnNuevo, btnEditar, btnAplicar, btnElim });
+            hdr.Controls.Add(pnlHdr);
+            var _tipF = AyudaService.CrearTooltip();
+            AyudaService.Tip(_tipF, _btnAy, "Abrir guía de ayuda de este módulo");
+            AyudaService.Tip(_tipF, btnNuevo, "Agregar un nuevo producto al listado de precios");
+            AyudaService.Tip(_tipF, btnEditar, "Modificar el precio del producto seleccionado");
+            AyudaService.Tip(_tipF, btnAplicar, "Aplicar todos los precios nuevos pendientes al inventario");
+            AyudaService.Tip(_tipF, btnElim, "Eliminar el producto seleccionado de la lista");
 
             // Panel filtros
             var panelFiltro = new Panel { Dock = DockStyle.Top, Height = 40, BackColor = Color.FromArgb(245, 235, 215) };
@@ -66,7 +89,15 @@ namespace SistemaGestion
 
             Controls.AddRange(new Control[] { dgv, panelFiltro, hdr, footer });
 
-            btnNuevo.Click  += (s, e) => { using var d = new DlgProducto(null); if (d.ShowDialog() == DialogResult.OK) { DatabaseService.InsertarProducto(d.Resultado); CargarDatos(); } };
+            btnNuevo.Click  += (s, e) => { using var d = new DlgProducto(null); if (d.ShowDialog() == DialogResult.OK) { DatabaseService.InsertarProducto(d.Resultado); 
+            VentanaPrefs.Restaurar(this);
+            var _vpT = new System.Windows.Forms.Timer { Interval = 800 };
+            _vpT.Tick        += (s, e) => { _vpT.Stop(); VentanaPrefs.Guardar(this); };
+            SizeChanged     += (s, e) => { _vpT.Stop(); _vpT.Start(); };
+            LocationChanged += (s, e) => { _vpT.Stop(); _vpT.Start(); };
+            FormClosed      += (s, e) => { _vpT.Stop(); _vpT.Dispose(); };
+
+            CargarDatos(); } };
             btnEditar.Click += (s, e) =>
             {
                 if (dgv.CurrentRow == null) return;
@@ -91,6 +122,10 @@ namespace SistemaGestion
         }
 
         private Button Btn(string t, Color c, Point p) { var b = new Button { Text = t, Size = new Size(90, 33), Location = p, BackColor = c, ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8f, FontStyle.Bold), Cursor = Cursors.Hand }; b.FlatAppearance.BorderSize = 0; return b; }
+        private Button Btn(string t, Color c)
+        { var b = new Button { Text = t, Size = new Size(90, 33), BackColor = c, ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8f, FontStyle.Bold), Cursor = Cursors.Hand }; b.Margin = new Padding(0, 0, 4, 0);
+            b.FlatAppearance.BorderSize = 0; return b; }
+
 
         private void CargarDatos(string filtro = "Todas")
         {
@@ -168,8 +203,8 @@ namespace SistemaGestion
         {
             Text = p == null ? "Nuevo Producto" : "Editar Producto";
             Size = new Size(440, 440); StartPosition = FormStartPosition.CenterParent;
-            FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = MinimizeBox = false;
-            BackColor = Color.FromArgb(255, 249, 240);
+            FormBorderStyle = FormBorderStyle.Sizable; MaximizeBox = true; MinimizeBox = false;
+            BackColor = Color.FromArgb(240, 244, 250);
 
             int y = 15;
             L("Codigo:", y);       txtCodigo = T("", y); y += 38;
@@ -196,10 +231,10 @@ namespace SistemaGestion
             ActMargen();
 
             var bOk = new Button { Text = "Guardar", Location = new Point(70, y), Size = new Size(110, 34),
-                BackColor = Color.FromArgb(180, 110, 30), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
+                BackColor = Color.FromArgb(30, 130, 70), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
             bOk.FlatAppearance.BorderSize = 0;
             var bCan = new Button { Text = "Cancelar", DialogResult = DialogResult.Cancel, Location = new Point(210, y), Size = new Size(110, 34),
-                BackColor = Color.FromArgb(150, 60, 60), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
+                BackColor = Color.FromArgb(160, 50, 50), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
             bCan.FlatAppearance.BorderSize = 0;
             bOk.Click += (s, e) =>
             {
@@ -215,7 +250,20 @@ namespace SistemaGestion
                 Resultado.UltimaActualizacion = DateTime.Today;
                 DialogResult = DialogResult.OK;
             };
+            
+            
+            var _dlgTip = AyudaService.CrearTooltip();
+            if (txtCodigo != null) AyudaService.Tip(_dlgTip, txtCodigo, "Código único del producto");
+            if (txtNombre != null) AyudaService.Tip(_dlgTip, txtNombre, "Nombre descriptivo del producto");
+            if (numCostoActual != null) AyudaService.Tip(_dlgTip, numCostoActual, "Costo actual vigente en el inventario");
+            if (numPrecioActual != null) AyudaService.Tip(_dlgTip, numPrecioActual, "Precio de venta actual");
+            if (numCostoNuevo != null) AyudaService.Tip(_dlgTip, numCostoNuevo, "Nuevo costo propuesto (se aplica con el botón [Aplicar])");
+            if (numPrecioNuevo != null) AyudaService.Tip(_dlgTip, numPrecioNuevo, "Nuevo precio propuesto (se aplica con el botón [Aplicar])");
+            // Recordar posición y tamaño
+            VentanaPrefs.Restaurar(this);
             Controls.AddRange(new Control[] { bOk, bCan });
+        
+            VentanaPrefs.Restaurar(this);
         }
 
         private void ActMargen()

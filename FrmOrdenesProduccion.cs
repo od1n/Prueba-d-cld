@@ -9,7 +9,7 @@ namespace SistemaGestion
     // ══════════════════════════════════════════════════════════════════════════
     //  LISTA DE ORDENES DE PRODUCCION
     // ══════════════════════════════════════════════════════════════════════════
-    public class FrmOrdenesProduccion : Form
+    public class FrmOrdenesProduccion : FormBase
     {
         private DataGridView dgv;
         private Label        lblResumen;

@@ -9,7 +9,7 @@ namespace SistemaGestion
     // ══════════════════════════════════════════════════════════════════════════
     //  LISTA DE FACTURAS
     // ══════════════════════════════════════════════════════════════════════════
-    public class FrmFacturas : Form
+    public class FrmFacturas : FormBase
     {
         private DataGridView dgv;
         private Label        lblResumen;
@@ -22,9 +22,9 @@ namespace SistemaGestion
             Text          = "Facturas";
             Size          = new Size(1130, 560);
             StartPosition = FormStartPosition.CenterParent;
-            BackColor     = Color.FromArgb(245, 247, 255);
+            BackColor     = Color.FromArgb(240, 244, 250);
 
-            var hdr = new Panel { Dock = DockStyle.Top, Height = 50, BackColor = Color.FromArgb(60, 100, 180) };
+            var hdr = new Panel { Dock = DockStyle.Top, Height = 50, BackColor = Color.FromArgb(26, 74, 138) };
             hdr.Controls.Add(new Label
             {
                 Text = "Facturas", ForeColor = Color.White,
@@ -32,27 +32,63 @@ namespace SistemaGestion
                 AutoSize = true, Location = new Point(12, 13)
             });
 
-            var btnNueva    = Btn("+ Nueva",     Color.FromArgb(40, 160, 80),  new Point(490, 8));
-            var btnVer      = Btn("Ver detalle", Color.FromArgb(60, 130, 190), new Point(588, 8), 100);
-            var btnPdf      = Btn("Exportar PDF",Color.FromArgb(180, 60, 30),  new Point(697, 8), 105);
-            var btnImprimir = Btn("Imprimir",    Color.FromArgb(100, 60, 160), new Point(810, 8));
-            var btnReporte  = Btn("Reporte PDF", Color.FromArgb(20, 110, 80),  new Point(908, 8), 100);
-            var btnCancelar = Btn("Cancelar",    Color.FromArgb(180, 60, 60),  new Point(1016, 8));
-            hdr.Controls.AddRange(new Control[] { btnNueva, btnVer, btnPdf, btnImprimir, btnReporte, btnCancelar });
+            var btnNueva    = Btn("+ Nueva",     Color.FromArgb(40, 160, 80));
+            var btnVer      = Btn("Ver detalle", Color.FromArgb(60, 130, 190));
+            var btnPdf      = Btn("Exportar PDF",Color.FromArgb(180, 60, 30));
+            var btnImprimir = Btn("Imprimir",    Color.FromArgb(100, 60, 160));
+            var btnReporte  = Btn("Reporte PDF", Color.FromArgb(20, 110, 80));
+            var btnAnular   = Btn("Anular",      Color.FromArgb(180, 40, 40));
+            var btnCorregir = Btn("Corregir",    Color.FromArgb(180, 130, 30), 100);
+            
+            
+            var _btnAyuda = new Button {
+                Text = "? Ayuda", Size = new Size(80, 32),
+                BackColor = Color.FromArgb(80, 50, 150), ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+                Cursor = Cursors.Hand, Margin = new Padding(0, 0, 4, 0)
+            };
+            _btnAyuda.FlatAppearance.BorderSize = 0;
+            _btnAyuda.Click += (s, e) => AyudaService.Mostrar(this, "FrmFacturas");
+            var _pnlHdr = new FlowLayoutPanel {
+                Dock = DockStyle.Right, AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false, BackColor = Color.Transparent,
+                Padding = new Padding(0, 9, 8, 0)
+            };
+            _pnlHdr.Controls.AddRange(new Control[] {
+                _btnAyuda, btnNueva, btnVer, btnPdf, btnImprimir, btnReporte,
+                btnCorregir, btnAnular });
+            hdr.Controls.Add(_pnlHdr);
+            // ── ToolTips ─────────────────────────────────────────────────
+            var _tip = AyudaService.CrearTooltip();
+            AyudaService.Tip(_tip, _btnAyuda, "Abrir la guía de ayuda de este módulo");
+            AyudaService.Tip(_tip, btnNueva, "Crear una nueva factura de venta");
+            AyudaService.Tip(_tip, btnVer, "Ver el detalle completo de la factura seleccionada");
+            AyudaService.Tip(_tip, btnPdf, "Exportar la factura seleccionada a PDF");
+            AyudaService.Tip(_tip, btnImprimir, "Imprimir la factura directamente en la impresora");
+            AyudaService.Tip(_tip, btnReporte, "Generar reporte PDF del período filtrado");
+            AyudaService.Tip(_tip, btnAnular,
+                "Anular la factura seleccionada (queda en BD para auditoría, " +
+                "no afecta CxC ni reportes). Requiere motivo y permiso.");
+            AyudaService.Tip(_tip, btnCorregir,
+                "Corregir la fecha de una factura anulada por fecha inválida. " +
+                "Útil para recuperar facturas afectadas por la migración v21.");
 
-            dgv = Grid(Color.FromArgb(60, 100, 180));
+            dgv = Grid(Color.FromArgb(26, 74, 138));
             dgv.DataBindingComplete += (s, e) => ColorearFilas();
             dgv.DoubleClick         += (s, e) => VerDetalle();
             dgv.ColumnHeaderMouseClick += (s, e) => OrdenarPorColumna(e.ColumnIndex);
 
-            var footer = new Panel { Dock = DockStyle.Bottom, Height = 45, BackColor = Color.FromArgb(215, 220, 240) };
+            var footer = new Panel { Dock = DockStyle.Bottom, Height = 45, BackColor = Color.FromArgb(240, 244, 250) };
             lblResumen = new Label
             {
                 AutoSize  = true, Location = new Point(12, 12),
                 Font      = new Font("Segoe UI", 9.5f, FontStyle.Bold),
                 ForeColor = Color.FromArgb(40, 50, 120)
             };
-            var btnCerrar = BtnFooter("Cerrar", footer, new Point(900, 8));
+            var btnCerrar = BtnFooter("Cerrar", footer);
             btnCerrar.Click += (s, e) => Close();
             footer.Controls.Add(lblResumen);
 
@@ -63,14 +99,26 @@ namespace SistemaGestion
             btnPdf.Click      += (s, e) => ExportarPdf();
             btnImprimir.Click += (s, e) => ImprimirFactura();
             btnReporte.Click  += (s, e) => ExportarReporte();
-            btnCancelar.Click += (s, e) => CancelarFactura();
+            btnAnular.Click   += (s, e) => AnularFacturaConDialogo();
+            btnCorregir.Click += (s, e) => CorregirFechaConDialogo();
 
-            CargarDatos();
+            
+            VentanaPrefs.Restaurar(this);
+            var _tp = new System.Windows.Forms.Timer { Interval = 800 };
+            _tp.Tick        += (s, e) => { _tp.Stop(); VentanaPrefs.Guardar(this); };
+            SizeChanged     += (s, e) => { _tp.Stop(); _tp.Start(); };
+            LocationChanged += (s, e) => { _tp.Stop(); _tp.Start(); };
+            FormClosed      += (s, e) => { _tp.Stop(); _tp.Dispose(); };
+
+CargarDatos();
         }
 
         private void CargarDatos()
         {
-            _facturas = DatabaseService.ObtenerFacturas();
+            // En el LISTADO de Facturas siempre mostramos las NE (con badge),
+            // independiente del toggle global. El toggle sólo afecta reportes
+            // y agregados (dashboard, P&L, libro de IVA).
+            _facturas = DatabaseService.ObtenerFacturas(incluirNotasEntrega: true);
 
             IEnumerable<Factura> ordenadas = _facturas;
             switch (_columnaOrden)
@@ -112,30 +160,55 @@ namespace SistemaGestion
             dgv.DataSource = null;
             dgv.DataSource = ordenadas.Select(f => new
             {
+                Tipo       = f.EsNotaEntrega        ? "NE"
+                           : f.EsFacturaExportacion ? "EXP"
+                                                    : "FAC",
                 f.NumeroF,
                 Cliente    = f.Codigo,
-                Fecha      = f.Fecha.ToShortDateString(),
+                // Si la fecha es válida la mostramos, si no señalizamos el problema
+                Fecha      = f.Fecha == DateTime.MinValue
+                                ? "(fecha inválida)"
+                                : f.Fecha.ToShortDateString(),
                 FormaPago  = f.FormaDePago,
                 Desc       = f.Descuento + "%",
-                IVA        = f.IvaF.ToString("C2"),
+                IVA        = f.EsNotaEntrega ? "—" : f.IvaF.ToString("C2"),
                 Total      = f.TotalF.ToString("C2"),
-                Abono      = f.Abono < 0 ? "CANCELADA" : f.Abono.ToString("C2"),
-                Saldo      = f.Abono < 0 ? "---" : (f.TotalF - f.Abono).ToString("C2"),
-                Estado     = f.Abono < 0 ? "Cancelada"
-                           : (f.TotalF - f.Abono) <= 0 ? "Saldada" : "Pendiente"
+                Abono      = f.Anulada       ? "—"
+                           : f.Abono < 0     ? "CANCELADA"
+                                             : f.Abono.ToString("C2"),
+                Saldo      = f.Anulada || f.Abono < 0
+                                ? "---" : (f.TotalF - f.Abono).ToString("C2"),
+                Estado     = f.Anulada       ? "Anulada"
+                           : f.Abono < 0     ? "Cancelada"
+                           : (f.TotalF - f.Abono) <= 0 ? "Saldada"
+                                             : "Pendiente"
             }).ToList();
 
             foreach (DataGridViewColumn col in dgv.Columns)
                 col.SortMode = DataGridViewColumnSortMode.Programmatic;
             AplicarGlyphOrden();
 
-            decimal total   = _facturas.Where(f => f.Abono >= 0).Sum(f => f.TotalF);
-            decimal cobrado = _facturas.Where(f => f.Abono >= 0).Sum(f => f.Abono);
+            // Excluir anuladas y NE de los totales (no son ventas declarables)
+            var validas = _facturas.Where(f =>
+                !f.Anulada && !f.EsNotaEntrega && f.Abono >= 0).ToList();
+            decimal total   = validas.Sum(f => f.TotalF);
+            decimal cobrado = validas.Sum(f => f.Abono);
+            int anuladas    = _facturas.Count(f => f.Anulada);
+            int notasEntrega= _facturas.Count(f => f.EsNotaEntrega);
+            decimal totalNE = _facturas.Where(f => f.EsNotaEntrega && !f.Anulada)
+                                       .Sum(f => f.TotalF);
+
+            string textoNE = notasEntrega > 0
+                ? "   |   NE: " + notasEntrega + " (" + totalNE.ToString("C2") + ")"
+                : "";
             lblResumen.Text =
-                "  Facturas: " + _facturas.Count +
+                "  Documentos: " + _facturas.Count +
+                (anuladas > 0 ? "  (" + anuladas + " anuladas)" : "") +
+                "   |   Facturas legales: " + validas.Count +
                 "   |   Total: " + total.ToString("C2") +
                 "   |   Cobrado: " + cobrado.ToString("C2") +
-                "   |   Saldo: " + (total - cobrado).ToString("C2");
+                "   |   Saldo: " + (total - cobrado).ToString("C2") +
+                textoNE;
         }
 
         private void OrdenarPorColumna(int columnIndex)
@@ -172,9 +245,33 @@ namespace SistemaGestion
             foreach (DataGridViewRow row in dgv.Rows)
             {
                 var estado = row.Cells["Estado"].Value?.ToString();
-                if (estado == "Saldada")   row.DefaultCellStyle.BackColor = Color.FromArgb(225, 255, 230);
-                else if (estado == "Cancelada") row.DefaultCellStyle.BackColor = Color.FromArgb(245, 230, 230);
-                else                            row.DefaultCellStyle.BackColor = Color.FromArgb(255, 250, 215);
+                var tipo   = row.Cells["Tipo"].Value?.ToString();
+
+                if (estado == "Anulada")
+                {
+                    // Gris suave + texto tachado para que se vea claro que NO cuenta
+                    row.DefaultCellStyle.BackColor = Color.FromArgb(235, 235, 240);
+                    row.DefaultCellStyle.ForeColor = Color.FromArgb(140, 140, 150);
+                    row.DefaultCellStyle.Font = new Font("Segoe UI", 9f, FontStyle.Strikeout);
+                }
+                else if (tipo == "NE")
+                {
+                    // Notas de Entrega: ámbar claro — fácil de identificar a primera vista
+                    row.DefaultCellStyle.BackColor = Color.FromArgb(255, 240, 215);
+                    row.DefaultCellStyle.ForeColor = Color.FromArgb(120, 70, 10);
+                }
+                else if (tipo == "EXP")
+                {
+                    // Exportación: lila tenue — diferenciable del FAC normal
+                    row.DefaultCellStyle.BackColor = Color.FromArgb(238, 232, 252);
+                    row.DefaultCellStyle.ForeColor = Color.FromArgb(60, 40, 130);
+                }
+                else if (estado == "Saldada")
+                    row.DefaultCellStyle.BackColor = Color.FromArgb(225, 255, 230);
+                else if (estado == "Cancelada")
+                    row.DefaultCellStyle.BackColor = Color.FromArgb(245, 230, 230);
+                else
+                    row.DefaultCellStyle.BackColor = Color.FromArgb(255, 250, 215);
             }
         }
 
@@ -281,17 +378,8 @@ namespace SistemaGestion
 
         private int ObtenerIdFactura(string numeroF)
         {
-            // La tabla Facturas usa NumeroF como PK de texto.
-            // DetallesFactura usa IdFactura INTEGER para referencia interna.
-            // Usamos el rowid de SQLite como id interno.
-            using var conn = new Microsoft.Data.Sqlite.SqliteConnection(
-                SecurityService.CadenaConexion);
-            conn.Open();
-            var cmd = conn.CreateCommand();
-            cmd.CommandText = "SELECT rowid FROM Facturas WHERE NumeroF=$n";
-            cmd.Parameters.AddWithValue("$n", numeroF);
-            var obj = cmd.ExecuteScalar();
-            return obj != null ? (int)(long)obj : 0;
+            // ALTA-3 FIX: delegado a DatabaseService — sin SqliteConnection directa
+            return DatabaseService.ObtenerIdFactura(numeroF);
         }
 
         private void VerDetalle()
@@ -308,24 +396,117 @@ namespace SistemaGestion
             dlg.ShowDialog();
         }
 
-        private void CancelarFactura()
+        // ── ANULACIÓN (v21) ───────────────────────────────────────────────
+        // Reemplaza la vieja "Cancelar" (que usaba el hack Abono=-1).
+        // Ahora marca Anulada=1 con motivo + usuario + fecha auditados.
+        private void AnularFacturaConDialogo()
         {
+            // Permiso
+            if (!Sesion.EsAdmin && !Sesion.TienePermiso("FacturasAnular"))
+            {
+                MessageBox.Show(this,
+                    "No tienes permiso para anular facturas.\n" +
+                    "Solicita acceso a un administrador.",
+                    "Acceso denegado", MessageBoxButtons.OK, MessageBoxIcon.Stop);
+                return;
+            }
+
+            if (dgv.CurrentRow == null)
+            {
+                MessageBox.Show(this, "Selecciona una factura primero.",
+                    "Sin selección", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            var num = dgv.CurrentRow.Cells["NumeroF"].Value?.ToString();
+            var f = _facturas.Find(x => x.NumeroF == num);
+            if (f == null) return;
+
+            if (f.Anulada)
+            {
+                MessageBox.Show(this,
+                    "La factura " + num + " ya está anulada.\n\n" +
+                    "Motivo registrado:\n" + (f.MotivoAnulacion ?? "(sin motivo)"),
+                    "Ya anulada", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            // Diálogo de motivo
+            using var dlg = new DlgAnularFactura(f.NumeroF, f.TotalF);
+            if (dlg.ShowDialog(this) != DialogResult.OK) return;
+
+            try
+            {
+                DatabaseService.AnularFactura(num, dlg.Motivo, Sesion.NombreUsuario ?? "desconocido");
+                MessageBox.Show(this,
+                    "Factura " + num + " anulada.\n\n" +
+                    "ATENCIÓN: el stock NO se revertió automáticamente. " +
+                    "Si la operación incluyó salida de inventario, registra " +
+                    "una entrada manual en Kardex.",
+                    "Anulada", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                CargarDatos();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, "Error al anular: " + ex.Message,
+                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        // Corrección de fecha — pensado para des-romper facturas que la
+        // migración v21 anuló por tener fecha inválida (año < 2000). El
+        // operador ingresa la fecha correcta, se actualiza Y se reactiva.
+        private void CorregirFechaConDialogo()
+        {
+            if (!Sesion.EsAdmin && !Sesion.TienePermiso("FacturasAnular"))
+            {
+                MessageBox.Show(this,
+                    "No tienes permiso para corregir facturas.",
+                    "Acceso denegado", MessageBoxButtons.OK, MessageBoxIcon.Stop);
+                return;
+            }
             if (dgv.CurrentRow == null) return;
             var num = dgv.CurrentRow.Cells["NumeroF"].Value?.ToString();
-            var f   = DatabaseService.ObtenerFacturas().Find(x => x.NumeroF == num);
-            if (f == null || f.Abono < 0) return;
+            var f = _facturas.Find(x => x.NumeroF == num);
+            if (f == null) return;
 
-            if (MessageBox.Show(
-                "Cancelar factura " + f.NumeroF + "?\n\n" +
-                "ATENCION: El stock NO se revertira automaticamente.\n" +
-                "Si necesitas devolver el stock usa el Kardex (Entrada).",
-                "Confirmar cancelacion",
-                MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes)
+            // Solo tiene sentido para anuladas-por-fecha o facturas con fecha rota
+            bool fechaRota = f.Fecha == DateTime.MinValue || f.Fecha.Year < 2000;
+            bool anuladaPorFecha = f.Anulada
+                && (f.MotivoAnulacion?.IndexOf("Fecha", StringComparison.OrdinalIgnoreCase) >= 0);
+
+            if (!fechaRota && !anuladaPorFecha)
             {
-                f.Abono = -1;
-                DatabaseService.ActualizarFactura(f);
-                DatabaseService.RegistrarAuditoria("FACTURA_CANCEL", "Facturas", "Cancelada: " + num);
+                MessageBox.Show(this,
+                    "Esta opción es solo para facturas con fecha inválida " +
+                    "(típicamente anuladas por la migración v21).\n\n" +
+                    "Para editar una factura normal usa 'Ver detalle'.",
+                    "No aplica", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            using var dlg = new DlgCorregirFecha(f.NumeroF,
+                f.MotivoAnulacion ?? "(sin motivo registrado)");
+            if (dlg.ShowDialog(this) != DialogResult.OK) return;
+
+            try
+            {
+                DatabaseService.CorregirFechaFactura(num, dlg.NuevaFecha,
+                    Sesion.NombreUsuario ?? "desconocido");
+                if (f.Anulada)
+                {
+                    var resp = MessageBox.Show(this,
+                        "Fecha corregida a " + dlg.NuevaFecha.ToShortDateString() + ".\n\n" +
+                        "¿Reactivar la factura (quitar el estado de anulada)?",
+                        "Reactivar", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                    if (resp == DialogResult.Yes)
+                        DatabaseService.ReactivarFactura(num, Sesion.NombreUsuario ?? "desconocido");
+                }
                 CargarDatos();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, "Error al corregir: " + ex.Message,
+                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
@@ -348,23 +529,20 @@ namespace SistemaGestion
             return g;
         }
 
-        private Button Btn(string t, Color c, Point p, int w = 90)
+        private Button Btn(string t, Color c, int w = 90)
         {
-            var b = new Button
-            {
-                Text = t, Size = new Size(w, 33), Location = p, BackColor = c,
-                ForeColor = Color.White, FlatStyle = FlatStyle.Flat,
-                Font = new Font("Segoe UI", 8.5f, FontStyle.Bold), Cursor = Cursors.Hand
-            };
-            b.FlatAppearance.BorderSize = 0;
-            return b;
+            var b = new Button { Text = t, Size = new Size(w, 32),
+                BackColor = c, ForeColor = Color.White, FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 8.5f, FontStyle.Bold), Cursor = Cursors.Hand,
+                Margin = new Padding(0, 0, 4, 0) };
+            b.FlatAppearance.BorderSize = 0; return b;
         }
 
-        private Button BtnFooter(string t, Panel p, Point loc)
+        private Button BtnFooter(string t, Panel p)
         {
             var b = new Button
             {
-                Text = t, Size = new Size(90, 27), Location = loc,
+                Text = t, Size = new Size(90, 27), Dock = DockStyle.Right,
                 BackColor = Color.FromArgb(100, 100, 120), ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat
             };
@@ -393,10 +571,12 @@ namespace SistemaGestion
         }
 
         // Cabecera
-        private TextBox       txtNumero, txtTransporte, txtObs;
+        private TextBox       txtNumero, txtTransporte, txtObs, txtDestinoExp;
         private DateTimePicker dtpFecha;
         private NumericUpDown  numDescuento, numAbono, numIva, numTotal, numDias;
         private ComboBox       cmbCliente, cmbFormaPago;
+        private CheckBox       chkExportacion;
+        private Label          lblDestinoExp, lblTipoDoc;
         private List<Cliente>  _clientesFactura = new List<Cliente>();
 
         // Grid de lineas
@@ -416,12 +596,12 @@ namespace SistemaGestion
                 : "Editar Factura " + f.NumeroF;
             Size            = new Size(900, 680);
             StartPosition   = FormStartPosition.CenterParent;
-            FormBorderStyle = FormBorderStyle.FixedDialog;
+            FormBorderStyle = FormBorderStyle.Sizable;
             MaximizeBox     = MinimizeBox = false;
-            BackColor       = Color.FromArgb(245, 247, 255);
+            BackColor       = Color.FromArgb(240, 244, 250);
 
             // ── Banner ────────────────────────────────────────────────────
-            var banner = new Panel { Dock = DockStyle.Top, Height = 40, BackColor = Color.FromArgb(60, 100, 180) };
+            var banner = new Panel { Dock = DockStyle.Top, Height = 40, BackColor = Color.FromArgb(26, 74, 138) };
             banner.Controls.Add(new Label
             {
                 Text = Text, ForeColor = Color.White,
@@ -434,7 +614,7 @@ namespace SistemaGestion
             {
                 Location = new Point(0, 42),
                 Size     = new Size(360, 370),
-                BackColor= Color.FromArgb(245, 247, 255)
+                BackColor= Color.FromArgb(240, 244, 250)
             };
 
             int y = 10;
@@ -505,10 +685,17 @@ namespace SistemaGestion
             y += 32;
 
             Lbl("Fecha:", y);
+            // Acotar el rango de fechas para evitar typos como "30/5/0117".
+            // Min: 2000-01-01  |  Max: año actual + 1.
+            int _anioMaxFct = DateTime.Today.Year + 1;
             dtpFecha = new DateTimePicker
             {
                 Location = new Point(130, y), Size = new Size(220, 24),
-                Format = DateTimePickerFormat.Short, Enabled = !soloLectura
+                Format   = DateTimePickerFormat.Short,
+                Enabled  = !soloLectura,
+                MinDate  = new DateTime(2000, 1, 1),
+                MaxDate  = new DateTime(_anioMaxFct, 12, 31),
+                Value    = DateTime.Today
             };
             panelIzq.Controls.Add(dtpFecha); y += 32;
 
@@ -524,6 +711,43 @@ namespace SistemaGestion
 
             Lbl("Desc. global (%):", y); numDescuento = Num(y, 100);       y += 32;
             Lbl("IVA ($):", y);          numIva       = Num(y, 9999999);   y += 32;
+
+            // ── EXPORTACIÓN (v22) ──────────────────────────────────────────
+            // Checkbox que sólo importa cuando IVA = 0. Si se marca, el
+            // documento será FacturaExportacion (legal, IVA 0%). Si NO se
+            // marca y el IVA es 0, el sistema lo guardará como NotaEntrega
+            // (sin valor fiscal).
+            chkExportacion = new CheckBox
+            {
+                Text = "Es exportación (IVA 0% legal)",
+                Location = new Point(130, y), Size = new Size(220, 22),
+                Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(20, 110, 80),
+                Enabled = !soloLectura
+            };
+            panelIzq.Controls.Add(chkExportacion); y += 26;
+
+            // Destino exportación — visible sólo cuando chkExportacion = true
+            lblDestinoExp = new Label
+            {
+                Text = "Destino exp.:", Location = new Point(10, y + 3),
+                AutoSize = true, Font = new Font("Segoe UI", 9f, FontStyle.Bold),
+                Visible = false
+            };
+            panelIzq.Controls.Add(lblDestinoExp);
+            txtDestinoExp = new TextBox
+            {
+                Location = new Point(130, y), Size = new Size(220, 24),
+                ReadOnly = soloLectura, Visible = false
+            };
+            panelIzq.Controls.Add(txtDestinoExp); y += 32;
+
+            chkExportacion.CheckedChanged += (s, e) =>
+            {
+                lblDestinoExp.Visible = chkExportacion.Checked;
+                txtDestinoExp.Visible = chkExportacion.Checked;
+            };
+
             Lbl("Abono ($):", y);        numAbono     = Num(y, 9999999);   y += 32;
             Lbl("Total ($):", y);        numTotal     = Num(y, 9999999);   y += 32;
             Lbl("Dias credito:", y);
@@ -542,12 +766,55 @@ namespace SistemaGestion
             };
             panelIzq.Controls.Add(txtObs);
 
+            // Banner informativo del tipo de documento — POR FUERA del
+            // panelIzq para no chocar con los campos del formulario. Se
+            // posiciona como una franja ancha bajo los dos paneles.
+            // Se agregará a `this.Controls` MÁS ABAJO (después de panelIzq/
+            // panelDer) para que quede al frente en z-order.
+            lblTipoDoc = new Label
+            {
+                AutoSize = false, Size = new Size(870, 32),
+                TextAlign = ContentAlignment.MiddleCenter,
+                Font = new Font("Segoe UI", 10f, FontStyle.Bold),
+                BackColor = Color.FromArgb(220, 230, 245),
+                ForeColor = Color.FromArgb(40, 60, 140),
+                Padding = new Padding(8, 0, 8, 0),
+                Location = new Point(8, 422),   // justo debajo de los dos paneles
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+            };
+            void RefrescarTipoDoc()
+            {
+                var tipo = DatabaseService.ClasificarTipoDocumento(
+                    numIva.Value, chkExportacion.Checked);
+                switch (tipo)
+                {
+                    case "FacturaConIVA":
+                        lblTipoDoc.Text = "✓ Factura con IVA — documento fiscal";
+                        lblTipoDoc.BackColor = Color.FromArgb(220, 245, 230);
+                        lblTipoDoc.ForeColor = Color.FromArgb(20, 110, 60);
+                        break;
+                    case "FacturaExportacion":
+                        lblTipoDoc.Text = "✓ Factura de Exportación — IVA 0% legal";
+                        lblTipoDoc.BackColor = Color.FromArgb(220, 235, 250);
+                        lblTipoDoc.ForeColor = Color.FromArgb(40, 80, 160);
+                        break;
+                    case "NotaEntrega":
+                        lblTipoDoc.Text = "⚠ NOTA DE ENTREGA — sin valor fiscal";
+                        lblTipoDoc.BackColor = Color.FromArgb(250, 235, 215);
+                        lblTipoDoc.ForeColor = Color.FromArgb(180, 100, 20);
+                        break;
+                }
+            }
+            numIva.ValueChanged       += (s, e) => RefrescarTipoDoc();
+            chkExportacion.CheckedChanged += (s, e) => RefrescarTipoDoc();
+            RefrescarTipoDoc();
+
             // ── Panel derecho: lineas de productos ────────────────────────
             var panelDer = new Panel
             {
                 Location  = new Point(362, 42),
                 Size      = new Size(520, 370),
-                BackColor = Color.FromArgb(238, 242, 255)
+                BackColor = Color.FromArgb(245, 248, 255)
             };
 
             var lblLineas = new Label
@@ -571,7 +838,7 @@ namespace SistemaGestion
             var btnQuitarLinea = new Button
             {
                 Text = "Quitar", Location = new Point(168, 28), Size = new Size(70, 26),
-                BackColor = Color.FromArgb(180, 60, 60), ForeColor = Color.White,
+                BackColor = Color.FromArgb(26, 74, 138), ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8f, FontStyle.Bold),
                 Visible = !soloLectura
             };
@@ -592,7 +859,7 @@ namespace SistemaGestion
                 Font = new Font("Segoe UI", 9f),
                 RowTemplate = { Height = 24 }
             };
-            dgvLineas.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(60, 100, 180);
+            dgvLineas.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(26, 74, 138);
             dgvLineas.ColumnHeadersDefaultCellStyle.ForeColor = Color.White;
             dgvLineas.ColumnHeadersDefaultCellStyle.Font      = new Font("Segoe UI", 9f, FontStyle.Bold);
             dgvLineas.EnableHeadersVisualStyles = false;
@@ -641,7 +908,7 @@ namespace SistemaGestion
                 {
                     Text      = "Guardar Factura",
                     Location  = new Point(260, 10), Size = new Size(160, 34),
-                    BackColor = Color.FromArgb(30, 110, 190), ForeColor = Color.White,
+                    BackColor = Color.FromArgb(30, 130, 70), ForeColor = Color.White,
                     FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 10f, FontStyle.Bold)
                 };
                 bOk.FlatAppearance.BorderSize = 0;
@@ -660,7 +927,13 @@ namespace SistemaGestion
             bCerrar.FlatAppearance.BorderSize = 0;
             panelBtns.Controls.Add(bCerrar);
 
+            
+            // Recordar posición y tamaño
+            VentanaPrefs.Restaurar(this);
             Controls.AddRange(new Control[] { banner, panelIzq, panelDer, panelBtns });
+            // El banner del tipo se agrega DESPUÉS para garantizar z-order correcto
+            this.Controls.Add(lblTipoDoc);
+            lblTipoDoc.BringToFront();
 
             // ── Cargar datos si es edicion/lectura ────────────────────────
             if (f != null)
@@ -668,7 +941,10 @@ namespace SistemaGestion
                 txtNumero.Text             = f.NumeroF;
                 if (!string.IsNullOrWhiteSpace(f.Codigo))
                     cmbCliente.SelectedValue = f.Codigo;
-                dtpFecha.Value             = f.Fecha;
+                // Si la fecha está corrupta (anulada por v21), usar HOY como
+                // fallback en el picker para evitar excepciones del control.
+                dtpFecha.Value = (f.Fecha < dtpFecha.MinDate || f.Fecha > dtpFecha.MaxDate)
+                                    ? DateTime.Today : f.Fecha;
                 if (cmbFormaPago.Items.Contains(f.FormaDePago))
                     cmbFormaPago.SelectedItem = f.FormaDePago;
                 numDescuento.Value         = f.Descuento;
@@ -679,6 +955,11 @@ namespace SistemaGestion
                 txtTransporte.Text         = f.Transporte;
                 txtObs.Text                = f.Observaciones;
                 txtNumero.ReadOnly         = true;
+                // v22: cargar tipo de documento existente
+                chkExportacion.Checked     = f.EsExportacion;
+                txtDestinoExp.Text         = f.DestinoExportacion ?? "";
+                lblDestinoExp.Visible      = f.EsExportacion;
+                txtDestinoExp.Visible      = f.EsExportacion;
             }
 
             // Cargar lineas existentes
@@ -728,6 +1009,8 @@ namespace SistemaGestion
             numIva.ValueChanged += (s, e) => RecalcularTotal();
 
             RecalcularTotal();
+        
+            VentanaPrefs.Restaurar(this);
         }
 
         // ── Agregar producto al grid ───────────────────────────────────────
@@ -883,6 +1166,69 @@ namespace SistemaGestion
                 return;
             }
 
+            // Validación de fecha — defensa en profundidad además del MinDate/MaxDate
+            // del DateTimePicker (por si el control se cambia en el futuro).
+            int anioMaxV = DateTime.Today.Year + 1;
+            if (dtpFecha.Value.Year < 2000 || dtpFecha.Value.Year > anioMaxV)
+            {
+                MessageBox.Show(this,
+                    $"La fecha debe estar entre 2000 y {anioMaxV}.\n\n" +
+                    "Verifica que el año esté bien tipeado (errores comunes: " +
+                    "tipear '0117' en vez de '2017').",
+                    "Fecha inválida", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                dtpFecha.Focus();
+                return;
+            }
+
+            // ── Validación de exportación ────────────────────────────────
+            // Si marcó exportación pero IVA > 0 → no tiene sentido.
+            if (chkExportacion.Checked && numIva.Value > 0)
+            {
+                MessageBox.Show(this,
+                    "Una factura de exportación tiene IVA 0% por ley.\n" +
+                    "Quita el IVA o desmarca la exportación.",
+                    "Inconsistencia", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                numIva.Focus();
+                return;
+            }
+            // Si marcó exportación, exigir destino
+            if (chkExportacion.Checked &&
+                string.IsNullOrWhiteSpace(txtDestinoExp.Text))
+            {
+                MessageBox.Show(this,
+                    "Indica el país/destino de la exportación.",
+                    "Falta destino", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                txtDestinoExp.Focus();
+                return;
+            }
+
+            // ── Si va a guardarse como NotaEntrega, confirmar ────────────
+            string tipoFinal = DatabaseService.ClasificarTipoDocumento(
+                numIva.Value, chkExportacion.Checked);
+            if (tipoFinal == "NotaEntrega")
+            {
+                if (!Sesion.EsAdmin && !Sesion.TienePermiso("NotasEntregaCrear"))
+                {
+                    MessageBox.Show(this,
+                        "No tienes permiso para emitir Notas de Entrega.\n\n" +
+                        "Una venta sin IVA y sin marcar como exportación se " +
+                        "registra automáticamente como Nota de Entrega (sin " +
+                        "valor fiscal). Si esto NO es lo que querías, agrega " +
+                        "el IVA correspondiente o marca la casilla de exportación.",
+                        "Acceso denegado", MessageBoxButtons.OK, MessageBoxIcon.Stop);
+                    return;
+                }
+                var resp = MessageBox.Show(this,
+                    "Esta venta se registrará como NOTA DE ENTREGA " +
+                    "(sin valor fiscal, sin IVA, no se declara).\n\n" +
+                    "El número será asignado automáticamente con el formato " +
+                    "NE-" + DateTime.Today.Year + "-XXXX.\n\n" +
+                    "¿Confirmas?",
+                    "Nota de Entrega",
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+                if (resp != DialogResult.Yes) return;
+            }
+
             Resultado = new Factura
             {
                 NumeroF = txtNumero.Text.Trim(),
@@ -895,6 +1241,9 @@ namespace SistemaGestion
                 Abono = numAbono.Value,
                 IvaF = numIva.Value,
                 DiasCreditoF = (int)numDias.Value,
+                EsExportacion      = chkExportacion.Checked,
+                DestinoExportacion = chkExportacion.Checked
+                                        ? txtDestinoExp.Text?.Trim() : null,
                 TotalF = numTotal.Value
             };
 
@@ -964,9 +1313,9 @@ namespace SistemaGestion
             Text = "Seleccionar producto";
             Size = new Size(760, 500);
             StartPosition = FormStartPosition.CenterParent;
-            FormBorderStyle = FormBorderStyle.FixedDialog;
-            MaximizeBox = MinimizeBox = false;
-            BackColor = Color.FromArgb(245, 247, 255);
+            FormBorderStyle = FormBorderStyle.Sizable;
+            MaximizeBox = true; MinimizeBox = false;
+            BackColor = Color.FromArgb(240, 244, 250);
 
             var lbl = new Label
             {
@@ -1055,6 +1404,8 @@ namespace SistemaGestion
             btnSel.Click += (s, e) => Seleccionar();
 
             Filtrar();
+        
+            VentanaPrefs.Restaurar(this);
         }
 
         private void Filtrar()
@@ -1063,9 +1414,8 @@ namespace SistemaGestion
 
             var data = string.IsNullOrWhiteSpace(q)
                 ? _inventario
-                : _inventario.Where(i =>
-                    (i.Codigo ?? "").ToLowerInvariant().Contains(q) ||
-                    (i.Descripcion ?? "").ToLowerInvariant().Contains(q))
+                : _inventario.Where(i => BusquedaHelper.ContieneFlexibleEnAlguno(q,
+                        i.Codigo, i.Descripcion))
                   .ToList();
 
             dgv.Rows.Clear();

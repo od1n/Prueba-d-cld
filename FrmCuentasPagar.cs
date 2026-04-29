@@ -10,7 +10,7 @@ namespace SistemaGestion
     // =========================================================================
     // FORMULARIO PRINCIPAL
     // =========================================================================
-    public class FrmCuentasPagar : Form
+    public class FrmCuentasPagar : FormBase
     {
         private DataGridView dgv;
         private ComboBox cmbFiltro;
@@ -342,7 +342,24 @@ namespace SistemaGestion
         {
             _original = original;
             InitializeComponent();
-            if (_original != null) CargarDatos();
+            if (_original != null) 
+            VentanaPrefs.Restaurar(this);
+            var _vpT = new System.Windows.Forms.Timer { Interval = 800 };
+            _vpT.Tick        += (s, e) => { _vpT.Stop(); VentanaPrefs.Guardar(this); };
+            SizeChanged     += (s, e) => { _vpT.Stop(); _vpT.Start(); };
+            LocationChanged += (s, e) => { _vpT.Stop(); _vpT.Start(); };
+            FormClosed      += (s, e) => { _vpT.Stop(); _vpT.Dispose(); };
+
+            
+            var _btnHlp = new Button {
+                Text = "? Ayuda", Size = new Size(80, 28),
+                BackColor = Color.FromArgb(80, 50, 150), ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+                Cursor = Cursors.Hand
+            };
+            _btnHlp.FlatAppearance.BorderSize = 0;
+            _btnHlp.Click += (s, e) => AyudaService.Mostrar(this, "FrmCuentasPagar");
+            CargarDatos();
             CargarProveedores();
         }
 

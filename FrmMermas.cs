@@ -7,7 +7,7 @@ using System.Windows.Forms;
 
 namespace SistemaGestion
 {
-    public class FrmMermas : Form
+    public class FrmMermas : FormBase
     {
         // Controles
         private DataGridView dgvOrdenes, dgvDetalle;

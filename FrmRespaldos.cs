@@ -6,7 +6,7 @@ using System.Windows.Forms;
 
 namespace SistemaGestion
 {
-    public class FrmRespaldos : Form
+    public class FrmRespaldos : FormBase
     {
         private DataGridView dgv;
         private Label        lblInfo;
@@ -17,10 +17,10 @@ namespace SistemaGestion
             Text          = "Gestion de Respaldos";
             Size          = new Size(960, 520);
             StartPosition = FormStartPosition.CenterParent;
-            BackColor     = Color.FromArgb(244, 248, 244);
+            BackColor     = Color.FromArgb(240, 244, 250);
 
             // ── Header ────────────────────────────────────────────────────
-            var hdr = new Panel { Dock = DockStyle.Top, Height = 50, BackColor = Color.FromArgb(20, 100, 50) };
+            var hdr = new Panel { Dock = DockStyle.Top, Height = 50, BackColor = Color.FromArgb(26, 74, 138) };
             hdr.Controls.Add(new Label
             {
                 Text      = "Respaldos de Base de Datos",
@@ -30,17 +30,42 @@ namespace SistemaGestion
                 Location  = new Point(12, 13)
             });
 
-            var btnRespaldo  = Btn("+ Respaldar ahora", Color.FromArgb(30, 140, 70),   new Point(460, 8), 160);
-            var btnVerificar = Btn("Verificar",          Color.FromArgb(120, 60, 180),  new Point(630, 8), 100);
-            var btnAbrir     = Btn("Abrir carpeta",      Color.FromArgb(60, 100, 180),  new Point(740, 8), 110);
-            hdr.Controls.AddRange(new Control[] { btnRespaldo, btnVerificar, btnAbrir });
+            var btnRespaldo  = Btn("+ Respaldar ahora", Color.FromArgb(30, 140, 70));
+            var btnVerificar = Btn("Verificar",          Color.FromArgb(120, 60, 180));
+            var btnAbrir     = Btn("Abrir carpeta",      Color.FromArgb(26, 74, 138));
+            
+            
+            var _btnAyuda = new Button {
+                Text = "? Ayuda", Size = new Size(80, 32),
+                BackColor = Color.FromArgb(80, 50, 150), ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+                Cursor = Cursors.Hand, Margin = new Padding(0, 0, 4, 0)
+            };
+            _btnAyuda.FlatAppearance.BorderSize = 0;
+            _btnAyuda.Click += (s, e) => AyudaService.Mostrar(this, "FrmRespaldos");
+            var _pnlHdr = new FlowLayoutPanel {
+                Dock = DockStyle.Right, AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false, BackColor = Color.Transparent,
+                Padding = new Padding(0, 9, 8, 0)
+            };
+            _pnlHdr.Controls.AddRange(new Control[] { _btnAyuda, btnRespaldo, btnVerificar, btnAbrir });
+            hdr.Controls.Add(_pnlHdr);
+            // ── ToolTips ─────────────────────────────────────────────────
+            var _tip = AyudaService.CrearTooltip();
+            AyudaService.Tip(_tip, _btnAyuda, "Abrir la guía de ayuda de este módulo");
+            AyudaService.Tip(_tip, btnRespaldo, "Crear una copia de seguridad de la base de datos ahora mismo");
+            AyudaService.Tip(_tip, btnVerificar, "Verificar la integridad de todos los archivos de respaldo");
+            AyudaService.Tip(_tip, btnAbrir, "Abrir la carpeta de respaldos en el Explorador de Windows");
 
             // ── Sub-header con ruta ───────────────────────────────────────
             var panelRuta = new Panel
             {
                 Dock      = DockStyle.Top,
                 Height    = 30,
-                BackColor = Color.FromArgb(228, 242, 230)
+                BackColor = Color.FromArgb(232, 240, 250)
             };
             lblRuta = new Label
             {
@@ -69,10 +94,10 @@ namespace SistemaGestion
                 Font                = new Font("Segoe UI", 9f),
                 RowTemplate         = { Height = 26 }
             };
-            dgv.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(20, 100, 50);
+            dgv.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(26, 74, 138);
             dgv.ColumnHeadersDefaultCellStyle.ForeColor = Color.White;
             dgv.ColumnHeadersDefaultCellStyle.Font      = new Font("Segoe UI", 9f, FontStyle.Bold);
-            dgv.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(235, 248, 238);
+            dgv.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(245, 248, 255);
             dgv.EnableHeadersVisualStyles = false;
             dgv.DataBindingComplete += (s, e) => ColorearFilas();
 
@@ -81,7 +106,7 @@ namespace SistemaGestion
             {
                 Dock      = DockStyle.Bottom,
                 Height    = 44,
-                BackColor = Color.FromArgb(215, 235, 218)
+                BackColor = Color.FromArgb(240, 244, 250)
             };
             lblInfo = new Label
             {
@@ -114,7 +139,15 @@ namespace SistemaGestion
                 System.Diagnostics.Process.Start("explorer.exe", BackupService.CarpetaRespaldos);
             };
 
-            CargarDatos();
+            
+            VentanaPrefs.Restaurar(this);
+            var _tp = new System.Windows.Forms.Timer { Interval = 800 };
+            _tp.Tick        += (s, e) => { _tp.Stop(); VentanaPrefs.Guardar(this); };
+            SizeChanged     += (s, e) => { _tp.Stop(); _tp.Start(); };
+            LocationChanged += (s, e) => { _tp.Stop(); _tp.Start(); };
+            FormClosed      += (s, e) => { _tp.Stop(); _tp.Dispose(); };
+
+CargarDatos();
         }
 
         // ── Respaldo manual ───────────────────────────────────────────────
@@ -247,18 +280,18 @@ namespace SistemaGestion
         }
 
         // ── Helper ────────────────────────────────────────────────────────
-        private Button Btn(string texto, Color color, Point location, int ancho = 90)
+        private Button Btn(string texto, Color color, int ancho = 90)
         {
             var b = new Button
             {
                 Text      = texto,
-                Size      = new Size(ancho, 33),
-                Location  = location,
+                Size      = new Size(ancho, 32),
                 BackColor = color,
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
                 Font      = new Font("Segoe UI", 8.5f, FontStyle.Bold),
-                Cursor    = Cursors.Hand
+                Cursor    = Cursors.Hand,
+                Margin    = new Padding(0, 0, 4, 0)
             };
             b.FlatAppearance.BorderSize = 0;
             return b;

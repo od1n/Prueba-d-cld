@@ -1,6 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace SistemaGestion
@@ -8,170 +11,795 @@ namespace SistemaGestion
     // ══════════════════════════════════════════════════════════════
     //  REPORTES
     // ══════════════════════════════════════════════════════════════
-    public class FrmReportes : Form
+    public class FrmReportes : FormBase
     {
+        // ── Helper async compartido por todos los tabs pesados ─────────────
+        // Ejecuta `trabajo` en thread pool con WaitCursor + bloqueo de los
+        // controles indicados. Garantiza que el UI nunca quede congelado y
+        // que los botones se rehabilitan incluso si el trabajo lanza.
+        private async Task<T> EjecutarConCarga<T>(Func<T> trabajo, params Control[] aBloquear)
+        {
+            this.UseWaitCursor = true;
+            Cursor.Current     = Cursors.WaitCursor;
+            foreach (var c in aBloquear) if (c != null) c.Enabled = false;
+            try
+            {
+                return await Task.Run(trabajo);
+            }
+            finally
+            {
+                this.UseWaitCursor = false;
+                Cursor.Current     = Cursors.Default;
+                foreach (var c in aBloquear) if (c != null) c.Enabled = true;
+            }
+        }
+
         public FrmReportes()
         {
-            Text = "Reportes"; Size = new Size(880, 600);
+            Text = "Reportes"; Size = new Size(980, 680);
             StartPosition = FormStartPosition.CenterParent;
-            BackColor = Color.FromArgb(245, 245, 248);
+            BackColor = Color.FromArgb(240, 244, 250);
 
-            var hdr = new Panel { Dock = DockStyle.Top, Height = 50, BackColor = Color.FromArgb(180, 60, 60) };
+            var hdr = new Panel { Dock = DockStyle.Top, Height = 50,
+                BackColor = Color.FromArgb(26, 74, 138) };
             hdr.Controls.Add(new Label { Text = "Reportes del Sistema", ForeColor = Color.White,
-                Font = new Font("Segoe UI", 12f, FontStyle.Bold), AutoSize = true, Location = new Point(12, 13) });
+                Font = new Font("Segoe UI", 12f, FontStyle.Bold), AutoSize = true,
+                Location = new Point(12, 13) });
 
-            var tabs = new TabControl { Dock = DockStyle.Fill, Font = new Font("Segoe UI", 9.5f) };
+            var tabs = new TabControl { Dock = DockStyle.Fill, Font = new Font("Segoe UI", 9f) };
             tabs.TabPages.Add(TabResumen());
-            tabs.TabPages.Add(TabFacturas());
-            tabs.TabPages.Add(TabCompras());
+            tabs.TabPages.Add(TabClientes());
+            tabs.TabPages.Add(TabVentas());
+            tabs.TabPages.Add(TabVentasCliente());
+            tabs.TabPages.Add(TabAbonos());
+            tabs.TabPages.Add(TabCuentasCobrar());
+            tabs.TabPages.Add(TabProduccion());
             tabs.TabPages.Add(TabInventario());
+            tabs.TabPages.Add(TabPatronesVentas());
+            tabs.TabPages.Add(TabCompras());
             tabs.TabPages.Add(TabMoldes());
             tabs.TabPages.Add(TabRentabilidad());
+            tabs.TabPages.Add(TabPyL());     // P&L: Ventas vs Egresos
             tabs.TabPages.Add(TabFlujoCaja());
             tabs.TabPages.Add(TabLibroIVA());
             tabs.TabPages.Add(TabMermas());
             tabs.TabPages.Add(TabComparacion());
 
-            var footer = new Panel { Dock = DockStyle.Bottom, Height = 40, BackColor = Color.FromArgb(220, 220, 230) };
-            var btnCerrar = new Button { Text = "Cerrar", Size = new Size(90, 26), Location = new Point(760, 7), BackColor = Color.FromArgb(100, 100, 120), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
-            btnCerrar.FlatAppearance.BorderSize = 0; btnCerrar.Click += (s, e) => Close();
+            var footer = new Panel { Dock = DockStyle.Bottom, Height = 40,
+                BackColor = Color.FromArgb(220, 220, 230) };
+            var btnCerrar = new Button { Text = "Cerrar", Size = new Size(90, 26),
+                Location = new Point(860, 7), BackColor = Color.FromArgb(100, 100, 120),
+                ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
+            btnCerrar.FlatAppearance.BorderSize = 0;
+            btnCerrar.Click += (s, e) => Close();
             footer.Controls.Add(btnCerrar);
 
-            Controls.AddRange(new Control[] { tabs, hdr, footer });
+            
+            VentanaPrefs.Restaurar(this);
+            var _tp = new System.Windows.Forms.Timer { Interval = 800 };
+            _tp.Tick        += (s, e) => { _tp.Stop(); VentanaPrefs.Guardar(this); };
+            SizeChanged     += (s, e) => { _tp.Stop(); _tp.Start(); };
+            LocationChanged += (s, e) => { _tp.Stop(); _tp.Start(); };
+            FormClosed      += (s, e) => { _tp.Stop(); _tp.Dispose(); };
+
+Controls.AddRange(new Control[] { tabs, hdr, footer });
         }
 
+        // ══════════════════════════════════════════════════════════
+        //  RESUMEN (existente)
+        // ══════════════════════════════════════════════════════════
         private TabPage TabResumen()
         {
-            var tab = new TabPage("Resumen General");
-            var panel = new FlowLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(20), BackColor = Color.White };
+            var tab   = new TabPage("Resumen");
+            var panel = new FlowLayoutPanel { Dock = DockStyle.Fill,
+                Padding = new Padding(20), BackColor = Color.White };
 
-            var facturas    = DatabaseService.ObtenerFacturas();
-            var compras     = DatabaseService.ObtenerCompras();
-            var clientes    = DatabaseService.ObtenerClientes();
-            var proveedores = DatabaseService.ObtenerProveedores();
-            var inventario  = DatabaseService.ObtenerInventario();
-            var moldes      = DatabaseService.ObtenerMoldes();
-
-            decimal totalFact   = facturas.Sum(f => f.TotalF);
-            decimal totalCompra = compras.Sum(c => c.TotalC);
-
-            panel.Controls.Add(Card("Total Facturado",   $"{totalFact:C2}",    Color.FromArgb(40, 160, 80)));
-            panel.Controls.Add(Card("Total Compras",     $"{totalCompra:C2}",  Color.FromArgb(180, 60, 60)));
-            panel.Controls.Add(Card("Clientes",          clientes.Count.ToString(),    Color.FromArgb(60, 100, 180)));
-            panel.Controls.Add(Card("Proveedores",       proveedores.Count.ToString(), Color.FromArgb(160, 90, 20)));
-            panel.Controls.Add(Card("Productos",         inventario.Count.ToString(),  Color.FromArgb(30, 120, 80)));
-            panel.Controls.Add(Card("Bajo Minimo",       inventario.Count(i => i.Existencia < i.ExistenMin).ToString(), Color.FromArgb(200, 80, 0)));
-            panel.Controls.Add(Card("Moldes",            moldes.Count.ToString(),      Color.FromArgb(20, 100, 140)));
-            panel.Controls.Add(Card("Mant. Vencido",     moldes.Count(m => (DateTime.Today - m.FechaLastMant).Days > 180).ToString(), Color.FromArgb(180, 40, 60)));
-
+            // Cargar cards en placeholder mientras corre la query.
+            var lblCargando = new Label
+            {
+                Text = "Cargando resumen...",
+                Font = new Font("Segoe UI", 10f, FontStyle.Italic),
+                ForeColor = Color.FromArgb(100, 100, 120),
+                AutoSize = true, Margin = new Padding(8, 8, 8, 8)
+            };
+            panel.Controls.Add(lblCargando);
             tab.Controls.Add(panel);
+
+            // OPTIMIZACIÓN: una sola query (10 sub-queries SUM/COUNT) en
+            // lugar de traer 6 listas completas a memoria y agregar en LINQ.
+            tab.HandleCreated += async (s, e) =>
+            {
+                try
+                {
+                    var rsm = await EjecutarConCarga(
+                        () => DatabaseService.ObtenerResumenGlobal());
+                    panel.Controls.Remove(lblCargando);
+                    panel.Controls.Add(Card("Total Facturado",  rsm.TotalFact.ToString("C2"), Color.FromArgb(40, 160, 80)));
+                    panel.Controls.Add(Card("Total Compras",    rsm.TotalComp.ToString("C2"), Color.FromArgb(26, 74, 138)));
+                    panel.Controls.Add(Card("Clientes",         rsm.Clientes.ToString(),      Color.FromArgb(26, 74, 138)));
+                    panel.Controls.Add(Card("Proveedores",      rsm.Proveedores.ToString(),   Color.FromArgb(160, 90, 20)));
+                    panel.Controls.Add(Card("Productos",        rsm.Productos.ToString(),     Color.FromArgb(30, 120, 80)));
+                    panel.Controls.Add(Card("Bajo Minimo",      rsm.BajoMin.ToString(),       Color.FromArgb(200, 80, 0)));
+                    panel.Controls.Add(Card("Moldes",           rsm.Moldes.ToString(),        Color.FromArgb(20, 100, 140)));
+                    panel.Controls.Add(Card("Mant. Vencido",    rsm.MantVencido.ToString(),   Color.FromArgb(180, 40, 60)));
+                }
+                catch (Exception ex)
+                {
+                    lblCargando.Text = "Error al cargar: " + ex.Message;
+                    lblCargando.ForeColor = Color.FromArgb(180, 40, 40);
+                }
+            };
+
             return tab;
         }
 
-        private Panel Card(string titulo, string valor, Color color)
+        // ══════════════════════════════════════════════════════════
+        //  CLIENTES
+        // ══════════════════════════════════════════════════════════
+        private TabPage TabClientes()
         {
-            var p = new Panel { Size = new Size(200, 100), Margin = new Padding(8), BackColor = color };
-            p.Controls.Add(new Label { Text = titulo, Location = new Point(10, 10), AutoSize = true, ForeColor = Color.White, Font = new Font("Segoe UI", 9f) });
-            p.Controls.Add(new Label { Text = valor,  Location = new Point(10, 40), AutoSize = true, ForeColor = Color.White, Font = new Font("Segoe UI", 18f, FontStyle.Bold) });
-            return p;
+            var tab = new TabPage("Clientes");
+            var pnl = new Panel { Dock = DockStyle.Fill, BackColor = Color.White };
+
+            var bar      = new Panel { Dock = DockStyle.Top, Height = 44,
+                BackColor = Color.FromArgb(228, 242, 232) };
+            var txtBuscar = new TextBox { Location = new Point(10, 10), Size = new Size(200, 26),
+                PlaceholderText = "Buscar..." };
+            var btnPdf   = BtnAccion("Exportar PDF", Color.FromArgb(180, 60, 30), new Point(220, 8));
+            bar.Controls.AddRange(new Control[] { txtBuscar, btnPdf });
+
+            var dgv   = Grid(Color.FromArgb(26, 74, 138));
+            var todos = DatabaseService.ObtenerClientes();
+
+            void Cargar(string filtro = "")
+            {
+                var lista = string.IsNullOrWhiteSpace(filtro) ? todos
+                    : todos.Where(c => BusquedaHelper.ContieneFlexibleEnAlguno(filtro,
+                            c.Codigo, c.Descripcion, c.CiRif, c.Telefono, c.Ciudad)).ToList();
+                dgv.DataSource = lista.Select(c => new {
+                    c.Codigo, c.Descripcion, c.Ciudad, c.Estado,
+                    c.Telefono, c.CiRif,
+                    Credito = c.Credito.ToString("C2"),
+                    AFavor  = c.AFavor.ToString("C2")
+                }).ToList();
+            }
+            Cargar();
+
+            txtBuscar.TextChanged += (s, e) => Cargar(txtBuscar.Text.ToLower());
+            btnPdf.Click += (s, e) =>
+            {
+                try
+                {
+                    var pdf = PdfService.GenerarReporteClientes(DatabaseService.ObtenerClientes());
+                    PdfService.GuardarYAbrir(pdf, "Clientes_" + DateTime.Today.ToString("yyyy-MM-dd") + ".pdf");
+                }
+                catch (Exception ex) { MsgErr(ex); }
+            };
+
+            pnl.Controls.Add(dgv);
+            pnl.Controls.Add(bar);
+            tab.Controls.Add(pnl);
+            return tab;
         }
 
-        private TabPage TabFacturas()
+        // ══════════════════════════════════════════════════════════
+        //  VENTAS
+        // ══════════════════════════════════════════════════════════
+        private TabPage TabVentas()
         {
-            var tab = new TabPage("Facturas");
-            var dgv = Grid(Color.FromArgb(180, 60, 60));
-            dgv.DataSource = DatabaseService.ObtenerFacturas().Select(f => new {
-                f.NumeroF, Fecha=f.Fecha.ToShortDateString(), Cliente=f.Codigo,
-                f.FormaDePago, IVA=f.IvaF.ToString("C2"), Total=f.TotalF.ToString("C2")
+            var tab = new TabPage("Ventas");
+            var pnl = new Panel { Dock = DockStyle.Fill, BackColor = Color.White };
+
+            var bar = new Panel { Dock = DockStyle.Top, Height = 48,
+                BackColor = Color.FromArgb(228, 242, 232) };
+            int fx = 8;
+            bar.Controls.Add(Lbl("Desde:", fx, 14)); fx += 52;
+            var dtpD = new DateTimePicker { Location = new Point(fx, 10), Size = new Size(110, 26),
+                Format = DateTimePickerFormat.Short, Value = DateTime.Today.AddMonths(-1) };
+            bar.Controls.Add(dtpD); fx += 118;
+            bar.Controls.Add(Lbl("Hasta:", fx, 14)); fx += 50;
+            var dtpH = new DateTimePicker { Location = new Point(fx, 10), Size = new Size(110, 26),
+                Format = DateTimePickerFormat.Short, Value = DateTime.Today };
+            bar.Controls.Add(dtpH); fx += 118;
+            bar.Controls.Add(Lbl("Producto:", fx, 14)); fx += 68;
+            var cmbProd = new ComboBox { Location = new Point(fx, 10), Size = new Size(180, 26),
+                DropDownStyle = ComboBoxStyle.DropDownList };
+            cmbProd.Items.Add("Todos");
+            DatabaseService.ObtenerInventario()
+                .ForEach(i => cmbProd.Items.Add(i.Codigo + " — " + i.Descripcion));
+            cmbProd.SelectedIndex = 0;
+            bar.Controls.Add(cmbProd); fx += 188;
+
+            var btnGeneral  = BtnAccion("General",  Color.FromArgb(30, 100, 60),  new Point(fx, 8)); fx += 94;
+            var btnAgrupado = BtnAccion("Agrupado", Color.FromArgb(22, 55, 120),  new Point(fx, 8)); fx += 94;
+            var btnGrafico  = BtnAccion("Grafico",  Color.FromArgb(100, 60, 160), new Point(fx, 8)); fx += 94;
+            var btnPdf      = BtnAccion("PDF",      Color.FromArgb(180, 60, 30),  new Point(fx, 8)); fx += 94;
+            var btnExcel    = BtnAccion("Excel",    Color.FromArgb(30, 130, 60),  new Point(fx, 8));
+            bar.Controls.AddRange(new Control[] { btnGeneral, btnAgrupado, btnGrafico, btnPdf, btnExcel });
+
+            var pnlContenido = new Panel { Dock = DockStyle.Fill, BackColor = Color.White };
+            pnl.Controls.Add(pnlContenido);
+            pnl.Controls.Add(bar);
+
+            var dgv  = Grid(Color.FromArgb(30, 100, 60)); dgv.Dock = DockStyle.Fill;
+            var pnlGraf = new Panel { Dock = DockStyle.Fill, BackColor = Color.White, Visible = false };
+            pnlContenido.Controls.Add(dgv);
+            pnlContenido.Controls.Add(pnlGraf);
+
+            // Helper local: codigo del producto seleccionado o null
+            string CodProd() => cmbProd.SelectedIndex <= 0 ? null
+                : cmbProd.SelectedItem.ToString().Split('—')[0].Trim();
+
+            // ── OPTIMIZADO: 1 sola query SQL en lugar de N+1 ────────────────
+            //   Antes: ObtenerFacturas() + ObtenerDetalles por cada factura
+            //   = ~10.000 queries para un mes de ventas → "(No responde)".
+            //   Ahora: una sola query JOIN con filtro de fecha en SQL.
+            //   Adapter convierte el DTO plano al modelo legacy LineaVentaReporte
+            //   para no romper PdfService.GenerarReporteVentas / Excel.
+            List<LineaVentaReporte> ObtenerLineasSync()
+            {
+                var raw = DatabaseService.ObtenerLineasVentaPorPeriodo(
+                    dtpD.Value.Date, dtpH.Value.Date, CodProd());
+                return raw.Select(l => new LineaVentaReporte
+                {
+                    NumFactura   = l.NumeroF,
+                    Fecha        = l.Fecha,
+                    Codigo       = l.Codigo,
+                    Descripcion  = l.Descripcion,
+                    Cantidad     = l.Cantidad,
+                    PrecioUnit   = l.PrecioUnit,
+                    Total        = l.Subtotal,
+                    TasaBCV      = l.TasaBCV,
+                    TasaParalelo = l.TasaParalelo
+                }).ToList();
+            }
+
+            // Wrapper async + WaitCursor + bloqueo de botones para que el UI
+            // no se congele ("(No responde)") durante la query.
+            async Task<List<LineaVentaReporte>> ObtenerLineasAsync()
+            {
+                Cursor.Current = Cursors.WaitCursor;
+                this.UseWaitCursor = true;
+                btnGeneral.Enabled = btnAgrupado.Enabled = btnGrafico.Enabled =
+                    btnPdf.Enabled = btnExcel.Enabled = false;
+                try
+                {
+                    return await Task.Run(() => ObtenerLineasSync());
+                }
+                finally
+                {
+                    this.UseWaitCursor = false;
+                    Cursor.Current = Cursors.Default;
+                    btnGeneral.Enabled = btnAgrupado.Enabled = btnGrafico.Enabled =
+                        btnPdf.Enabled = btnExcel.Enabled = true;
+                }
+            }
+
+            List<(string Nombre, decimal Valor)> _grafDatos = new();
+
+            btnGeneral.Click += async (s, e) =>
+            {
+                try
+                {
+                    var lineas = await ObtenerLineasAsync();
+                    pnlGraf.Visible = false; dgv.Visible = true;
+                    dgv.DataSource = lineas.Select(l => new {
+                        Factura     = l.NumFactura,
+                        Fecha       = l.Fecha.ToString("dd/MM/yyyy"),
+                        l.Codigo, l.Descripcion,
+                        Cantidad    = l.Cantidad.ToString("N2"),
+                        Precio      = l.PrecioUnit.ToString("C2"),
+                        Total       = l.Total.ToString("C2")
+                    }).ToList();
+                }
+                catch (Exception ex) { MsgErr(ex); }
+            };
+
+            btnAgrupado.Click += async (s, e) =>
+            {
+                try
+                {
+                    var lineas = await ObtenerLineasAsync();
+                    pnlGraf.Visible = false; dgv.Visible = true;
+                    dgv.DataSource = lineas
+                        .GroupBy(l => new { l.Codigo, l.Descripcion })
+                        .Select(g => new {
+                            g.Key.Codigo, g.Key.Descripcion,
+                            TotalUnidades = g.Sum(x => x.Cantidad).ToString("N2"),
+                            TotalVendido  = g.Sum(x => x.Total).ToString("C2")
+                        }).ToList();
+                }
+                catch (Exception ex) { MsgErr(ex); }
+            };
+
+            btnGrafico.Click += async (s, e) =>
+            {
+                try
+                {
+                    var lineas = await ObtenerLineasAsync();
+                    dgv.Visible = false; pnlGraf.Visible = true;
+                    _grafDatos = lineas
+                        .GroupBy(l => l.Descripcion)
+                        .Select(g => (g.Key, g.Sum(x => x.Total)))
+                        .OrderByDescending(x => x.Item2)
+                        .Take(10).ToList();
+                    pnlGraf.Invalidate();
+                }
+                catch (Exception ex) { MsgErr(ex); }
+            };
+
+            pnlGraf.Paint += (s, e) => PintarTorta(e.Graphics, _grafDatos, pnlGraf.Size);
+
+            btnPdf.Click += async (s, e) =>
+            {
+                try
+                {
+                    var lineas = await ObtenerLineasAsync();
+                    if (lineas.Count == 0)
+                    {
+                        MessageBox.Show("No hay datos para el período seleccionado.",
+                            "Sin datos", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        return;
+                    }
+                    var pdf = await Task.Run(() => PdfService.GenerarReporteVentas(
+                        lineas, dtpD.Value, dtpH.Value, CodProd()));
+                    PdfService.GuardarYAbrir(pdf, "Ventas_" + DateTime.Today.ToString("yyyy-MM-dd") + ".pdf");
+                }
+                catch (Exception ex) { MsgErr(ex); }
+            };
+
+            btnExcel.Click += async (s, e) =>
+            {
+                try
+                {
+                    var lineas = await ObtenerLineasAsync();
+                    if (lineas.Count == 0)
+                    {
+                        MessageBox.Show("No hay datos para exportar en el período seleccionado.",
+                            "Sin datos", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        return;
+                    }
+                    await Task.Run(() => ExportarVentasExcel(lineas, dtpD.Value, dtpH.Value));
+                }
+                catch (Exception ex) { MsgErr(ex); }
+            };
+
+            tab.Controls.Add(pnl);
+            return tab;
+        }
+
+        // ══════════════════════════════════════════════════════════
+        //  VENTAS POR CLIENTE
+        // ══════════════════════════════════════════════════════════
+        private TabPage TabVentasCliente()
+        {
+            var tab = new TabPage("Ventas x Cliente");
+            var pnl = new Panel { Dock = DockStyle.Fill, BackColor = Color.White };
+
+            // Construir barra de filtros directamente (sin out params en lambdas)
+            var bar = new Panel { Dock = DockStyle.Top, Height = 48,
+                BackColor = Color.FromArgb(228, 242, 232) };
+            var dtpD = DTP(bar, "Desde:", 8, DateTime.Today.AddMonths(-1), out int fx1);
+            var dtpH = DTP(bar, "Hasta:", fx1, DateTime.Today, out int fx2);
+            var cmbCliente = Cmb(bar, "Cliente:", fx2, out int fx3);
+            var btnVer = BtnAccion("Ver", Color.FromArgb(30, 100, 60),  new Point(fx3, 8)); fx3 += 94;
+            var btnPdf = BtnAccion("PDF", Color.FromArgb(180, 60, 30),  new Point(fx3, 8));
+            bar.Controls.AddRange(new Control[] { btnVer, btnPdf });
+
+            var dgv = Grid(Color.FromArgb(30, 100, 60)); dgv.Dock = DockStyle.Fill;
+
+            // OPTIMIZADO: filtrado en SQL + async + WaitCursor.
+            string CodCli() => cmbCliente.SelectedIndex <= 0 ? null
+                : cmbCliente.SelectedItem.ToString().Split('—')[0].Trim();
+
+            btnVer.Click += async (s, e) =>
+            {
+                try
+                {
+                    var facturas = await EjecutarConCarga(
+                        () => DatabaseService.ObtenerFacturasPorPeriodo(
+                            dtpD.Value.Date, dtpH.Value.Date, CodCli()),
+                        btnVer, btnPdf);
+                    dgv.DataSource = facturas.Select(f => new {
+                        f.NumeroF, Fecha = f.Fecha.ToString("dd/MM/yyyy"),
+                        Cliente = f.Codigo, f.FormaDePago,
+                        IVA = f.IvaF.ToString("C2"), Total = f.TotalF.ToString("C2")
+                    }).ToList();
+                }
+                catch (Exception ex) { MsgErr(ex); }
+            };
+            btnPdf.Click += async (s, e) =>
+            {
+                try
+                {
+                    string cod = CodCli();
+                    var facturas = await EjecutarConCarga(
+                        () => DatabaseService.ObtenerFacturasPorPeriodo(
+                            dtpD.Value.Date, dtpH.Value.Date, cod),
+                        btnVer, btnPdf);
+                    var pdf = await Task.Run(() => PdfService.GenerarReporteVentasPorCliente(
+                        facturas, dtpD.Value, dtpH.Value, cod));
+                    PdfService.GuardarYAbrir(pdf, "VentasCliente_" + DateTime.Today.ToString("yyyy-MM-dd") + ".pdf");
+                }
+                catch (Exception ex) { MsgErr(ex); }
+            };
+
+            pnl.Controls.Add(dgv);
+            pnl.Controls.Add(bar);
+            tab.Controls.Add(pnl);
+            return tab;
+        }
+
+        // ══════════════════════════════════════════════════════════
+        //  ABONOS
+        // ══════════════════════════════════════════════════════════
+        private TabPage TabAbonos()
+        {
+            var tab = new TabPage("Abonos");
+            var pnl = new Panel { Dock = DockStyle.Fill, BackColor = Color.White };
+
+            var bar = new Panel { Dock = DockStyle.Top, Height = 48,
+                BackColor = Color.FromArgb(228, 242, 232) };
+            var dtpD       = DTP(bar, "Desde:", 8, DateTime.Today.AddMonths(-1), out int fx1);
+            var dtpH       = DTP(bar, "Hasta:", fx1, DateTime.Today, out int fx2);
+            var cmbCliente = Cmb(bar, "Cliente:", fx2, out int fx3);
+            var btnVer     = BtnAccion("Ver", Color.FromArgb(40, 140, 140), new Point(fx3, 8)); fx3 += 94;
+            var btnPdf     = BtnAccion("PDF", Color.FromArgb(180, 60, 30),  new Point(fx3, 8));
+            bar.Controls.AddRange(new Control[] { btnVer, btnPdf });
+
+            var dgv = Grid(Color.FromArgb(40, 140, 140)); dgv.Dock = DockStyle.Fill;
+
+            // OPTIMIZADO: filtrado en SQL + async + WaitCursor.
+            string CodCli() => cmbCliente.SelectedIndex <= 0 ? null
+                : cmbCliente.SelectedItem.ToString().Split('—')[0].Trim();
+
+            btnVer.Click += async (s, e) =>
+            {
+                try
+                {
+                    var abonos = await EjecutarConCarga(
+                        () => DatabaseService.ObtenerAbonosPorPeriodo(
+                            dtpD.Value.Date, dtpH.Value.Date, CodCli()),
+                        btnVer, btnPdf);
+                    dgv.DataSource = abonos.Select(a => new {
+                        a.NumAbono, a.NumeroF,
+                        Fecha   = a.Fecha.ToString("dd/MM/yyyy"),
+                        Cliente = a.Cliente,
+                        Monto   = a.Monto.ToString("C2")
+                    }).ToList();
+                }
+                catch (Exception ex) { MsgErr(ex); }
+            };
+            btnPdf.Click += async (s, e) =>
+            {
+                try
+                {
+                    string cod = CodCli();
+                    var abonos = await EjecutarConCarga(
+                        () => DatabaseService.ObtenerAbonosPorPeriodo(
+                            dtpD.Value.Date, dtpH.Value.Date, cod),
+                        btnVer, btnPdf);
+                    var pdf = await Task.Run(() => PdfService.GenerarReporteAbonos(
+                        abonos, dtpD.Value, dtpH.Value, cod));
+                    PdfService.GuardarYAbrir(pdf, "Abonos_" + DateTime.Today.ToString("yyyy-MM-dd") + ".pdf");
+                }
+                catch (Exception ex) { MsgErr(ex); }
+            };
+
+            pnl.Controls.Add(dgv);
+            pnl.Controls.Add(bar);
+            tab.Controls.Add(pnl);
+            return tab;
+        }
+
+        // ══════════════════════════════════════════════════════════
+        //  CUENTAS POR COBRAR
+        // ══════════════════════════════════════════════════════════
+        private TabPage TabCuentasCobrar()
+        {
+            var tab = new TabPage("Ctas. x Cobrar");
+            var pnl = new Panel { Dock = DockStyle.Fill, BackColor = Color.White };
+
+            var bar = new Panel { Dock = DockStyle.Top, Height = 48,
+                BackColor = Color.FromArgb(228, 242, 232) };
+            bar.Controls.Add(Lbl("Cliente:", 8, 14));
+            var cmbCliente = new ComboBox { Location = new Point(68, 10), Size = new Size(260, 26),
+                DropDownStyle = ComboBoxStyle.DropDownList };
+            cmbCliente.Items.Add("Todos los clientes");
+            DatabaseService.ObtenerClientes()
+                .ForEach(c => cmbCliente.Items.Add(c.Codigo + " — " + c.Descripcion));
+            cmbCliente.SelectedIndex = 0;
+            bar.Controls.Add(cmbCliente);
+
+            var chkPend = new CheckBox { Text = "Solo pendientes", Location = new Point(340, 13),
+                AutoSize = true, Font = new Font("Segoe UI", 9f), Checked = true };
+            bar.Controls.Add(chkPend);
+
+            var btnVer = BtnAccion("Ver", Color.FromArgb(40, 140, 140), new Point(480, 8));
+            var btnPdf = BtnAccion("PDF", Color.FromArgb(180, 60, 30),  new Point(576, 8));
+            bar.Controls.AddRange(new Control[] { btnVer, btnPdf });
+
+            var dgv = Grid(Color.FromArgb(40, 140, 140)); dgv.Dock = DockStyle.Fill;
+
+            // OPTIMIZADO: filtrado en SQL + async + WaitCursor.
+            string CodCli() => cmbCliente.SelectedIndex <= 0 ? null
+                : cmbCliente.SelectedItem.ToString().Split('—')[0].Trim();
+
+            btnVer.Click += async (s, e) =>
+            {
+                try
+                {
+                    var cuentas = await EjecutarConCarga(
+                        () => DatabaseService.ObtenerCuentasFiltrado(CodCli(), chkPend.Checked),
+                        btnVer, btnPdf);
+                    dgv.DataSource = cuentas.Select(c => new {
+                        c.Id, c.Cliente, c.Concepto,
+                        Monto  = c.Monto.ToString("C2"),
+                        Pagado = c.Pagado.ToString("C2"),
+                        Saldo  = c.Saldo.ToString("C2"),
+                        Vence  = c.FechaVence.ToString("dd/MM/yyyy"),
+                        c.Estado
+                    }).ToList();
+                }
+                catch (Exception ex) { MsgErr(ex); }
+            };
+            btnPdf.Click += async (s, e) =>
+            {
+                try
+                {
+                    string cod = CodCli();
+                    var cuentas = await EjecutarConCarga(
+                        () => DatabaseService.ObtenerCuentasFiltrado(cod, chkPend.Checked),
+                        btnVer, btnPdf);
+                    var pdf = await Task.Run(() => PdfService.GenerarReporteCuentasCobrar(cuentas, cod));
+                    PdfService.GuardarYAbrir(pdf, "CuentasCobrar_" + DateTime.Today.ToString("yyyy-MM-dd") + ".pdf");
+                }
+                catch (Exception ex) { MsgErr(ex); }
+            };
+
+            pnl.Controls.Add(dgv);
+            pnl.Controls.Add(bar);
+            tab.Controls.Add(pnl);
+            return tab;
+        }
+
+        // ══════════════════════════════════════════════════════════
+        //  PRODUCCION
+        // ══════════════════════════════════════════════════════════
+        private TabPage TabProduccion()
+        {
+            var tab = new TabPage("Produccion");
+            var pnl = new Panel { Dock = DockStyle.Fill, BackColor = Color.White };
+
+            var bar = new Panel { Dock = DockStyle.Top, Height = 48,
+                BackColor = Color.FromArgb(228, 242, 232) };
+            int fx = 8;
+            bar.Controls.Add(Lbl("Desde:", fx, 14)); fx += 52;
+            var dtpD = new DateTimePicker { Location = new Point(fx, 10), Size = new Size(110, 26),
+                Format = DateTimePickerFormat.Short, Value = DateTime.Today.AddMonths(-1) };
+            bar.Controls.Add(dtpD); fx += 118;
+            bar.Controls.Add(Lbl("Hasta:", fx, 14)); fx += 50;
+            var dtpH = new DateTimePicker { Location = new Point(fx, 10), Size = new Size(110, 26),
+                Format = DateTimePickerFormat.Short, Value = DateTime.Today };
+            bar.Controls.Add(dtpH); fx += 118;
+            bar.Controls.Add(Lbl("Producto:", fx, 14)); fx += 68;
+            var cmbProd = new ComboBox { Location = new Point(fx, 10), Size = new Size(180, 26),
+                DropDownStyle = ComboBoxStyle.DropDownList };
+            cmbProd.Items.Add("Todos");
+            DatabaseService.ObtenerInventario()
+                .ForEach(i => cmbProd.Items.Add(i.Codigo + " — " + i.Descripcion));
+            cmbProd.SelectedIndex = 0;
+            bar.Controls.Add(cmbProd); fx += 188;
+
+            var chkDet = new CheckBox { Text = "Detallado", Location = new Point(fx, 13),
+                AutoSize = true, Font = new Font("Segoe UI", 9f), Checked = true };
+            bar.Controls.Add(chkDet); fx += 90;
+
+            var btnVer = BtnAccion("Ver", Color.FromArgb(20, 120, 160), new Point(fx, 8)); fx += 94;
+            var btnPdf = BtnAccion("PDF", Color.FromArgb(180, 60, 30),  new Point(fx, 8));
+            bar.Controls.AddRange(new Control[] { btnVer, btnPdf });
+
+            var dgv = Grid(Color.FromArgb(20, 120, 160)); dgv.Dock = DockStyle.Fill;
+
+            // OPTIMIZADO: la query ya filtra por SQL; añadimos async + WaitCursor.
+            string CodProd() => cmbProd.SelectedIndex <= 0 ? null
+                : cmbProd.SelectedItem.ToString().Split('—')[0].Trim();
+
+            btnVer.Click += async (s, e) =>
+            {
+                try
+                {
+                    string cod = CodProd();
+                    var datos = await EjecutarConCarga(
+                        () => DatabaseService.ObtenerProduccionDiariaRango(dtpD.Value, dtpH.Value)
+                              .Where(p => cod == null || p.Codigo == cod).ToList(),
+                        btnVer, btnPdf);
+
+                    if (chkDet.Checked)
+                        dgv.DataSource = datos.Select(p => new {
+                            Fecha      = p.Fecha.ToString("dd/MM/yyyy"),
+                            p.Codigo, p.Descripcion,
+                            Cantidad   = p.Cantidad.ToString("N2"),
+                            CostoUnit  = p.CostoUnitario.ToString("C2"),
+                            CostoTotal = p.CostoTotal.ToString("C2"),
+                            p.Observacion
+                        }).ToList();
+                    else
+                        dgv.DataSource = datos
+                            .GroupBy(p => new { p.Codigo, p.Descripcion })
+                            .Select(g => new {
+                                g.Key.Codigo, g.Key.Descripcion,
+                                TotalUnidades = g.Sum(x => x.Cantidad).ToString("N2"),
+                                CostoTotal    = g.Sum(x => x.CostoTotal).ToString("C2")
+                            }).ToList();
+                }
+                catch (Exception ex) { MsgErr(ex); }
+            };
+            btnPdf.Click += async (s, e) =>
+            {
+                try
+                {
+                    string cod = CodProd();
+                    var datos = await EjecutarConCarga(
+                        () => DatabaseService.ObtenerProduccionDiariaRango(dtpD.Value, dtpH.Value)
+                              .Where(p => cod == null || p.Codigo == cod).ToList(),
+                        btnVer, btnPdf);
+                    var pdf = await Task.Run(() => PdfService.GenerarReporteProduccion(
+                        datos, dtpD.Value, dtpH.Value, cod, chkDet.Checked));
+                    PdfService.GuardarYAbrir(pdf, "Produccion_" + DateTime.Today.ToString("yyyy-MM-dd") + ".pdf");
+                }
+                catch (Exception ex) { MsgErr(ex); }
+            };
+
+            pnl.Controls.Add(dgv);
+            pnl.Controls.Add(bar);
+            tab.Controls.Add(pnl);
+            return tab;
+        }
+
+        // ══════════════════════════════════════════════════════════
+        //  INVENTARIO
+        // ══════════════════════════════════════════════════════════
+        private TabPage TabInventario()
+        {
+            var tab = new TabPage("Inventario");
+            var pnl = new Panel { Dock = DockStyle.Fill, BackColor = Color.White };
+
+            var bar    = new Panel { Dock = DockStyle.Top, Height = 44,
+                BackColor = Color.FromArgb(228, 242, 232) };
+            var btnPdf = BtnAccion("Exportar PDF", Color.FromArgb(180, 60, 30), new Point(8, 8));
+            bar.Controls.Add(btnPdf);
+
+            var dgv   = Grid(Color.FromArgb(30, 100, 60)); dgv.Dock = DockStyle.Fill;
+            var lista = DatabaseService.ObtenerInventario();
+            dgv.DataSource = lista.Select(i => new {
+                i.Codigo, i.Descripcion, i.Departamento,
+                Costo  = i.CostoActual.ToString("C2"),
+                Precio = i.Precio.ToString("C2"),
+                i.Existencia, i.ExistenMin, i.ExistenMax
             }).ToList();
-            tab.Controls.Add(dgv);
-            return tab;
-        }
-        private TabPage TabMermas()
-        {
-            var tab = new TabPage("Mermas");
-            var pnl = new Panel { Dock = DockStyle.Fill, BackColor = Color.White };
-
-            var btnAbrir = new Button
+            dgv.DataBindingComplete += (s, e) =>
             {
-                Text = "Abrir Control de Mermas y Desperdicios",
-                Size = new Size(340, 44),
-                Font = new Font("Segoe UI", 10f, FontStyle.Bold),
-                BackColor = Color.FromArgb(100, 50, 10),
-                ForeColor = Color.White,
-                FlatStyle = FlatStyle.Flat,
-                Cursor = Cursors.Hand
+                for (int idx = 0; idx < dgv.Rows.Count && idx < lista.Count; idx++)
+                {
+                    if (lista[idx].Existencia == 0)
+                        dgv.Rows[idx].DefaultCellStyle.BackColor = Color.FromArgb(255, 210, 210);
+                    else if (lista[idx].Existencia < lista[idx].ExistenMin)
+                        dgv.Rows[idx].DefaultCellStyle.BackColor = Color.FromArgb(255, 245, 190);
+                }
             };
-            btnAbrir.FlatAppearance.BorderSize = 0;
-            btnAbrir.Click += (s, e) => new FrmMermas().ShowDialog();
 
-            pnl.Controls.Add(btnAbrir);
-            pnl.Resize += (s, e) => btnAbrir.Location = new System.Drawing.Point(
-                (pnl.Width - btnAbrir.Width) / 2,
-                (pnl.Height - btnAbrir.Height) / 2);
+            btnPdf.Click += (s, e) =>
+            {
+                try
+                {
+                    var pdf = PdfService.GenerarReporteInventario(lista);
+                    PdfService.GuardarYAbrir(pdf, "Inventario_" + DateTime.Today.ToString("yyyy-MM-dd") + ".pdf");
+                }
+                catch (Exception ex) { MsgErr(ex); }
+            };
 
+            pnl.Controls.Add(dgv);
+            pnl.Controls.Add(bar);
             tab.Controls.Add(pnl);
             return tab;
         }
 
-        private TabPage TabComparacion()
+        // ══════════════════════════════════════════════════════════
+        //  PATRONES DE VENTAS
+        // ══════════════════════════════════════════════════════════
+        private TabPage TabPatronesVentas()
         {
-            var tab = new TabPage("Comparacion");
+            var tab = new TabPage("Patrones Ventas");
             var pnl = new Panel { Dock = DockStyle.Fill, BackColor = Color.White };
 
-            var btnAbrir = new Button
+            var bar = new Panel { Dock = DockStyle.Top, Height = 48,
+                BackColor = Color.FromArgb(228, 242, 232) };
+            bar.Controls.Add(Lbl("Anos (ej: 2022,2023,2024):", 8, 14));
+            var txtAnos = new TextBox { Location = new Point(210, 10), Size = new Size(200, 26),
+                Text = (DateTime.Today.Year-2) + "," + (DateTime.Today.Year-1) + "," + DateTime.Today.Year };
+            bar.Controls.Add(txtAnos);
+
+            var btnAnalizar = BtnAccion("Analizar", Color.FromArgb(100, 60, 160), new Point(422, 8));
+            var btnPdf      = BtnAccion("PDF",      Color.FromArgb(180, 60, 30),  new Point(518, 8));
+            bar.Controls.AddRange(new Control[] { btnAnalizar, btnPdf });
+
+            var pnlGraf = new Panel { Dock = DockStyle.Top, Height = 260, BackColor = Color.White };
+            var dgv     = Grid(Color.FromArgb(100, 60, 160)); dgv.Dock = DockStyle.Fill;
+
+            List<(int Ano, int Mes, decimal Total)> _datos = new();
+
+            pnlGraf.Paint += (s, e) => PintarLineasAnuales(e.Graphics, _datos, pnlGraf.Size);
+
+            // OPTIMIZADO: agregacion (SUM, GROUP BY ano/mes) hecha en SQL.
+            // Antes: ObtenerFacturas trae N filas, LINQ groupby en C#.
+            // Ahora: SQLite agrega y devuelve directamente 12*N filas (max 36
+            // para 3 anos), todo el calculo en motor relacional.
+            int[] ParsearAnos() => txtAnos.Text.Split(',')
+                .Select(a => int.TryParse(a.Trim(), out int v) ? v : 0)
+                .Where(a => a > 0).ToArray();
+
+            async Task AnalizarAsync()
             {
-                Text      = "Abrir Comparacion de Periodos",
-                Size      = new Size(300, 44),
-                Font      = new Font("Segoe UI", 10f, FontStyle.Bold),
-                BackColor = Color.FromArgb(50, 50, 120),
-                ForeColor = Color.White,
-                FlatStyle = FlatStyle.Flat,
-                Cursor    = Cursors.Hand
+                var anos = ParsearAnos();
+                if (anos.Length == 0) return;
+
+                _datos = await EjecutarConCarga(
+                    () => DatabaseService.ObtenerVentasMensualesPorAnos(anos),
+                    btnAnalizar, btnPdf);
+                pnlGraf.Invalidate();
+
+                dgv.DataSource = _datos.GroupBy(d => d.Ano).Select(g =>
+                {
+                    decimal[] meses = Enumerable.Range(1, 12)
+                        .Select(m => g.FirstOrDefault(x => x.Mes == m).Total).ToArray();
+                    return new {
+                        Ano = g.Key,
+                        Ene=meses[0].ToString("C0"), Feb=meses[1].ToString("C0"),
+                        Mar=meses[2].ToString("C0"), Abr=meses[3].ToString("C0"),
+                        May=meses[4].ToString("C0"), Jun=meses[5].ToString("C0"),
+                        Jul=meses[6].ToString("C0"), Ago=meses[7].ToString("C0"),
+                        Sep=meses[8].ToString("C0"), Oct=meses[9].ToString("C0"),
+                        Nov=meses[10].ToString("C0"),Dic=meses[11].ToString("C0"),
+                        Total=g.Sum(x=>x.Total).ToString("C0")
+                    };
+                }).ToList();
+            }
+
+            btnAnalizar.Click += async (s, e) =>
+            {
+                try { await AnalizarAsync(); }
+                catch (Exception ex) { MsgErr(ex); }
             };
-            btnAbrir.FlatAppearance.BorderSize = 0;
-            btnAbrir.Click += (s, e) => new FrmComparacion().ShowDialog();
+            btnPdf.Click += async (s, e) =>
+            {
+                try
+                {
+                    if (_datos.Count == 0) await AnalizarAsync();
+                    var pdf = await Task.Run(() =>
+                        PdfService.GenerarReportePatronesVentas(_datos, txtAnos.Text));
+                    PdfService.GuardarYAbrir(pdf, "PatronesVentas_" + DateTime.Today.ToString("yyyy-MM-dd") + ".pdf");
+                }
+                catch (Exception ex) { MsgErr(ex); }
+            };
 
-            pnl.Controls.Add(btnAbrir);
-            pnl.Resize += (s, e) => btnAbrir.Location = new System.Drawing.Point(
-                (pnl.Width  - btnAbrir.Width)  / 2,
-                (pnl.Height - btnAbrir.Height) / 2);
-
+            pnl.Controls.Add(dgv);
+            pnl.Controls.Add(pnlGraf);
+            pnl.Controls.Add(bar);
             tab.Controls.Add(pnl);
             return tab;
         }
 
+        // ══════════════════════════════════════════════════════════
+        //  TABS EXISTENTES
+        // ══════════════════════════════════════════════════════════
         private TabPage TabCompras()
         {
             var tab = new TabPage("Compras");
             var dgv = Grid(Color.FromArgb(100, 50, 160));
             dgv.DataSource = DatabaseService.ObtenerCompras().Select(c => new {
                 c.CompraN, Fecha=c.FechaC.ToShortDateString(), Proveedor=c.CodigoP,
-                c.FormaDePago, Total=c.TotalC.ToString("C2")
-            }).ToList();
-            tab.Controls.Add(dgv);
-            return tab;
-        }
-
-        private TabPage TabInventario()
-        {
-            var tab = new TabPage("Inventario");
-            var dgv = Grid(Color.FromArgb(30, 100, 60));
-            var lista = DatabaseService.ObtenerInventario();
-            dgv.DataSource = lista.Select(i => new {
-                i.Codigo, i.Descripcion, i.Departamento,
-                Costo=i.CostoActual.ToString("C2"), Precio=i.Precio.ToString("C2"),
-                i.Existencia, i.ExistenMin, i.ExistenMax
-            }).ToList();
-            dgv.DataBindingComplete += (s, e) =>
-            {
-                for (int idx = 0; idx < dgv.Rows.Count; idx++)
-                {
-                    var item = lista[idx];
-                    if (item.Existencia == 0)         dgv.Rows[idx].DefaultCellStyle.BackColor = Color.FromArgb(255, 210, 210);
-                    else if (item.Existencia < item.ExistenMin) dgv.Rows[idx].DefaultCellStyle.BackColor = Color.FromArgb(255, 245, 190);
-                }
-            };
+                c.FormaDePago, Total=c.TotalC.ToString("C2") }).ToList();
             tab.Controls.Add(dgv);
             return tab;
         }
@@ -183,30 +811,9 @@ namespace SistemaGestion
             dgv.DataSource = DatabaseService.ObtenerMoldes().Select(m => new {
                 m.CodigoMold, m.Descripcion, m.ModeloQfabrica,
                 UltMant = m.FechaLastMant.ToShortDateString(),
-                Dias = (DateTime.Today - m.FechaLastMant).Days,
-                m.CantMatXunid
-            }).ToList();
+                Dias    = (DateTime.Today - m.FechaLastMant).Days,
+                m.CantMatXunid }).ToList();
             tab.Controls.Add(dgv);
-            return tab;
-        }
-
-        private TabPage TabFlujoCaja()
-        {
-            var tab = new TabPage("Flujo de Caja");
-            var pnl = new Panel { Dock = DockStyle.Fill, BackColor = Color.White };
-            var btnAbrir = new Button
-            {
-                Text = "Abrir proyeccion de flujo de caja 30/60/90 dias",
-                Size = new Size(360, 44), Font = new Font("Segoe UI", 10f, FontStyle.Bold),
-                BackColor = Color.FromArgb(20, 70, 130), ForeColor = Color.White,
-                FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand
-            };
-            btnAbrir.FlatAppearance.BorderSize = 0;
-            btnAbrir.Click += (s, e) => new FrmFlujoCaja().ShowDialog();
-            pnl.Controls.Add(btnAbrir);
-            pnl.Resize += (s, e) => btnAbrir.Location = new System.Drawing.Point(
-                (pnl.Width - btnAbrir.Width) / 2, (pnl.Height - btnAbrir.Height) / 2);
-            tab.Controls.Add(pnl);
             return tab;
         }
 
@@ -214,121 +821,737 @@ namespace SistemaGestion
         {
             var tab = new TabPage("Rentabilidad");
             var pnl = new Panel { Dock = DockStyle.Fill, BackColor = Color.White };
+            var btn = BtnCentrado("Abrir reporte completo de rentabilidad",
+                Color.FromArgb(30, 100, 60), pnl);
+            btn.Click += (s, e) => new FrmRentabilidad().ShowDialog();
+            tab.Controls.Add(pnl); return tab;
+        }
 
-            var btnAbrir = new Button
+        // ══════════════════════════════════════════════════════════
+        //  P&L — GANANCIAS Y PÉRDIDAS  (Ventas USD vs Egresos USD)
+        //  Cierra el loop del módulo Egresos: muestra el resultado
+        //  neto del negocio mes a mes en una sola pantalla.
+        // ══════════════════════════════════════════════════════════
+        private TabPage TabPyL()
+        {
+            var tab = new TabPage("Ganancias / Pérdidas");
+            var pnl = new Panel { Dock = DockStyle.Fill, BackColor = Color.White };
+
+            var bar = new Panel { Dock = DockStyle.Top, Height = 50,
+                BackColor = Color.FromArgb(228, 235, 244) };
+            int fx = 8;
+            bar.Controls.Add(Lbl("Desde:", fx, 16)); fx += 52;
+            var dtpD = new DateTimePicker { Location = new Point(fx, 12), Size = new Size(110, 26),
+                Format = DateTimePickerFormat.Short,
+                Value = new DateTime(DateTime.Today.Year, 1, 1) };
+            bar.Controls.Add(dtpD); fx += 118;
+            bar.Controls.Add(Lbl("Hasta:", fx, 16)); fx += 50;
+            var dtpH = new DateTimePicker { Location = new Point(fx, 12), Size = new Size(110, 26),
+                Format = DateTimePickerFormat.Short, Value = DateTime.Today };
+            bar.Controls.Add(dtpH); fx += 130;
+
+            var btnCalc = BtnAccion("Calcular", Color.FromArgb(30, 100, 60), new Point(fx, 10));
+            fx += 110;
+            var btnPdf = BtnAccion("PDF", Color.FromArgb(180, 60, 30), new Point(fx, 10));
+            bar.Controls.AddRange(new Control[] { btnCalc, btnPdf });
+
+            // Cards de KPIs
+            var pnlKpi = new TableLayoutPanel { Dock = DockStyle.Top, Height = 90,
+                ColumnCount = 4, RowCount = 1, BackColor = Color.White,
+                Padding = new Padding(8, 8, 8, 4) };
+            for (int i = 0; i < 4; i++)
+                pnlKpi.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25f));
+
+            Label lblKpiV = null!, lblKpiE = null!, lblKpiU = null!, lblKpiM = null!;
+            pnlKpi.Controls.Add(KpiCardLocal("VENTAS USD", out lblKpiV, "$ 0,00",
+                Color.FromArgb(30, 100, 60)), 0, 0);
+            pnlKpi.Controls.Add(KpiCardLocal("EGRESOS USD", out lblKpiE, "$ 0,00",
+                Color.FromArgb(192, 57, 43)), 1, 0);
+            pnlKpi.Controls.Add(KpiCardLocal("UTILIDAD NETA", out lblKpiU, "$ 0,00",
+                Color.FromArgb(26, 74, 138)), 2, 0);
+            pnlKpi.Controls.Add(KpiCardLocal("MARGEN %", out lblKpiM, "0%",
+                Color.FromArgb(83, 74, 183)), 3, 0);
+
+            // Split: tabla + gráfico
+            var split = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Horizontal,
+                BackColor = Color.White };
+            split.HandleCreated += (s, e) =>
             {
-                Text      = "Abrir reporte completo de rentabilidad",
-                Size      = new Size(340, 44),
-                Font      = new Font("Segoe UI", 10f, FontStyle.Bold),
-                BackColor = Color.FromArgb(30, 100, 60),
-                ForeColor = Color.White,
-                FlatStyle = FlatStyle.Flat,
-                Cursor    = Cursors.Hand
+                try { split.SplitterDistance = (int)(split.Height * 0.45); } catch { }
             };
-            btnAbrir.FlatAppearance.BorderSize = 0;
-            btnAbrir.Click += (s, e) => new FrmRentabilidad().ShowDialog();
 
-            // Centrar el boton
-            pnl.Controls.Add(btnAbrir);
-            pnl.Resize += (s, e) =>
+            var dgv = Grid(Color.FromArgb(26, 74, 138));
+            dgv.Dock = DockStyle.Fill;
+            split.Panel1.Controls.Add(dgv);
+
+            var pnlGraf = new Panel { Dock = DockStyle.Fill, BackColor = Color.White };
+            split.Panel2.Controls.Add(pnlGraf);
+
+            // Datos cacheados para el gráfico y PDF
+            List<(string Mes, decimal V, decimal E, decimal U)> _datos = new();
+
+            pnlGraf.Paint += (s, e) => PintarPyL(e.Graphics, _datos, pnlGraf.Size);
+
+            void Calcular()
             {
-                btnAbrir.Location = new System.Drawing.Point(
-                    (pnl.Width  - btnAbrir.Width)  / 2,
-                    (pnl.Height - btnAbrir.Height) / 2);
+                try
+                {
+                    Cursor.Current = Cursors.WaitCursor;
+                    var d = dtpD.Value.Date; var h = dtpH.Value.Date;
+                    var ventas  = DatabaseService.ObtenerVentasMensualesUSDPorPeriodo(d, h);
+                    var egresos = DatabaseService.ObtenerEgresosMensualesPorPeriodo(d, h);
+
+                    // Indexar por (Año, Mes) para join
+                    var dictV = ventas.ToDictionary(x => (x.Ano, x.Mes), x => x.VentasUSD);
+                    var dictE = egresos.ToDictionary(x => (x.Ano, x.Mes),
+                        x => (MP: x.MateriaPrima, Op: x.Operativos));
+
+                    var clavesUni = dictV.Keys.Union(dictE.Keys)
+                        .OrderBy(k => k.Ano).ThenBy(k => k.Mes).ToList();
+
+                    string[] mn = { "Ene","Feb","Mar","Abr","May","Jun",
+                                    "Jul","Ago","Sep","Oct","Nov","Dic" };
+                    decimal totalV = 0, totalE = 0;
+                    var datosTabla = new List<object>();
+                    _datos.Clear();
+                    foreach (var (ano, mes) in clavesUni)
+                    {
+                        decimal v = dictV.TryGetValue((ano, mes), out var vv) ? vv : 0;
+                        decimal mp = 0, op = 0;
+                        if (dictE.TryGetValue((ano, mes), out var ee))
+                        { mp = ee.MP; op = ee.Op; }
+                        decimal e = mp + op;
+                        decimal u = v - e;
+                        decimal margen = v > 0 ? (u / v * 100) : 0;
+                        totalV += v; totalE += e;
+                        string lblMes = mn[mes - 1] + " " + (ano % 100).ToString("00");
+                        datosTabla.Add(new {
+                            Mes        = lblMes,
+                            VentasUSD  = "$ " + v.ToString("N2"),
+                            MateriaPrima = "$ " + mp.ToString("N2"),
+                            Operativos = "$ " + op.ToString("N2"),
+                            EgresosUSD = "$ " + e.ToString("N2"),
+                            Utilidad   = "$ " + u.ToString("N2"),
+                            Margen     = margen.ToString("N1") + "%"
+                        });
+                        _datos.Add((lblMes, v, e, u));
+                    }
+
+                    dgv.DataSource = datosTabla;
+                    decimal totalU = totalV - totalE;
+                    decimal totalMargen = totalV > 0 ? (totalU / totalV * 100) : 0;
+
+                    lblKpiV.Text = "$ " + totalV.ToString("N2");
+                    lblKpiE.Text = "$ " + totalE.ToString("N2");
+                    lblKpiU.Text = "$ " + totalU.ToString("N2");
+                    lblKpiU.ForeColor = totalU >= 0 ? Color.FromArgb(15, 110, 86)
+                                                    : Color.FromArgb(192, 57, 43);
+                    lblKpiM.Text = totalMargen.ToString("N1") + "%";
+                    lblKpiM.ForeColor = totalMargen >= 0 ? Color.FromArgb(15, 110, 86)
+                                                         : Color.FromArgb(192, 57, 43);
+
+                    pnlGraf.Invalidate();
+                }
+                catch (Exception ex) { MsgErr(ex); }
+                finally { Cursor.Current = Cursors.Default; }
+            }
+
+            btnCalc.Click += (s, e) => Calcular();
+            btnPdf.Click  += (s, e) =>
+            {
+                if (_datos.Count == 0) Calcular();
+                MessageBox.Show("Exportación PDF del P&L pendiente de implementar.\n" +
+                    "Por ahora puedes exportar los datos copiando desde la tabla.",
+                    "PDF", MessageBoxButtons.OK, MessageBoxIcon.Information);
             };
 
+            pnl.Controls.Add(split);
+            pnl.Controls.Add(pnlKpi);
+            pnl.Controls.Add(bar);
             tab.Controls.Add(pnl);
+
+            // Auto-calcular al abrir
+            tab.HandleCreated += (s, e) => Calcular();
             return tab;
         }
+
+        private Panel KpiCardLocal(string titulo, out Label lblValor, string valorIni, Color barra)
+        {
+            var p = new Panel { Dock = DockStyle.Fill, BackColor = Color.White,
+                Margin = new Padding(0, 0, 8, 0), Padding = new Padding(8) };
+            p.Paint += (s, e) =>
+            {
+                using var pen = new Pen(Color.FromArgb(215, 222, 230), 1f);
+                e.Graphics.DrawRectangle(pen, 0, 0, p.Width - 1, p.Height - 1);
+            };
+            var bar = new Panel { Dock = DockStyle.Left, Width = 4, BackColor = barra };
+            var lblTit = new Label
+            {
+                Text = "  " + titulo,
+                Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(122, 131, 149),
+                Dock = DockStyle.Top, Height = 20,
+                TextAlign = ContentAlignment.MiddleLeft
+            };
+            var lblVal = new Label
+            {
+                Text = "  " + valorIni,
+                Font = new Font("Segoe UI", 17f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(30, 34, 51),
+                Dock = DockStyle.Fill,
+                TextAlign = ContentAlignment.MiddleLeft
+            };
+            lblValor = lblVal;
+            p.Controls.Add(lblVal); p.Controls.Add(lblTit); p.Controls.Add(bar);
+            return p;
+        }
+
+        private void PintarPyL(Graphics g,
+            List<(string Mes, decimal V, decimal E, decimal U)> datos, Size size)
+        {
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.Clear(Color.White);
+            if (datos.Count == 0)
+            {
+                using var brT = new SolidBrush(Color.FromArgb(122, 131, 149));
+                g.DrawString("Pulsa 'Calcular' para ver el gráfico",
+                    new Font("Segoe UI", 10f, FontStyle.Italic), brT,
+                    size.Width / 2 - 130, size.Height / 2 - 8);
+                return;
+            }
+            int W = size.Width, H = size.Height;
+            int padL = 60, padR = 130, padT = 16, padB = 36;
+            decimal maxAbs = Math.Max(1m, datos.Max(d => Math.Max(d.V, d.E)));
+            float maxV = (float)maxAbs;
+            int n = datos.Count;
+            float barW = (W - padL - padR) / (float)(n * 3f);
+
+            using var brV = new SolidBrush(Color.FromArgb(30, 130, 80));
+            using var brE = new SolidBrush(Color.FromArgb(192, 57, 43));
+            using var penU = new Pen(Color.FromArgb(26, 74, 138), 2.5f);
+            using var brLbl = new SolidBrush(Color.FromArgb(122, 131, 149));
+            using var brTxt = new SolidBrush(Color.FromArgb(30, 34, 51));
+            using var penGrid = new Pen(Color.FromArgb(240, 242, 246), 1);
+
+            // Grid
+            for (int i = 0; i <= 4; i++)
+            {
+                int y = padT + (H - padT - padB) * i / 4;
+                g.DrawLine(penGrid, padL, y, W - padR, y);
+                float val = maxV * (4 - i) / 4f;
+                g.DrawString("$ " + val.ToString("N0"),
+                    new Font("Segoe UI", 8f), brLbl, 4, y - 6);
+            }
+
+            var puntosU = new PointF[n];
+            for (int i = 0; i < n; i++)
+            {
+                float xCentro = padL + (W - padL - padR) * (i + 0.5f) / n;
+                float xV = xCentro - barW;
+                float xE = xCentro;
+                float hV = (H - padT - padB) * (float)datos[i].V / maxV;
+                float hE = (H - padT - padB) * (float)datos[i].E / maxV;
+                g.FillRectangle(brV, xV, H - padB - hV, barW * 0.9f, hV);
+                g.FillRectangle(brE, xE, H - padB - hE, barW * 0.9f, hE);
+                g.DrawString(datos[i].Mes, new Font("Segoe UI", 8f), brLbl,
+                    xCentro - 14, H - padB + 4);
+                // Línea de utilidad: sigue el centro vertical de cada mes
+                float yU = padT + (H - padT - padB) * (1 - (float)datos[i].U / maxV);
+                if (yU < padT) yU = padT;
+                if (yU > H - padB) yU = H - padB;
+                puntosU[i] = new PointF(xCentro - 5, yU);
+            }
+            if (n >= 2) g.DrawLines(penU, puntosU);
+            for (int i = 0; i < n; i++)
+                g.FillEllipse(new SolidBrush(Color.FromArgb(26, 74, 138)),
+                    puntosU[i].X - 3, puntosU[i].Y - 3, 6, 6);
+
+            // Leyenda
+            int lx = W - padR + 14, ly = padT + 4;
+            void Leyenda(int dy, Color c, string txt)
+            {
+                using var b = new SolidBrush(c);
+                g.FillRectangle(b, lx, ly + dy, 12, 12);
+                g.DrawString(txt, new Font("Segoe UI", 9f), brTxt, lx + 18, ly + dy - 2);
+            }
+            Leyenda(0,  Color.FromArgb(30, 130, 80),  "Ventas");
+            Leyenda(20, Color.FromArgb(192, 57, 43),  "Egresos");
+            Leyenda(40, Color.FromArgb(26, 74, 138),  "Utilidad");
+        }
+
+        private TabPage TabFlujoCaja()
+        {
+            var tab = new TabPage("Flujo Caja");
+            var pnl = new Panel { Dock = DockStyle.Fill, BackColor = Color.White };
+            var btn = BtnCentrado("Abrir proyeccion de flujo de caja 30/60/90 dias",
+                Color.FromArgb(20, 70, 130), pnl);
+            btn.Click += (s, e) => new FrmFlujoCaja().ShowDialog();
+            tab.Controls.Add(pnl); return tab;
+        }
+
         private TabPage TabLibroIVA()
         {
             var tab = new TabPage("Libro IVA");
             var pnl = new Panel { Dock = DockStyle.Fill, BackColor = Color.White };
-
-            var btnAbrir = new Button
-            {
-                Text = "Abrir Libro de Ventas y Compras IVA (SENIAT)",
-                Size = new Size(380, 44),
-                Font = new Font("Segoe UI", 10f, FontStyle.Bold),
-                BackColor = Color.FromArgb(140, 20, 20),
-                ForeColor = Color.White,
-                FlatStyle = FlatStyle.Flat,
-                Cursor = Cursors.Hand
-            };
-            btnAbrir.FlatAppearance.BorderSize = 0;
-            btnAbrir.Click += (s, e) => new FrmLibroIVA().ShowDialog();
-
-            pnl.Controls.Add(btnAbrir);
-            pnl.Resize += (s, e) => btnAbrir.Location = new System.Drawing.Point(
-                (pnl.Width - btnAbrir.Width) / 2,
-                (pnl.Height - btnAbrir.Height) / 2);
-
-            tab.Controls.Add(pnl);
-            return tab;
+            var btn = BtnCentrado("Abrir Libro de Ventas y Compras IVA (SENIAT)",
+                Color.FromArgb(140, 20, 20), pnl);
+            btn.Click += (s, e) => new FrmLibroIVA().ShowDialog();
+            tab.Controls.Add(pnl); return tab;
         }
+
+        private TabPage TabMermas()
+        {
+            var tab = new TabPage("Mermas");
+            var pnl = new Panel { Dock = DockStyle.Fill, BackColor = Color.White };
+            var btn = BtnCentrado("Abrir Control de Mermas y Desperdicios",
+                Color.FromArgb(100, 50, 10), pnl);
+            btn.Click += (s, e) => new FrmMermas().ShowDialog();
+            tab.Controls.Add(pnl); return tab;
+        }
+
+        private TabPage TabComparacion()
+        {
+            var tab = new TabPage("Comparacion");
+            var pnl = new Panel { Dock = DockStyle.Fill, BackColor = Color.White };
+            var btn = BtnCentrado("Abrir Comparacion de Periodos",
+                Color.FromArgb(50, 50, 120), pnl);
+            btn.Click += (s, e) => new FrmComparacion().ShowDialog();
+            tab.Controls.Add(pnl); return tab;
+        }
+
+        // ══════════════════════════════════════════════════════════
+        //  GRAFICAS GDI+
+        // ══════════════════════════════════════════════════════════
+        private static readonly Color[] _paleta =
+        {
+            Color.FromArgb(30,120,60),  Color.FromArgb(22,55,120),  Color.FromArgb(100,60,160),
+            Color.FromArgb(160,100,20), Color.FromArgb(20,110,130), Color.FromArgb(180,60,30),
+            Color.FromArgb(60,130,190), Color.FromArgb(140,40,100), Color.FromArgb(80,140,40),
+            Color.FromArgb(120,80,20)
+        };
+
+        private void PintarTorta(Graphics g,
+            List<(string Nombre, decimal Valor)> datos, Size sz)
+        {
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            if (datos == null || datos.Count == 0)
+            {
+                g.DrawString("Presiona 'Grafico' para ver", new Font("Segoe UI", 10f), Brushes.Gray, 20, 20);
+                return;
+            }
+            decimal total = datos.Sum(d => d.Valor);
+            if (total == 0) return;
+
+            int r = Math.Min(sz.Width / 2 - 100, sz.Height / 2 - 30);
+            int cx = r + 20, cy = sz.Height / 2;
+            var rect = new RectangleF(cx - r, cy - r, r * 2, r * 2);
+            float ang = -90f;
+
+            for (int i = 0; i < datos.Count; i++)
+            {
+                float sweep = (float)(datos[i].Valor / total * 360);
+                using var br = new SolidBrush(_paleta[i % _paleta.Length]);
+                g.FillPie(br, rect, ang, sweep);
+                g.DrawPie(Pens.White, rect, ang, sweep);
+                ang += sweep;
+            }
+
+            int ly = 10;
+            using var fnt = new Font("Segoe UI", 8f);
+            for (int i = 0; i < datos.Count; i++)
+            {
+                g.FillRectangle(new SolidBrush(_paleta[i % _paleta.Length]),
+                    cx + r + 20, ly, 12, 12);
+                g.DrawString($"{datos[i].Nombre}  {datos[i].Valor/total:P1}",
+                    fnt, Brushes.Black, cx + r + 36, ly - 1);
+                ly += 18;
+            }
+        }
+
+        private void PintarLineasAnuales(Graphics g,
+            List<(int Ano, int Mes, decimal Total)> datos, Size sz)
+        {
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            if (datos == null || datos.Count == 0)
+            {
+                g.DrawString("Presiona 'Analizar' para ver el grafico",
+                    new Font("Segoe UI", 10f), Brushes.Gray, 20, 20);
+                return;
+            }
+
+            int padL=60, padR=80, padT=20, padB=36;
+            int w = sz.Width-padL-padR, h = sz.Height-padT-padB;
+            decimal maxVal = datos.Max(d => d.Total); if (maxVal==0) maxVal=1;
+            var anos = datos.Select(d=>d.Ano).Distinct().OrderBy(a=>a).ToList();
+            string[] nm = {"Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"};
+
+            using var penEje = new Pen(Color.FromArgb(180,180,190));
+            g.DrawLine(penEje, padL, padT, padL, padT+h);
+            g.DrawLine(penEje, padL, padT+h, padL+w, padT+h);
+
+            using var fntS = new Font("Segoe UI", 7f);
+            for (int m=0; m<12; m++)
+                g.DrawString(nm[m], fntS, Brushes.Gray,
+                    padL + m*(w/11f) - 8, padT+h+5);
+
+            for (int ai=0; ai<anos.Count; ai++)
+            {
+                var color = _paleta[ai % _paleta.Length];
+                using var pen = new Pen(color, 2f);
+                PointF? prev = null;
+                for (int m=1; m<=12; m++)
+                {
+                    decimal val = datos.FirstOrDefault(d=>d.Ano==anos[ai]&&d.Mes==m).Total;
+                    float x = padL + (m-1)*(w/11f);
+                    float y = padT + h - (float)(val/maxVal*h);
+                    var pt = new PointF(x, y);
+                    if (prev.HasValue) g.DrawLine(pen, prev.Value, pt);
+                    g.FillEllipse(new SolidBrush(color), x-3, y-3, 6, 6);
+                    prev = pt;
+                }
+                g.FillRectangle(new SolidBrush(color), padL+w+5, padT+ai*16, 12, 10);
+                g.DrawString(anos[ai].ToString(), fntS,
+                    new SolidBrush(color), padL+w+20, padT+ai*16-1);
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════
+        //  HELPERS UI
+        // ══════════════════════════════════════════════════════════
+        private static List<LineaFactura> ObtenerDetallesPorNumero(string numeroF)
+        {
+            var todas = DatabaseService.ObtenerFacturas();
+            int idx   = todas.FindIndex(f => f.NumeroF == numeroF);
+            return idx < 0 ? new List<LineaFactura>()
+                           : DatabaseService.ObtenerDetallesFactura(idx + 1);
+        }
+
+        // Helper: DateTimePicker con label en barra, devuelve siguiente x
+        private DateTimePicker DTP(Panel bar, string label, int x, DateTime val, out int nextX)
+        {
+            bar.Controls.Add(Lbl(label, x, 14)); x += label.Length * 6 + 4;
+            var dtp = new DateTimePicker { Location = new Point(x, 10), Size = new Size(110, 26),
+                Format = DateTimePickerFormat.Short, Value = val };
+            bar.Controls.Add(dtp);
+            nextX = x + 118;
+            return dtp;
+        }
+
+        // Helper: ComboBox de clientes
+        private ComboBox Cmb(Panel bar, string label, int x, out int nextX)
+        {
+            bar.Controls.Add(Lbl(label, x, 14)); x += label.Length * 6 + 4;
+            var cmb = new ComboBox { Location = new Point(x, 10), Size = new Size(240, 26),
+                DropDownStyle = ComboBoxStyle.DropDownList };
+            cmb.Items.Add("Todos los clientes");
+            DatabaseService.ObtenerClientes()
+                .ForEach(c => cmb.Items.Add(c.Codigo + " — " + c.Descripcion));
+            cmb.SelectedIndex = 0;
+            bar.Controls.Add(cmb);
+            nextX = x + 248;
+            return cmb;
+        }
+
+        private Button BtnAccion(string texto, Color color, Point loc) => new Button
+        {
+            Text = texto, Location = loc, Size = new Size(88, 28),
+            BackColor = color, ForeColor = Color.White,
+            FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+            Cursor = Cursors.Hand
+        };
+
+        private Button BtnCentrado(string texto, Color color, Panel padre)
+        {
+            var btn = new Button { Text = texto, Size = new Size(380, 44),
+                Font = new Font("Segoe UI", 10f, FontStyle.Bold),
+                BackColor = color, ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand };
+            btn.FlatAppearance.BorderSize = 0;
+            padre.Controls.Add(btn);
+            padre.Resize += (s, e) => btn.Location = new Point(
+                (padre.Width - btn.Width) / 2, (padre.Height - btn.Height) / 2);
+            return btn;
+        }
+
+        private Panel Card(string titulo, string valor, Color color)
+        {
+            var p = new Panel { Size = new Size(200, 100), Margin = new Padding(8), BackColor = color };
+            p.Controls.Add(new Label { Text = titulo, Location = new Point(10, 10), AutoSize = true,
+                ForeColor = Color.White, Font = new Font("Segoe UI", 9f) });
+            p.Controls.Add(new Label { Text = valor, Location = new Point(10, 40), AutoSize = true,
+                ForeColor = Color.White, Font = new Font("Segoe UI", 18f, FontStyle.Bold) });
+            return p;
+        }
+
         private DataGridView Grid(Color h)
         {
-            var g = new DataGridView { Dock=DockStyle.Fill, ReadOnly=true, SelectionMode=DataGridViewSelectionMode.FullRowSelect, AllowUserToAddRows=false, AutoSizeColumnsMode=DataGridViewAutoSizeColumnsMode.Fill, BackgroundColor=Color.White, BorderStyle=BorderStyle.None, RowHeadersVisible=false };
-            g.ColumnHeadersDefaultCellStyle.BackColor=h; g.ColumnHeadersDefaultCellStyle.ForeColor=Color.White; g.ColumnHeadersDefaultCellStyle.Font=new Font("Segoe UI",9f,FontStyle.Bold); g.EnableHeadersVisualStyles=false;
+            var g = new DataGridView { Dock = DockStyle.Fill, ReadOnly = true,
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+                AllowUserToAddRows = false,
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
+                BackgroundColor = Color.White, BorderStyle = BorderStyle.None,
+                RowHeadersVisible = false, Font = new Font("Segoe UI", 8.5f) };
+            g.ColumnHeadersDefaultCellStyle.BackColor = h;
+            g.ColumnHeadersDefaultCellStyle.ForeColor = Color.White;
+            g.ColumnHeadersDefaultCellStyle.Font = new Font("Segoe UI", 9f, FontStyle.Bold);
+            g.EnableHeadersVisualStyles = false;
+            g.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(245, 250, 247);
             return g;
         }
+
+        private Label Lbl(string t, int x, int y) =>
+            new Label { Text = t, Location = new Point(x, y), AutoSize = true,
+                Font = new Font("Segoe UI", 9f) };
+
+        private void MsgErr(Exception ex) =>
+            MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+
+        // ── Exportar ventas a CSV compatible con Excel ────────────────────
+        private static void ExportarVentasExcel(
+            List<LineaVentaReporte> lineas, DateTime desde, DateTime hasta)
+        {
+            using var dlg = new SaveFileDialog
+            {
+                Title    = "Exportar ventas a Excel",
+                Filter   = "Excel CSV (*.csv)|*.csv|Todos los archivos (*.*)|*.*",
+                FileName = $"Ventas_{desde:yyyyMMdd}_{hasta:yyyyMMdd}.csv"
+            };
+            if (dlg.ShowDialog() != DialogResult.OK) return;
+
+            var sb = new System.Text.StringBuilder();
+
+            // BOM UTF-8 para que Excel lo reconozca correctamente
+            sb.Append('\uFEFF');
+
+            // Encabezado
+            sb.AppendLine("Reporte de Ventas");
+            sb.AppendLine($"Período;{desde:dd/MM/yyyy};al;{hasta:dd/MM/yyyy}");
+            sb.AppendLine($"Generado;{DateTime.Now:dd/MM/yyyy HH:mm};;");
+            sb.AppendLine();
+
+            // Detalle por línea
+            sb.AppendLine("Factura;Fecha;Código;Descripción;Cantidad;Precio Unit.;Total");
+            decimal totalGeneral = 0;
+            foreach (var l in lineas.OrderBy(l => l.Fecha).ThenBy(l => l.NumFactura))
+            {
+                sb.AppendLine(
+                    $"{l.NumFactura};" +
+                    $"{l.Fecha:dd/MM/yyyy};" +
+                    $"{l.Codigo};" +
+                    $"{l.Descripcion.Replace(";", ",")};" +
+                    $"{l.Cantidad:N2};" +
+                    $"{l.PrecioUnit:N2};" +
+                    $"{l.Total:N2}");
+                totalGeneral += l.Total;
+            }
+
+            sb.AppendLine();
+            sb.AppendLine($"TOTAL GENERAL;;;;;; {totalGeneral:N2}");
+            sb.AppendLine();
+
+            // Resumen agrupado por producto
+            sb.AppendLine("Resumen por Producto");
+            sb.AppendLine("Código;Descripción;Unidades vendidas;Total vendido");
+            foreach (var g in lineas
+                .GroupBy(l => new { l.Codigo, l.Descripcion })
+                .OrderByDescending(g => g.Sum(x => x.Total)))
+            {
+                sb.AppendLine(
+                    $"{g.Key.Codigo};" +
+                    $"{g.Key.Descripcion.Replace(";", ",")};" +
+                    $"{g.Sum(x => x.Cantidad):N2};" +
+                    $"{g.Sum(x => x.Total):N2}");
+            }
+
+            System.IO.File.WriteAllText(dlg.FileName, sb.ToString(),
+                new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+
+            // Abrir el archivo en Excel directamente
+            try
+            {
+                System.Diagnostics.Process.Start(
+                    new System.Diagnostics.ProcessStartInfo
+                    { FileName = dlg.FileName, UseShellExecute = true });
+            }
+            catch { /* si Excel no está instalado, el archivo igual se guardó */ }
+
+            MessageBox.Show(
+                $"Exportado correctamente:\n{System.IO.Path.GetFileName(dlg.FileName)}\n\n" +
+                $"{lineas.Count} líneas  |  Total: {totalGeneral:N2}",
+                "Exportación completada", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+    }  // fin clase FrmReportes
+
+    // ══════════════════════════════════════════════════════════════
+    //  MODELO AUXILIAR
+    // ══════════════════════════════════════════════════════════════
+    public class LineaVentaReporte
+    {
+        public string   NumFactura   { get; set; }
+        public DateTime Fecha        { get; set; }
+        public string   Codigo       { get; set; }
+        public string   Descripcion  { get; set; }
+        public decimal  Cantidad     { get; set; }
+        public decimal  PrecioUnit   { get; set; }
+        public decimal  Total        { get; set; }
+        // Tasa del día de la factura (0 si no hay registrada)
+        public decimal  TasaBCV      { get; set; }
+        public decimal  TasaParalelo { get; set; }
+        // Totales en Bs calculados
+        public decimal  TotalBCV      => TasaBCV      > 0 ? Total * TasaBCV      : 0;
+        public decimal  TotalParalelo => TasaParalelo > 0 ? Total * TasaParalelo : 0;
     }
 
     // ══════════════════════════════════════════════════════════════
-    //  ARCHIVOS DEL SISTEMA  (catálogos maestros)
+    //  FrmArchivos — rediseñado con tarjetas wash de color
     // ══════════════════════════════════════════════════════════════
-    public class FrmArchivos : Form
+    public class FrmArchivos : FormBase
     {
         public FrmArchivos()
         {
-            Text = "Archivos del Sistema"; Size = new Size(860, 660);
-            StartPosition = FormStartPosition.CenterParent;
-            FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false;
-            BackColor = Color.FromArgb(248, 245, 235);
+            Text            = "Archivos del Sistema";
+            ClientSize      = new Size(960, 600);
+            MinimumSize     = new Size(700, 460);
+            StartPosition   = FormStartPosition.CenterParent;
+            FormBorderStyle = FormBorderStyle.Sizable;
+            MaximizeBox     = true;
+            BackColor       = UITheme.Fondo;
+            Font            = UITheme.Body;
 
-            var hdr = new Panel { Dock = DockStyle.Top, Height = 50, BackColor = Color.FromArgb(180, 140, 20) };
-            hdr.Controls.Add(new Label { Text = "Archivos del Sistema", ForeColor = Color.White,
-                Font = new Font("Segoe UI", 12f, FontStyle.Bold), AutoSize = true, Location = new Point(12, 13) });
+            // ── Header oscuro consistente ─────────────────────────────────
+            var hdr = new Panel
+            {
+                Dock = DockStyle.Top, Height = 60,
+                BackColor = UITheme.AzulOscuro
+            };
+            hdr.Paint += (s, e) =>
+            {
+                e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                using var fTit = new Font("Segoe UI", 14f, FontStyle.Bold);
+                e.Graphics.DrawString("Archivos del Sistema", fTit, Brushes.White, 20, 12);
+                using var fSub = new Font("Segoe UI", 9.5f);
+                using var brSub = new SolidBrush(Color.FromArgb(168, 177, 187));
+                e.Graphics.DrawString("Catálogos maestros, inventario, accesos y configuración",
+                    fSub, brSub, 22, 34);
+            };
 
-            var panelBtns = new FlowLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(30, 20, 30, 20), BackColor = Color.FromArgb(250, 247, 235), FlowDirection = FlowDirection.LeftToRight, WrapContents = true };
+            // ── Footer claro unificado ────────────────────────────────────
+            var footer = new Panel
+            {
+                Dock = DockStyle.Bottom, Height = 52,
+                BackColor = UITheme.FondoCard
+            };
+            footer.Paint += (s, e) =>
+            {
+                using var pen = new Pen(UITheme.Borde, 1f);
+                e.Graphics.DrawLine(pen, 0, 0, footer.Width, 0);
+            };
+            var btnCerrar = new Button
+            {
+                Text = "Cerrar", Width = 130, Height = 36,
+                FlatStyle = FlatStyle.Flat,
+                BackColor = UITheme.Azul, ForeColor = Color.White,
+                Font = new Font("Segoe UI", 10f, FontStyle.Bold),
+                Cursor = Cursors.Hand
+            };
+            btnCerrar.FlatAppearance.BorderSize = 0;
+            btnCerrar.FlatAppearance.MouseOverBackColor = UITheme.AzulHover;
+            btnCerrar.Click += (s, e) => Close();
+            var flowR = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Right, FlowDirection = FlowDirection.RightToLeft,
+                BackColor = UITheme.FondoCard, Width = 170, WrapContents = false,
+                Padding = new Padding(0, 7, 16, 7)
+            };
+            flowR.Controls.Add(btnCerrar);
+            footer.Controls.Add(flowR);
 
-            panelBtns.Controls.Add(ModBtn("Inventario",  Color.FromArgb(30,120,60),   () => new FrmInventario().ShowDialog()));
-            panelBtns.Controls.Add(ModBtn("Clientes",    Color.FromArgb(40,80,160),   () => new FrmClientes().ShowDialog()));
-            panelBtns.Controls.Add(ModBtn("Proveedores", Color.FromArgb(160,90,20),   () => new FrmProveedores().ShowDialog()));
-            panelBtns.Controls.Add(ModBtn("Compras",     Color.FromArgb(100,50,160),  () => new FrmCompras().ShowDialog()));
-            panelBtns.Controls.Add(ModBtn("Moldes",      Color.FromArgb(20,100,140),  () => new FrmMoldes().ShowDialog()));
-            panelBtns.Controls.Add(ModBtn("Mant.Moldes",Color.FromArgb(20, 80,120),  () => new FrmMantenimientoMoldes().ShowDialog()));
-            panelBtns.Controls.Add(ModBtn("Kardex",      Color.FromArgb(20, 80, 20),  () => new FrmKardex().ShowDialog()));
-            panelBtns.Controls.Add(ModBtn("Ordenes OP",  Color.FromArgb(60, 120, 40),  () => new FrmOrdenesProduccion().ShowDialog()));
-            panelBtns.Controls.Add(ModBtn("Control Cal.", Color.FromArgb(40, 80, 160),  () => new FrmControlCalidad().ShowDialog()));
-            if (Sesion.EsAdmin)
-                panelBtns.Controls.Add(ModBtn("Respaldos",   Color.FromArgb(20, 100, 50), () => new FrmRespaldos().ShowDialog()));
+            // ── Definición de módulos ─────────────────────────────────────
+            // (titulo, subtitulo, color, accion, soloAdmin, tooltip)
+            var modulos = new System.Collections.Generic.List<(string ico, string titulo, string sub,
+                Color color, Action accion, bool soloAdmin, string tip)>
+            {
+                ("◧", "Inventario",      "Productos terminados",
+                    UITheme.Verde,                    () => new FrmInventario().ShowDialog(),         false,
+                    "Catálogo de productos terminados: códigos, precios y stock"),
 
-            var footer = new Panel { Dock = DockStyle.Bottom, Height = 50, BackColor = Color.FromArgb(235, 228, 210) };
-            var btnCerrar = new Button { Text = "Cerrar", Size = new Size(120, 35), Location = new Point(270, 8), BackColor = Color.FromArgb(100, 100, 120), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 10f, FontStyle.Bold) };
-            btnCerrar.FlatAppearance.BorderSize = 0; btnCerrar.Click += (s, e) => Close();
-            footer.Controls.Add(btnCerrar);
+                ("◈", "Clientes",        "Directorio de clientes",
+                    UITheme.Azul,                     () => new FrmClientes().ShowDialog(),           false,
+                    "Directorio de clientes para facturación"),
 
-            Controls.AddRange(new Control[] { panelBtns, hdr, footer });
-        }
+                ("◫", "Proveedores",     "Directorio de proveedores",
+                    UITheme.Naranja,                  () => new FrmProveedores().ShowDialog(),        false,
+                    "Directorio de proveedores de materias primas y servicios"),
 
-        private Button ModBtn(string texto, Color color, Action onClick)
-        {
-            var btn = new Button { Text = texto, Size = new Size(160, 100), Margin = new Padding(10),
-                BackColor = color, ForeColor = Color.White, FlatStyle = FlatStyle.Flat,
-                Font = new Font("Segoe UI", 10f, FontStyle.Bold), Cursor = Cursors.Hand };
-            btn.FlatAppearance.BorderSize = 0;
-            btn.Click += (s, e) => onClick();
-            btn.MouseEnter += (s, e) => btn.BackColor = ControlPaint.Light(color, 0.2f);
-            btn.MouseLeave += (s, e) => btn.BackColor = color;
-            return btn;
+                ("▣", "Moldes",          "Catálogo de moldes",
+                    UITheme.Cyan,                     () => new FrmMoldes().ShowDialog(),             false,
+                    "Catálogo de moldes de producción y sus productos"),
+
+                ("⊞", "Mant. Moldes",    "Mantenimiento preventivo",
+                    Color.FromArgb(20, 80, 120),      () => new FrmMantenimientoMoldes().ShowDialog(), false,
+                    "Registro de mantenimientos y reparaciones de moldes"),
+
+                ("▤", "Kardex",          "Movimientos inventario",
+                    Color.FromArgb(0, 150, 136),      () => new FrmKardex().ShowDialog(),             false,
+                    "Movimientos de inventario de productos e insumos"),
+
+                ("◎", "Insumos Proveed.","Materias primas",
+                    Color.FromArgb(45, 90, 175),      () => new FrmProductosProveedor().ShowDialog(), false,
+                    "Control de materias primas y stock de insumos"),
+
+                ("◈", "Control Calidad", "Inspecciones",
+                    Color.FromArgb(120, 60, 140),     () => new FrmControlCalidad().ShowDialog(),     false,
+                    "Registro de inspecciones y control de calidad"),
+
+                ("▣", "Respaldos",       "Copias de seguridad",
+                    Color.FromArgb(60, 100, 140),     () => new FrmRespaldos().ShowDialog(),          true,
+                    "Copias de seguridad de la base de datos (solo Admin)"),
+
+                ("▤", "Tarifas Bono",    "Producción y ventas",
+                    Color.FromArgb(160, 50, 110),     () => new FrmTarifasBonoProduccion().ShowDialog(), true,
+                    "Configurar tarifas de producción y bonos (solo Admin)"),
+
+                ("◎", "Usuarios",        "Gestión de accesos",
+                    UITheme.Rojo,                     () => new FrmUsuarios().ShowDialog(),           true,
+                    "Gestión de usuarios y permisos del sistema (solo Admin)"),
+            };
+
+            // ── Área scrollable con cards ─────────────────────────────────
+            var arcTip = AyudaService.CrearTooltip();
+            var pnlScroll = new Panel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = UITheme.Fondo,
+                AutoScroll = true,
+                Padding = new Padding(28, 24, 28, 24)
+            };
+
+            var tarjetas = new System.Collections.Generic.List<Panel>();
+            foreach (var (ico, titulo, sub, color, accion, soloAdmin, textoTip) in modulos)
+            {
+                if (soloAdmin && !Sesion.EsAdmin) continue;
+                var card = UICards.CrearTarjeta(ico, titulo, sub, color, accion,
+                    tieneAcceso: true, tip: arcTip, textoTooltip: textoTip);
+                tarjetas.Add(card);
+                pnlScroll.Controls.Add(card);
+            }
+
+            // Distribución responsive scrollable con buen aire entre tarjetas
+            UICards.DistribuirGridScrollable(pnlScroll, tarjetas,
+                minAncho: 240, alto: 124, gap: 24, padX: 8, padY: 8);
+
+            // Orden de Add: Fill primero, después Top/Bottom
+            Controls.Add(pnlScroll);
+            Controls.Add(footer);
+            Controls.Add(hdr);
+            // VentanaPrefs.Restaurar lo invoca FormBase.OnLoad automáticamente
         }
     }
 
     // ══════════════════════════════════════════════════════════════
-    //  CONFIGURACION DEL SISTEMA
+    //  FrmSistema (sin cambios)
     // ══════════════════════════════════════════════════════════════
-    public class FrmSistema : Form
+    public class FrmSistema : FormBase
     {
         public FrmSistema()
         {
@@ -337,98 +1560,95 @@ namespace SistemaGestion
             FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = MinimizeBox = false;
             BackColor = Color.FromArgb(245, 245, 250);
 
-            var hdr = new Panel { Dock = DockStyle.Top, Height = 50, BackColor = Color.FromArgb(60, 80, 160) };
+            var hdr = new Panel { Dock = DockStyle.Top, Height = 50,
+                BackColor = Color.FromArgb(60, 80, 160) };
             hdr.Controls.Add(new Label { Text = "Configuracion del Sistema", ForeColor = Color.White,
-                Font = new Font("Segoe UI", 11f, FontStyle.Bold), AutoSize = true, Location = new Point(12, 14) });
+                Font = new Font("Segoe UI", 11f, FontStyle.Bold), AutoSize = true,
+                Location = new Point(12, 14) });
 
             int y = 70;
-            Lbl("Nombre del sistema:", y); TxtBox("Sistema de Gestion", y); y += 45;
-            Lbl("Version:", y);            TxtBox("1.0.0", y);              y += 45;
-            Lbl("Empresa:", y);            TxtBox("Mi Empresa S.A.", y);    y += 45;
-            Lbl("Moneda:", y);
-            var cmbMoneda = new ComboBox { Location = new Point(200, y), Size = new Size(200, 25), DropDownStyle = ComboBoxStyle.DropDownList };
-            cmbMoneda.Items.AddRange(new object[] { "MXN - Peso Mexicano", "USD - Dolar", "EUR - Euro", "VES - Bolivar" });
+            Lbl2("Nombre del sistema:", y); TxtBox("Sistema de Gestion", y); y += 45;
+            Lbl2("Version:", y);            TxtBox("1.0.0", y);              y += 45;
+            Lbl2("Empresa:", y);            TxtBox("Mi Empresa S.A.", y);    y += 45;
+            Lbl2("Moneda:", y);
+            var cmbMoneda = new ComboBox { Location = new Point(200, y), Size = new Size(200, 25),
+                DropDownStyle = ComboBoxStyle.DropDownList };
+            cmbMoneda.Items.AddRange(new object[] {
+                "MXN - Peso Mexicano","USD - Dolar","EUR - Euro","VES - Bolivar" });
             cmbMoneda.SelectedIndex = 0; Controls.Add(cmbMoneda); y += 60;
 
-            var btnRespaldos = new Button
-            {
-                Text = "Ver respaldos", Location = new Point(100, y), Size = new Size(160, 36),
-                BackColor = Color.FromArgb(20, 100, 50), ForeColor = Color.White,
-                FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 10f, FontStyle.Bold)
-            };
+            var btnRespaldos = new Button { Text = "Ver respaldos", Location = new Point(100, y),
+                Size = new Size(160, 36), BackColor = Color.FromArgb(20,100,50), ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 10f, FontStyle.Bold) };
             btnRespaldos.FlatAppearance.BorderSize = 0;
             btnRespaldos.Click += (s, e) => new FrmRespaldos().ShowDialog();
-            Controls.Add(btnRespaldos);
-            y += 50;
+            Controls.Add(btnRespaldos); y += 50;
 
-            // Version del esquema
-            var lblVersion = new Label
-            {
-                Location  = new Point(100, y),
-                AutoSize  = true,
-                Font      = new Font("Segoe UI", 9f, FontStyle.Italic),
-                ForeColor = Color.FromArgb(80, 100, 80)
-            };
+            var lblVersion = new Label { Location = new Point(100, y), AutoSize = true,
+                Font = new Font("Segoe UI", 9f, FontStyle.Italic),
+                ForeColor = Color.FromArgb(80, 100, 80) };
             try
             {
-                using var cv = new Microsoft.Data.Sqlite.SqliteConnection(
-                    SecurityService.CadenaConexion);
-                cv.Open();
-                var cmv = cv.CreateCommand();
-                cmv.CommandText = "PRAGMA user_version";
-                int ver = (int)(long)cmv.ExecuteScalar();
-                lblVersion.Text = "Base de datos: version de esquema v" + ver +
+                // ALTA-3 FIX: usar DatabaseService — sin SqliteConnection directa en UI
+                int ver = DatabaseService.ObtenerVersionEsquema();
+                lblVersion.Text = "Base de datos: esquema v" + ver +
                     " (codigo: v" + DatabaseService.SCHEMA_VERSION + ")" +
                     (ver == DatabaseService.SCHEMA_VERSION ? " — Al dia" : " — PENDIENTE MIGRACION");
                 lblVersion.ForeColor = ver == DatabaseService.SCHEMA_VERSION
                     ? Color.FromArgb(30, 100, 40) : Color.FromArgb(160, 50, 30);
             }
             catch { lblVersion.Text = "No se pudo leer version de esquema"; }
-            Controls.Add(lblVersion);
-            y += 28;
+            Controls.Add(lblVersion); y += 28;
 
-            var btnPerfil2 = new Button
-            {
-                Text = "Mi Perfil y preferencias", Location = new Point(100, y),
-                Size = new Size(220, 36),
-                BackColor = Color.FromArgb(55, 70, 110), ForeColor = Color.White,
-                FlatStyle = FlatStyle.Flat,
-                Font = new Font("Segoe UI", 10f, FontStyle.Bold)
-            };
+            var btnPerfil2 = new Button { Text = "Mi Perfil y preferencias",
+                Location = new Point(100, y), Size = new Size(220, 36),
+                BackColor = Color.FromArgb(55,70,110), ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 10f, FontStyle.Bold) };
             btnPerfil2.FlatAppearance.BorderSize = 0;
             btnPerfil2.Click += (s2, e2) => new FrmPerfil().ShowDialog();
-            Controls.Add(btnPerfil2);
-            y += 50;
+            Controls.Add(btnPerfil2); y += 50;
 
             if (Sesion.EsAdmin)
             {
-                var btnLog = new Button
-                {
-                    Text = "Ver log de auditoria", Location = new Point(100, y),
-                    Size = new Size(220, 36),
-                    BackColor = Color.FromArgb(40, 55, 90), ForeColor = Color.White,
-                    FlatStyle = FlatStyle.Flat,
-                    Font = new Font("Segoe UI", 10f, FontStyle.Bold)
-                };
+                var btnLog = new Button { Text = "Ver log de auditoria",
+                    Location = new Point(100, y), Size = new Size(220, 36),
+                    BackColor = Color.FromArgb(40,55,90), ForeColor = Color.White,
+                    FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 10f, FontStyle.Bold) };
                 btnLog.FlatAppearance.BorderSize = 0;
                 btnLog.Click += (s2, e2) => new FrmLogAuditoria().ShowDialog();
-                Controls.Add(btnLog);
-                y += 50;
+                Controls.Add(btnLog); y += 50;
+
+                var btnUsrs = new Button { Text = "Gestión de Usuarios",
+                    Location = new Point(100, y), Size = new Size(220, 36),
+                    BackColor = Color.FromArgb(30, 80, 160), ForeColor = Color.White,
+                    FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 10f, FontStyle.Bold) };
+                btnUsrs.FlatAppearance.BorderSize = 0;
+                btnUsrs.Click += (s2, e2) => new FrmUsuarios().ShowDialog();
+                Controls.Add(btnUsrs); y += 50;
             }
 
-            var btnGuardar = new Button { Text = "Guardar cambios", Location = new Point(100, y), Size = new Size(160, 36),
-                BackColor = Color.FromArgb(60, 130, 200), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 10f, FontStyle.Bold) };
+            var btnGuardar = new Button { Text = "Guardar cambios", Location = new Point(100, y),
+                Size = new Size(160, 36), BackColor = Color.FromArgb(60,130,200), ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 10f, FontStyle.Bold) };
             btnGuardar.FlatAppearance.BorderSize = 0;
-            btnGuardar.Click += (s, e) => MessageBox.Show("Configuracion guardada.", "Exito", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            btnGuardar.Click += (s, e) => MessageBox.Show("Configuracion guardada.", "Exito",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
 
-            var btnCerrar = new Button { Text = "Cerrar", Location = new Point(280, y), Size = new Size(110, 36),
-                BackColor = Color.FromArgb(100, 100, 120), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
+            var btnCerrar = new Button { Text = "Cerrar", Location = new Point(280, y),
+                Size = new Size(110, 36), BackColor = Color.FromArgb(100,100,120),
+                ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
             btnCerrar.FlatAppearance.BorderSize = 0; btnCerrar.Click += (s, e) => Close();
 
             Controls.AddRange(new Control[] { hdr, btnGuardar, btnCerrar });
         }
 
-        private void Lbl(string t, int y) => Controls.Add(new Label { Text = t, Location = new Point(30, y + 3), AutoSize = true, Font = new Font("Segoe UI", 9.5f, FontStyle.Bold) });
-        private void TxtBox(string val, int y) { var tb = new TextBox { Text = val, Location = new Point(200, y), Size = new Size(200, 25) }; Controls.Add(tb); }
+        private void Lbl2(string t, int y) => Controls.Add(new Label { Text = t,
+            Location = new Point(30, y+3), AutoSize = true,
+            Font = new Font("Segoe UI", 9.5f, FontStyle.Bold) });
+        private void TxtBox(string val, int y)
+        {
+            var tb = new TextBox { Text = val, Location = new Point(200, y), Size = new Size(200, 25) };
+            Controls.Add(tb);
+        }
     }
 }

@@ -7,7 +7,7 @@ using System.Windows.Forms;
 
 namespace SistemaGestion
 {
-    public class FrmPuntoEquilibrio : Form
+    public class FrmPuntoEquilibrio : FormBase
     {
         // --- Controles principales ---
         private Panel pnlKpis;
@@ -95,7 +95,27 @@ namespace SistemaGestion
             btnExportarPdf.Location = new Point(640, 12);
             btnExportarPdf.Click += BtnExportarPdf_Click;
 
-            pnlToolbar.Controls.AddRange(new Control[] {
+            pnlToolbar.Controls.Add(btnExportarPdf);
+
+            var _tipA = AyudaService.CrearTooltip();
+            var _btnHelp = new Button {
+                Text = "? Ayuda", Size = new Size(80, 28),
+                BackColor = Color.FromArgb(80, 50, 150), ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+                Cursor = Cursors.Hand
+            };
+            _btnHelp.FlatAppearance.BorderSize = 0;
+            _btnHelp.Click += (s, e) => AyudaService.Mostrar(this, "FrmPuntoEquilibrio");
+            AyudaService.Tip(_tipA, btnExportarPdf, "Exportar el análisis de punto de equilibrio a PDF");
+            AyudaService.Tip(_tipA, _btnHelp, "Abrir guía de ayuda");
+            VentanaPrefs.Restaurar(this);
+            var _tp = new System.Windows.Forms.Timer { Interval = 800 };
+            _tp.Tick        += (s, e) => { _tp.Stop(); VentanaPrefs.Guardar(this); };
+            SizeChanged     += (s, e) => { _tp.Stop(); _tp.Start(); };
+            LocationChanged += (s, e) => { _tp.Stop(); _tp.Start(); };
+            FormClosed      += (s, e) => { _tp.Stop(); _tp.Dispose(); };
+
+            Controls.AddRange(new Control[] {
                 lblTitulo, lblPeriodo, cmbMeses, btnCargar, btnExportarPdf
             });
 

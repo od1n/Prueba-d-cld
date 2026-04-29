@@ -9,7 +9,7 @@ namespace SistemaGestion
     // ══════════════════════════════════════════════════════════════════════════
     //  PROCESAR NOMINA SEMANAL
     // ══════════════════════════════════════════════════════════════════════════
-    public class FrmProcesarNomina : Form
+    public class FrmProcesarNomina : FormBase
     {
         private DataGridView   dgv;
         private DataGridView   dgvAportes;
@@ -25,7 +25,7 @@ namespace SistemaGestion
             Text = "Procesar Nomina Semanal";
             Size = new Size(1280, 660);
             StartPosition = FormStartPosition.CenterParent;
-            BackColor = Color.FromArgb(245, 248, 245);
+            BackColor = Color.FromArgb(240, 244, 250);
 
             BuildUI();
             CargarPeriodos();
@@ -35,20 +35,45 @@ namespace SistemaGestion
         {
             // ── Header ────────────────────────────────────────────────────
             var hdr = new Panel { Dock = DockStyle.Top, Height = 50,
-                BackColor = Color.FromArgb(30, 120, 60) };
+                BackColor = Color.FromArgb(26, 74, 138) };
             hdr.Controls.Add(new Label
             {
                 Text = "Nomina Semanal — USD", ForeColor = Color.White,
                 Font = new Font("Segoe UI", 12f, FontStyle.Bold),
                 AutoSize = true, Location = new Point(14, 13)
             });
-            var btnNuevoPeriodo = Btn("+ Nuevo periodo", Color.FromArgb(40, 170, 80),  new Point(720, 8), 130);
-            var btnCerrarPer    = Btn("Cerrar periodo",  Color.FromArgb(160, 100, 20), new Point(860, 8), 110);
-            var btnRecibo       = Btn("Recibo PDF",      Color.FromArgb(180, 50, 30),  new Point(980, 8), 100);
-            var btnPlanilla     = Btn("Plan. IVSS",      Color.FromArgb(40, 80, 160),  new Point(1090, 8), 90);
-            var btnAportePdf    = Btn("Aportes PDF",     Color.FromArgb(100, 40, 150), new Point(1190, 8), 90);
-            hdr.Controls.AddRange(new Control[]
-                { btnNuevoPeriodo, btnCerrarPer, btnRecibo, btnPlanilla, btnAportePdf });
+            var btnNuevoPeriodo = Btn("+ Nuevo periodo", Color.FromArgb(40, 170, 80),  130);
+            var btnCerrarPer    = Btn("Cerrar periodo",  Color.FromArgb(160, 100, 20), 110);
+            var btnRecibo       = Btn("Recibo PDF",      Color.FromArgb(180, 50, 30),  100);
+            var btnPlanilla     = Btn("Plan. IVSS",      Color.FromArgb(40, 80, 160),   90);
+            var btnAportePdf    = Btn("Aportes PDF",     Color.FromArgb(100, 40, 150),  90);
+
+            var pnlHdrRight = new FlowLayoutPanel {
+                Dock = DockStyle.Right, AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false, BackColor = Color.Transparent,
+                Padding = new Padding(0, 9, 8, 0)
+            };
+            var _btnAyN = new Button {
+                Text = "? Ayuda", Size = new Size(80, 30),
+                BackColor = Color.FromArgb(80, 50, 150), ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+                Cursor = Cursors.Hand, Margin = new Padding(0, 0, 4, 0)
+            };
+            _btnAyN.FlatAppearance.BorderSize = 0;
+            _btnAyN.Click += (s, e) => AyudaService.Mostrar(this, "FrmProcesarNomina");
+            pnlHdrRight.Controls.AddRange(new Control[]
+                { btnNuevoPeriodo, btnCerrarPer, btnRecibo, btnPlanilla, btnAportePdf, _btnAyN });
+            hdr.Controls.Add(pnlHdrRight);
+
+            var _tipN = AyudaService.CrearTooltip();
+            AyudaService.Tip(_tipN, _btnAyN,       "Abrir guía de ayuda de nómina");
+            AyudaService.Tip(_tipN, btnNuevoPeriodo,"Crear un nuevo período de nómina para la semana actual");
+            AyudaService.Tip(_tipN, btnCerrarPer,   "Cerrar el período — los montos quedan definitivos");
+            AyudaService.Tip(_tipN, btnRecibo,       "Generar recibo de pago PDF del empleado seleccionado");
+            AyudaService.Tip(_tipN, btnPlanilla,     "Generar planilla IVSS del período");
+            AyudaService.Tip(_tipN, btnAportePdf,    "Generar resumen de aportes patronales en PDF");
 
             // ── Barra de periodo ──────────────────────────────────────────
             var pnlPer = new Panel { Dock = DockStyle.Top, Height = 44,
@@ -69,7 +94,7 @@ namespace SistemaGestion
 
             // Tab 1: Nomina detallada
             var tabNomina = new TabPage("Nomina detallada");
-            dgv = MkGrid(Color.FromArgb(30, 120, 60));
+            dgv = MkGrid(Color.FromArgb(26, 74, 138));
             dgv.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(235, 248, 237);
             dgv.CellDoubleClick += (s, e) => EditarLinea();
 
@@ -192,6 +217,13 @@ namespace SistemaGestion
                     BindGridAportes();
                 }
             };
+
+            VentanaPrefs.Restaurar(this);
+            var _tp = new System.Windows.Forms.Timer { Interval = 800 };
+            _tp.Tick        += (s, e) => { _tp.Stop(); VentanaPrefs.Guardar(this); };
+            SizeChanged     += (s, e) => { _tp.Stop(); _tp.Start(); };
+            LocationChanged += (s, e) => { _tp.Stop(); _tp.Start(); };
+            FormClosed      += (s, e) => { _tp.Stop(); _tp.Dispose(); };
         }
 
         private DataGridView MkGrid(Color h)
@@ -539,6 +571,14 @@ namespace SistemaGestion
                 Font = new Font("Segoe UI", 8f, FontStyle.Bold), Cursor = Cursors.Hand };
             b.FlatAppearance.BorderSize = 0; return b;
         }
+        private Button Btn(string t, Color c, int w = 90)
+        {
+            var b = new Button { Text = t, Size = new Size(w, 32), BackColor = c,
+                ForeColor = Color.White, FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 8f, FontStyle.Bold), Cursor = Cursors.Hand,
+                Margin = new Padding(0, 0, 4, 0) };
+            b.FlatAppearance.BorderSize = 0; return b;
+        }
 
         private class PeriodoItem
         {
@@ -561,10 +601,10 @@ namespace SistemaGestion
             Text = "Nuevo Periodo de Nomina";
             Size = new Size(420, 300); StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = MinimizeBox = false;
-            BackColor = Color.FromArgb(245, 248, 245);
+            BackColor = Color.FromArgb(240, 244, 250);
 
             var banner = new Panel { Dock = DockStyle.Top, Height = 38,
-                BackColor = Color.FromArgb(30, 120, 60) };
+                BackColor = Color.FromArgb(26, 74, 138) };
             banner.Controls.Add(new Label { Text = Text, ForeColor = Color.White,
                 Font = new Font("Segoe UI", 10f, FontStyle.Bold), AutoSize = true, Location = new Point(12, 9) });
             Controls.Add(banner);
@@ -600,7 +640,7 @@ namespace SistemaGestion
             Controls.Add(txtObs); y += 44;
 
             var bOk = new Button { Text = "Crear periodo", Location = new Point(80, y), Size = new Size(150, 33),
-                BackColor = Color.FromArgb(30, 120, 60), ForeColor = Color.White,
+                BackColor = Color.FromArgb(26, 74, 138), ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9f, FontStyle.Bold) };
             bOk.FlatAppearance.BorderSize = 0;
             var bCan = new Button { Text = "Cancelar", DialogResult = DialogResult.Cancel,
@@ -672,10 +712,10 @@ namespace SistemaGestion
             Text = "Nomina — " + emp.NombreCompleto;
             Size = new Size(560, 580); StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = MinimizeBox = false;
-            BackColor = Color.FromArgb(245, 248, 245);
+            BackColor = Color.FromArgb(240, 244, 250);
 
             var banner = new Panel { Dock = DockStyle.Top, Height = 50,
-                BackColor = Color.FromArgb(30, 120, 60) };
+                BackColor = Color.FromArgb(26, 74, 138) };
             banner.Controls.Add(new Label { Text = emp.NombreCompleto, ForeColor = Color.White,
                 Font = new Font("Segoe UI", 11f, FontStyle.Bold), AutoSize = true, Location = new Point(12, 8) });
             banner.Controls.Add(new Label
@@ -745,7 +785,7 @@ namespace SistemaGestion
             Controls.AddRange(new Control[] { lblN, lblNeto, lblNetoBs }); y += 50;
 
             var bOk = new Button { Text = "Guardar", Location = new Point(120, y),
-                Size = new Size(150, 33), BackColor = Color.FromArgb(30, 120, 60),
+                Size = new Size(150, 33), BackColor = Color.FromArgb(26, 74, 138),
                 ForeColor = Color.White, FlatStyle = FlatStyle.Flat,
                 Font = new Font("Segoe UI", 10f, FontStyle.Bold) };
             bOk.FlatAppearance.BorderSize = 0;

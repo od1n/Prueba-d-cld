@@ -10,7 +10,7 @@ namespace SistemaGestion
     // =========================================================================
     //  REPORTE DE COMPARACION POR PERIODO
     // =========================================================================
-    public class FrmComparacion : Form
+    public class FrmComparacion : FormBase
     {
         private DateTimePicker dtpPer1Desde, dtpPer1Hasta;
         private DateTimePicker dtpPer2Desde, dtpPer2Hasta;
@@ -56,18 +56,18 @@ namespace SistemaGestion
             // Toolbar
             var pnlToolbar = new Panel { Dock = DockStyle.Top, Height = 80, BackColor = Color.FromArgb(230, 232, 245) };
 
-            // Periodo 1
+            // Periodo 1 — DTP a 115px para que el formato dd/MM/yyyy entre completo.
             var pnlP1 = new GroupBox
             {
                 Text = "Periodo 1 (actual)", Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
-                Location = new Point(8, 6), Size = new Size(280, 66),
+                Location = new Point(8, 6), Size = new Size(335, 66),
                 ForeColor = Color.FromArgb(22, 55, 120)
             };
-            pnlP1.Controls.Add(new Label { Text = "Desde:", Location = new Point(8, 22), AutoSize = true });
-            dtpPer1Desde = new DateTimePicker { Location = new Point(55, 20), Size = new Size(100, 24), Format = DateTimePickerFormat.Short };
+            pnlP1.Controls.Add(new Label { Text = "Desde:", Location = new Point(8, 24), AutoSize = true });
+            dtpPer1Desde = new DateTimePicker { Location = new Point(55, 20), Size = new Size(115, 24), Format = DateTimePickerFormat.Short };
             pnlP1.Controls.Add(dtpPer1Desde);
-            pnlP1.Controls.Add(new Label { Text = "Hasta:", Location = new Point(160, 22), AutoSize = true });
-            dtpPer1Hasta = new DateTimePicker { Location = new Point(200, 20), Size = new Size(70, 24), Format = DateTimePickerFormat.Short };
+            pnlP1.Controls.Add(new Label { Text = "Hasta:", Location = new Point(178, 24), AutoSize = true });
+            dtpPer1Hasta = new DateTimePicker { Location = new Point(218, 20), Size = new Size(115, 24), Format = DateTimePickerFormat.Short };
             pnlP1.Controls.Add(dtpPer1Hasta);
             pnlToolbar.Controls.Add(pnlP1);
 
@@ -75,20 +75,20 @@ namespace SistemaGestion
             var pnlP2 = new GroupBox
             {
                 Text = "Periodo 2 (comparar con)", Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
-                Location = new Point(298, 6), Size = new Size(280, 66),
+                Location = new Point(353, 6), Size = new Size(335, 66),
                 ForeColor = Color.FromArgb(160, 40, 40)
             };
-            pnlP2.Controls.Add(new Label { Text = "Desde:", Location = new Point(8, 22), AutoSize = true });
-            dtpPer2Desde = new DateTimePicker { Location = new Point(55, 20), Size = new Size(100, 24), Format = DateTimePickerFormat.Short };
+            pnlP2.Controls.Add(new Label { Text = "Desde:", Location = new Point(8, 24), AutoSize = true });
+            dtpPer2Desde = new DateTimePicker { Location = new Point(55, 20), Size = new Size(115, 24), Format = DateTimePickerFormat.Short };
             pnlP2.Controls.Add(dtpPer2Desde);
-            pnlP2.Controls.Add(new Label { Text = "Hasta:", Location = new Point(160, 22), AutoSize = true });
-            dtpPer2Hasta = new DateTimePicker { Location = new Point(200, 20), Size = new Size(70, 24), Format = DateTimePickerFormat.Short };
+            pnlP2.Controls.Add(new Label { Text = "Hasta:", Location = new Point(178, 24), AutoSize = true });
+            dtpPer2Hasta = new DateTimePicker { Location = new Point(218, 20), Size = new Size(115, 24), Format = DateTimePickerFormat.Short };
             pnlP2.Controls.Add(dtpPer2Hasta);
             pnlToolbar.Controls.Add(pnlP2);
 
             btnComparar = new Button
             {
-                Text = "Comparar", Size = new Size(100, 34), Location = new Point(590, 20),
+                Text = "Comparar", Size = new Size(100, 34), Location = new Point(700, 20),
                 FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(41, 128, 185),
                 ForeColor = Color.White, Font = new Font("Segoe UI", 9f, FontStyle.Bold),
                 FlatAppearance = { BorderSize = 0 }, Cursor = Cursors.Hand
@@ -98,7 +98,7 @@ namespace SistemaGestion
 
             btnPdf = new Button
             {
-                Text = "Exportar PDF", Size = new Size(110, 34), Location = new Point(700, 20),
+                Text = "Exportar PDF", Size = new Size(110, 34), Location = new Point(810, 20),
                 FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(192, 57, 43),
                 ForeColor = Color.White, Font = new Font("Segoe UI", 9f, FontStyle.Bold),
                 FlatAppearance = { BorderSize = 0 }, Cursor = Cursors.Hand
@@ -132,6 +132,23 @@ namespace SistemaGestion
             lblTituloPer2 = new Label { Text = "Periodo 2", AutoSize = true, Location = new Point(380, 6),
                 Font = new Font("Segoe UI", 8.5f, FontStyle.Bold), ForeColor = Color.FromArgb(160, 40, 40) };
             pnlGridHeader.Controls.AddRange(new Control[] { lblTituloPer1, lblTituloPer2 });
+
+            var _btnAyC = new Button {
+                Text = "? Ayuda", Size = new Size(80, 28),
+                BackColor = Color.FromArgb(80, 50, 150), ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+                Cursor = Cursors.Hand
+            };
+            _btnAyC.FlatAppearance.BorderSize = 0;
+            _btnAyC.Click += (s, e) => AyudaService.Mostrar(this, "FrmComparacion");
+            var _tipC = AyudaService.CrearTooltip();
+            AyudaService.Tip(_tipC, _btnAyC, "Abrir guía de ayuda");
+            VentanaPrefs.Restaurar(this);
+            var _tp = new System.Windows.Forms.Timer { Interval = 800 };
+            _tp.Tick        += (s, e) => { _tp.Stop(); VentanaPrefs.Guardar(this); };
+            SizeChanged     += (s, e) => { _tp.Stop(); _tp.Start(); };
+            LocationChanged += (s, e) => { _tp.Stop(); _tp.Start(); };
+            FormClosed      += (s, e) => { _tp.Stop(); _tp.Dispose(); };
 
             dgv = new DataGridView
             {

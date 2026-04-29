@@ -1,106 +1,138 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
 
 namespace SistemaGestion
 {
-    // ══════════════════════════════════════════════════════════════
-    //  SUBMENÚ TRANSACCIONES
-    // ══════════════════════════════════════════════════════════════
-    public class FrmTransacciones : Form
+    public class FrmTransacciones : FormBase
     {
         public FrmTransacciones()
         {
             Text = "Transacciones";
-            Size = new Size(620, 680);   // altura aumentada para 3 filas
+            ClientSize = new Size(880, 500);
+            MinimumSize = new Size(640, 380);
             StartPosition = FormStartPosition.CenterParent;
-            FormBorderStyle = FormBorderStyle.FixedDialog;
-            MaximizeBox = false;
-            BackColor = Color.FromArgb(236, 236, 236);
-            Font = new Font("Segoe UI", 9f);
+            FormBorderStyle = FormBorderStyle.Sizable;
+            MaximizeBox = true;
+            BackColor = UITheme.Fondo;
+            Font = UITheme.Body;
 
-            var lblTitulo = new Label
+            // ── Header oscuro ───────────────────────────────────────────────
+            var hdr = new Panel
             {
-                Text = "TRANSACCIONES",
-                Font = new Font("Segoe UI", 12f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(50, 50, 120),
-                AutoSize = false,
-                TextAlign = ContentAlignment.MiddleCenter,
-                Dock = DockStyle.Top,
-                Height = 45,
-                BackColor = Color.FromArgb(220, 220, 240)
+                Dock = DockStyle.Top, Height = 60,
+                BackColor = UITheme.AzulOscuro
+            };
+            hdr.Paint += (s, e) =>
+            {
+                e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                using var fTit = new Font("Segoe UI", 14f, FontStyle.Bold);
+                e.Graphics.DrawString("Transacciones", fTit, Brushes.White, 20, 12);
+                using var fSub = new Font("Segoe UI", 9.5f);
+                using var brSub = new SolidBrush(Color.FromArgb(168, 177, 187));
+                e.Graphics.DrawString("Operaciones de venta, cobros, precios y egresos",
+                    fSub, brSub, 22, 34);
             };
 
-            // Fila 1
-            var btnFacturas   = CrearBoton("Facturas",                Color.FromArgb(60, 100, 180),  new Point(60,  70));
-            var btnProduccion = CrearBoton("Ordenes de\nProduccion",  Color.FromArgb(60, 120, 40),   new Point(310, 70));
-
-            // Fila 2
-            var btnCuentas    = CrearBoton("Cuentas por\nCobrar",     Color.FromArgb(40, 140, 140),  new Point(60,  240));
-            var btnPrecios    = CrearBoton("Cambio de\nPrecios y Costos", Color.FromArgb(180, 110, 30), new Point(310, 240));
-
-            // Fila 3 — Cuentas por Pagar centrado
-            var btnCxP        = CrearBoton("Cuentas por\nPagar",      Color.FromArgb(100, 30, 100),  new Point(185, 410));
-
-            var panelBottom = new Panel { Dock = DockStyle.Bottom, Height = 70, BackColor = Color.FromArgb(210, 210, 210) };
-            var btnSalir = new Button
+            // ── Footer claro unificado ──────────────────────────────────────
+            var footer = new Panel
             {
-                Text = "Cerrar",
-                Size = new Size(120, 40),
-                Location = new Point(240, 15),
-                BackColor = Color.FromArgb(180, 60, 60),
-                ForeColor = Color.White,
-                FlatStyle = FlatStyle.Flat,
-                Font = new Font("Segoe UI", 9f, FontStyle.Bold),
-                Cursor = Cursors.Hand
+                Dock = DockStyle.Bottom, Height = 52,
+                BackColor = UITheme.FondoCard
             };
-            btnSalir.FlatAppearance.BorderSize = 0;
-            btnSalir.Click += (s, e) => Close();
-            panelBottom.Controls.Add(btnSalir);
-
-            btnFacturas.Click   += (s, e) => new FrmFacturas().ShowDialog();
-            btnProduccion.Click += (s, e) => new FrmOrdenesProduccion().ShowDialog();
-            btnCuentas.Click    += (s, e) => new FrmCuentasCobrar().ShowDialog();
-            btnPrecios.Click    += (s, e) => new FrmCambioPrecios().ShowDialog();
-            btnCxP.Click        += (s, e) => new FrmCuentasPagar().ShowDialog();
-
-            AplicarHover(btnFacturas,   Color.FromArgb(80,  120, 200), Color.FromArgb(60,  100, 180));
-            AplicarHover(btnProduccion, Color.FromArgb(80,  150,  60), Color.FromArgb(60,  120,  40));
-            AplicarHover(btnCuentas,    Color.FromArgb(60,  160, 160), Color.FromArgb(40,  140, 140));
-            AplicarHover(btnPrecios,    Color.FromArgb(200, 130,  50), Color.FromArgb(180, 110,  30));
-            AplicarHover(btnCxP,        Color.FromArgb(130,  50, 130), Color.FromArgb(100,  30, 100));
-
-            Controls.AddRange(new Control[] {
-                lblTitulo,
-                btnFacturas, btnProduccion,
-                btnCuentas,  btnPrecios,
-                btnCxP,
-                panelBottom
-            });
-        }
-
-        private Button CrearBoton(string texto, Color color, Point location)
-        {
-            var btn = new Button
+            footer.Paint += (s, e) =>
             {
-                Text = texto,
-                Size = new Size(200, 150),
-                Location = location,
-                BackColor = color,
-                ForeColor = Color.White,
+                using var pen = new Pen(UITheme.Borde, 1f);
+                e.Graphics.DrawLine(pen, 0, 0, footer.Width, 0);
+            };
+            var btnCerrar = new Button
+            {
+                Text = "Cerrar", Width = 130, Height = 36,
                 FlatStyle = FlatStyle.Flat,
+                BackColor = UITheme.Azul, ForeColor = Color.White,
                 Font = new Font("Segoe UI", 10f, FontStyle.Bold),
-                TextAlign = ContentAlignment.MiddleCenter,
-                Cursor = Cursors.Hand
+                Cursor = Cursors.Hand,
+                Margin = new Padding(0, 7, 16, 7)
             };
-            btn.FlatAppearance.BorderSize = 0;
-            return btn;
-        }
+            btnCerrar.FlatAppearance.BorderSize = 0;
+            btnCerrar.FlatAppearance.MouseOverBackColor = UITheme.AzulHover;
+            btnCerrar.Click += (s, e) => Close();
 
-        private void AplicarHover(Button btn, Color colorHover, Color colorNormal)
-        {
-            btn.MouseEnter += (s, e) => btn.BackColor = colorHover;
-            btn.MouseLeave += (s, e) => btn.BackColor = colorNormal;
+            var flowR = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Right, FlowDirection = FlowDirection.RightToLeft,
+                BackColor = UITheme.FondoCard, Width = 170, WrapContents = false
+            };
+            flowR.Controls.Add(btnCerrar);
+            footer.Controls.Add(flowR);
+
+            // ── Contenedor de tarjetas con padding ──────────────────────────
+            var content = new Panel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = UITheme.Fondo,
+                Padding = new Padding(28, 24, 28, 24)
+            };
+            var grid = new Panel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = UITheme.Fondo
+            };
+            content.Controls.Add(grid);
+
+            // ── Definición de módulos ───────────────────────────────────────
+            // Colores coherentes con la paleta UITheme y MenuPrincipalV2.
+            var tip = AyudaService.CrearTooltip();
+            var tarjetas = new List<Panel>();
+
+            void Add(string ico, string titulo, string sub, Color color,
+                     Action accion, string textoTip)
+            {
+                var card = UICards.CrearTarjeta(ico, titulo, sub, color,
+                    accion, tieneAcceso: true, tip: tip, textoTooltip: textoTip);
+                tarjetas.Add(card);
+                grid.Controls.Add(card);
+            }
+
+            Add("◈", "Facturas",            "Emitir y consultar",
+                UITheme.Azul,
+                () => new FrmFacturas().ShowDialog(),
+                "Ver, emitir y gestionar todas las facturas de venta");
+
+            Add("◫", "Cuentas por Cobrar",  "Saldos y vencimientos",
+                Color.FromArgb(0, 150, 136),       // teal
+                () => new FrmCuentasCobrar().ShowDialog(),
+                "Gestionar saldos pendientes de clientes");
+
+            Add("▤", "Cambio de Precios",   "Actualizar precios y costos",
+                UITheme.Naranja,                   // ámbar
+                () => new FrmCambioPrecios().ShowDialog(),
+                "Actualizar precios de venta y costos del inventario");
+
+            Add("◉", "Egresos",             "Compras, gastos y MP",
+                UITheme.Verde,
+                () => new FrmEgresos().ShowDialog(),
+                "Materia prima, servicios, mantenimiento, oficina y CxP");
+
+            Add("◎", "Cuentas por Pagar",   "Obligaciones pendientes",
+                Color.FromArgb(120, 60, 140),      // morado
+                () => new FrmCuentasPagar().ShowDialog(),
+                "Ver y gestionar obligaciones con proveedores");
+
+            Add("▣", "Ingreso Producción",  "Registro diario",
+                UITheme.Cyan,
+                () => new FrmRegistroProduccionDia().ShowDialog(),
+                "Registrar la producción diaria de cada molde");
+
+            // Distribución responsive: columnas según ancho disponible,
+            // con buen aire entre tarjetas para que respiren visualmente.
+            UICards.DistribuirGrid(grid, tarjetas, minAncho: 250, alto: 124, gap: 24);
+
+            // Orden de Add: Fill antes que Top/Bottom (z-order inverso)
+            Controls.Add(content);
+            Controls.Add(footer);
+            Controls.Add(hdr);
         }
     }
 }

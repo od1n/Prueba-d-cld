@@ -7,7 +7,7 @@ namespace SistemaGestion
     // ══════════════════════════════════════════════════════════════════════════
     //  PERFIL DE USUARIO — Cambio de contraseña + Preferencias
     // ══════════════════════════════════════════════════════════════════════════
-    public class FrmPerfil : Form
+    public class FrmPerfil : FormBase
     {
         // ── Tabs ──────────────────────────────────────────────────────────
         private TabControl tabs;

@@ -5,7 +5,7 @@ using System.Windows.Forms;
 
 namespace SistemaGestion
 {
-    public class FrmCuentasCobrar : Form
+    public class FrmCuentasCobrar : FormBase
     {
         private DataGridView dgv;
         private Label lblResumen;
@@ -15,16 +15,38 @@ namespace SistemaGestion
             Text = "Cuentas por Cobrar";
             Size = new Size(950, 560);
             StartPosition = FormStartPosition.CenterParent;
-            BackColor = Color.FromArgb(244, 252, 252);
+            BackColor = Color.FromArgb(240, 244, 250);
 
-            var hdr = new Panel { Dock = DockStyle.Top, Height = 50, BackColor = Color.FromArgb(40, 140, 140) };
+            var hdr = new Panel { Dock = DockStyle.Top, Height = 50, BackColor = Color.FromArgb(26, 74, 138) };
             hdr.Controls.Add(new Label { Text = "Cuentas por Cobrar", ForeColor = Color.White,
                 Font = new Font("Segoe UI", 12f, FontStyle.Bold), AutoSize = true, Location = new Point(12, 13) });
 
-            var btnNueva  = Btn("+ Nueva",   Color.FromArgb(40, 160, 80),  new Point(600, 8));
-            var btnEditar = Btn("Editar",    Color.FromArgb(60, 100, 180), new Point(698, 8));
-            var btnPago   = Btn("Reg. Pago", Color.FromArgb(180, 130, 20), new Point(795, 8));
-            hdr.Controls.AddRange(new Control[] { btnNueva, btnEditar, btnPago });
+            var btnNueva  = Btn("+ Nueva",   Color.FromArgb(40, 160, 80));
+            var btnEditar = Btn("Editar",    Color.FromArgb(60, 100, 180));
+            var btnPago   = Btn("Reg. Pago", Color.FromArgb(180, 130, 20));
+            
+            var _btnAy = new Button {
+                Text = "? Ayuda", Size = new Size(80, 32),
+                BackColor = Color.FromArgb(80, 50, 150), ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+                Cursor = Cursors.Hand, Margin = new Padding(0, 0, 4, 0)
+            };
+            _btnAy.FlatAppearance.BorderSize = 0;
+            _btnAy.Click += (s, e) => AyudaService.Mostrar(this, "FrmCuentasCobrar");
+            var pnlHdr = new FlowLayoutPanel {
+                Dock = DockStyle.Right, AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false, BackColor = Color.Transparent,
+                Padding = new Padding(0, 9, 8, 0)
+            };
+            pnlHdr.Controls.AddRange(new Control[] { _btnAy, btnNueva, btnEditar, btnPago });
+            hdr.Controls.Add(pnlHdr);
+            var _tipF = AyudaService.CrearTooltip();
+            AyudaService.Tip(_tipF, _btnAy, "Abrir guía de ayuda de este módulo");
+            AyudaService.Tip(_tipF, btnNueva, "Registrar una nueva cuenta por cobrar manualmente");
+            AyudaService.Tip(_tipF, btnEditar, "Modificar los datos de la cuenta seleccionada");
+            AyudaService.Tip(_tipF, btnPago, "Registrar un abono o pago total de la cuenta seleccionada");
 
             dgv = new DataGridView { Dock = DockStyle.Fill, ReadOnly = true,
                 SelectionMode = DataGridViewSelectionMode.FullRowSelect,
@@ -50,7 +72,15 @@ namespace SistemaGestion
 
             Controls.AddRange(new Control[] { dgv, hdr, footer });
 
-            btnNueva.Click  += (s, e) => { using var d = new DlgCuenta(null); if (d.ShowDialog() == DialogResult.OK) { DatabaseService.InsertarCuenta(d.Resultado); CargarDatos(); } };
+            btnNueva.Click  += (s, e) => { using var d = new DlgCuenta(null); if (d.ShowDialog() == DialogResult.OK) { DatabaseService.InsertarCuenta(d.Resultado); 
+            VentanaPrefs.Restaurar(this);
+            var _vpT = new System.Windows.Forms.Timer { Interval = 800 };
+            _vpT.Tick        += (s, e) => { _vpT.Stop(); VentanaPrefs.Guardar(this); };
+            SizeChanged     += (s, e) => { _vpT.Stop(); _vpT.Start(); };
+            LocationChanged += (s, e) => { _vpT.Stop(); _vpT.Start(); };
+            FormClosed      += (s, e) => { _vpT.Stop(); _vpT.Dispose(); };
+
+            CargarDatos(); } };
             btnEditar.Click += (s, e) =>
             {
                 if (dgv.CurrentRow == null) return;
@@ -66,6 +96,10 @@ namespace SistemaGestion
         }
 
         private Button Btn(string t, Color c, Point p) { var b = new Button { Text = t, Size = new Size(90, 33), Location = p, BackColor = c, ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8.5f, FontStyle.Bold), Cursor = Cursors.Hand }; b.FlatAppearance.BorderSize = 0; return b; }
+        private Button Btn(string t, Color c)
+        { var b = new Button { Text = t, Size = new Size(90, 33), BackColor = c, ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8.5f, FontStyle.Bold), Cursor = Cursors.Hand }; b.Margin = new Padding(0, 0, 4, 0);
+            b.FlatAppearance.BorderSize = 0; return b; }
+
 
         private void CargarDatos()
         {
@@ -134,8 +168,8 @@ namespace SistemaGestion
         {
             Text = cc == null ? "Nueva Cuenta" : "Editar Cuenta";
             Size = new Size(420, 420); StartPosition = FormStartPosition.CenterParent;
-            FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = MinimizeBox = false;
-            BackColor = Color.FromArgb(244, 252, 252);
+            FormBorderStyle = FormBorderStyle.Sizable; MaximizeBox = true; MinimizeBox = false;
+            BackColor = Color.FromArgb(240, 244, 250);
 
             int y = 15;
             L("Cliente:", y);       txtCliente  = T("", y); y += 38;
@@ -158,10 +192,10 @@ namespace SistemaGestion
             }
 
             var bOk = new Button { Text = "Guardar", Location = new Point(70, y), Size = new Size(110, 34),
-                BackColor = Color.FromArgb(40, 140, 140), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
+                BackColor = Color.FromArgb(30, 130, 70), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
             bOk.FlatAppearance.BorderSize = 0;
             var bCan = new Button { Text = "Cancelar", DialogResult = DialogResult.Cancel, Location = new Point(200, y), Size = new Size(110, 34),
-                BackColor = Color.FromArgb(150, 60, 60), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
+                BackColor = Color.FromArgb(160, 50, 50), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
             bCan.FlatAppearance.BorderSize = 0;
             bOk.Click += (s, e) =>
             {
@@ -173,6 +207,16 @@ namespace SistemaGestion
                 Resultado.Estado = cmbEstado.SelectedItem.ToString();
                 DialogResult = DialogResult.OK;
             };
+            
+            
+            var _dlgTip = AyudaService.CrearTooltip();
+            if (txtCliente != null) AyudaService.Tip(_dlgTip, txtCliente, "Nombre del cliente que debe");
+            if (txtConcepto != null) AyudaService.Tip(_dlgTip, txtConcepto, "Descripción de la deuda o servicio");
+            if (numMonto != null) AyudaService.Tip(_dlgTip, numMonto, "Monto total de la deuda en USD");
+            if (numPagado != null) AyudaService.Tip(_dlgTip, numPagado, "Monto ya recibido como pago");
+            if (dtpVence != null) AyudaService.Tip(_dlgTip, dtpVence, "Fecha límite de pago — después genera alerta de vencimiento");
+            // Recordar posición y tamaño
+            VentanaPrefs.Restaurar(this);
             Controls.AddRange(new Control[] { bOk, bCan });
         }
 
@@ -189,8 +233,8 @@ namespace SistemaGestion
         {
             Text = "Registrar Pago"; Size = new Size(320, 180);
             StartPosition = FormStartPosition.CenterParent;
-            FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = MinimizeBox = false;
-            BackColor = Color.FromArgb(244, 252, 252);
+            FormBorderStyle = FormBorderStyle.Sizable; MaximizeBox = true; MinimizeBox = false;
+            BackColor = Color.FromArgb(240, 244, 250);
 
             Controls.Add(new Label { Text = $"Saldo pendiente: {saldo:C2}", Location = new Point(20, 20), AutoSize = true, Font = new Font("Segoe UI", 10f, FontStyle.Bold) });
             Controls.Add(new Label { Text = "Monto a pagar:", Location = new Point(20, 55), AutoSize = true, Font = new Font("Segoe UI", 9f) });
@@ -198,12 +242,15 @@ namespace SistemaGestion
             Controls.Add(num);
 
             var bOk = new Button { Text = "Registrar", Location = new Point(60, 100), Size = new Size(100, 32),
-                BackColor = Color.FromArgb(40, 140, 140), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
+                BackColor = Color.FromArgb(30, 130, 70), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
             bOk.FlatAppearance.BorderSize = 0;
             var bCan = new Button { Text = "Cancelar", DialogResult = DialogResult.Cancel, Location = new Point(175, 100), Size = new Size(100, 32),
-                BackColor = Color.FromArgb(150, 60, 60), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
+                BackColor = Color.FromArgb(160, 50, 50), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
             bCan.FlatAppearance.BorderSize = 0;
             bOk.Click += (s, e) => { MontoPago = num.Value; DialogResult = DialogResult.OK; };
+            
+            // Recordar posición y tamaño
+            VentanaPrefs.Restaurar(this);
             Controls.AddRange(new Control[] { bOk, bCan });
         }
     }

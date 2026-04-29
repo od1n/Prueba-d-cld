@@ -7,7 +7,7 @@ using System.Windows.Forms;
 
 namespace SistemaGestion
 {
-    public class FrmLogAuditoria : Form
+    public class FrmLogAuditoria : FormBase
     {
         // ── Filtros ───────────────────────────────────────────────────────
         private DateTimePicker dtpDesde, dtpHasta;

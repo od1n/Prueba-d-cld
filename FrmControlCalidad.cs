@@ -10,7 +10,7 @@ namespace SistemaGestion
     // ══════════════════════════════════════════════════════════════════════════
     //  CONTROL DE CALIDAD — HISTORIAL DE INSPECCIONES
     // ══════════════════════════════════════════════════════════════════════════
-    public class FrmControlCalidad : Form
+    public class FrmControlCalidad : FormBase
     {
         private DataGridView dgv;
         private Label        lblResumen;
@@ -38,11 +38,34 @@ namespace SistemaGestion
                 AutoSize = true, Location = new Point(12, 13)
             });
 
-            var btnNueva  = Btn("+ Nueva insp.",  Color.FromArgb(40, 160, 80),  new Point(700, 8), 110);
-            var btnVer    = Btn("Ver detalle",     Color.FromArgb(60, 110, 190), new Point(820, 8));
-            var btnElim   = Btn("Eliminar",        Color.FromArgb(180, 50, 50),  new Point(918, 8));
-            var btnReporte= Btn("Reporte PDF",     Color.FromArgb(160, 60, 20),  new Point(1016, 8), 100);
-            hdr.Controls.AddRange(new Control[] { btnNueva, btnVer, btnElim, btnReporte });
+            var btnNueva  = Btn("+ Nueva insp.",  Color.FromArgb(40, 160, 80));
+            var btnVer    = Btn("Ver detalle",     Color.FromArgb(60, 110, 190));
+            var btnElim   = Btn("Eliminar",        Color.FromArgb(180, 50, 50));
+            var btnReporte= Btn("Reporte PDF",     Color.FromArgb(160, 60, 20));
+            
+            var _tpF2 = AyudaService.CrearTooltip();
+            var _btnA2 = new Button {
+                Text = "? Ayuda", Size = new Size(80, 32),
+                BackColor = Color.FromArgb(80, 50, 150), ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+                Cursor = Cursors.Hand, Margin = new Padding(0, 0, 4, 0)
+            };
+            _btnA2.FlatAppearance.BorderSize = 0;
+            _btnA2.Click += (s, e) => AyudaService.Mostrar(this, "FrmControlCalidad");
+            AyudaService.Tip(_tpF2, _btnA2, "Abrir guía de ayuda");
+            AyudaService.Tip(_tpF2, btnNueva, "Registrar una nueva inspección de control de calidad");
+            AyudaService.Tip(_tpF2, btnVer, "Ver el detalle completo de la inspección seleccionada");
+            AyudaService.Tip(_tpF2, btnElim, "Eliminar la inspección seleccionada");
+            AyudaService.Tip(_tpF2, btnReporte, "Generar reporte PDF de inspecciones");
+            var _pnlHF = new FlowLayoutPanel {
+                Dock = DockStyle.Right, AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false, BackColor = Color.Transparent,
+                Padding = new Padding(0, 9, 8, 0)
+            };
+            _pnlHF.Controls.AddRange(new Control[] { _btnA2, btnNueva, btnVer, btnElim, btnReporte });
+            hdr.Controls.Add(_pnlHF);
 
             // ── KPIs ──────────────────────────────────────────────────────
             var pnlKpis = new Panel
@@ -125,6 +148,14 @@ namespace SistemaGestion
             btnVer.Click     += (s, e) => VerDetalle();
             btnElim.Click    += (s, e) => Eliminar();
             btnReporte.Click += (s, e) => ExportarPdf();
+
+            
+            VentanaPrefs.Restaurar(this);
+            var _vpT = new System.Windows.Forms.Timer { Interval = 800 };
+            _vpT.Tick        += (s, e) => { _vpT.Stop(); VentanaPrefs.Guardar(this); };
+            SizeChanged     += (s, e) => { _vpT.Stop(); _vpT.Start(); };
+            LocationChanged += (s, e) => { _vpT.Stop(); _vpT.Start(); };
+            FormClosed      += (s, e) => { _vpT.Stop(); _vpT.Dispose(); };
 
             CargarDatos();
 
@@ -437,6 +468,18 @@ namespace SistemaGestion
             b.FlatAppearance.BorderSize = 0;
             return b;
         }
+        private Button Btn(string t, Color c, int w = 90)
+        {
+            var b = new Button
+            {
+                Text = t, Size = new Size(w, 33), BackColor = c,
+                ForeColor = Color.White, FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 8f, FontStyle.Bold), Cursor = Cursors.Hand
+            };
+            b.FlatAppearance.BorderSize = 0;
+            return b;
+        }
+
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -451,7 +494,7 @@ namespace SistemaGestion
         {
             Text = "Seleccionar ingreso de produccion";
             Size = new Size(700, 420); StartPosition = FormStartPosition.CenterParent;
-            FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = MinimizeBox = false;
+            FormBorderStyle = FormBorderStyle.Sizable; MaximizeBox = true; MinimizeBox = false;
             BackColor = Color.FromArgb(245, 250, 245);
 
             var hdr = new Panel { Dock = DockStyle.Top, Height = 38, BackColor = Color.FromArgb(60, 120, 40) };
@@ -497,6 +540,8 @@ namespace SistemaGestion
                 Fecha = i.Fecha.ToShortDateString(),
                 i.Estado, i.Responsable
             }).ToList();
+        
+            VentanaPrefs.Restaurar(this);
         }
 
         private void Seleccionar()
@@ -544,13 +589,13 @@ namespace SistemaGestion
                  : "Editar Inspeccion";
             Size = new Size(920, 660);
             StartPosition = FormStartPosition.CenterParent;
-            FormBorderStyle = FormBorderStyle.FixedDialog;
-            MaximizeBox = MinimizeBox = false;
+            FormBorderStyle = FormBorderStyle.Sizable;
+            MaximizeBox = true; MinimizeBox = false;
             BackColor = Color.FromArgb(245, 248, 252);
 
             // Banner
             var banner = new Panel { Dock = DockStyle.Top, Height = 40,
-                BackColor = Color.FromArgb(40, 80, 160) };
+                BackColor = Color.FromArgb(26, 74, 138) };
             banner.Controls.Add(new Label { Text = Text, ForeColor = Color.White,
                 Font = new Font("Segoe UI", 10f, FontStyle.Bold), AutoSize = true,
                 Location = new Point(12, 10) });
@@ -730,7 +775,7 @@ namespace SistemaGestion
             {
                 var bOk = new Button { Text = "Guardar inspeccion",
                     Location = new Point(280, 10), Size = new Size(180, 32),
-                    BackColor = Color.FromArgb(40, 80, 160), ForeColor = Color.White,
+                    BackColor = Color.FromArgb(30, 130, 70), ForeColor = Color.White,
                     FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 10f, FontStyle.Bold) };
                 bOk.FlatAppearance.BorderSize = 0;
                 bOk.Click += (s, e) => Guardar(ins, ingreso);
@@ -745,7 +790,12 @@ namespace SistemaGestion
             bCan.FlatAppearance.BorderSize = 0;
             pBtns.Controls.Add(bCan);
 
+            
+            // Recordar posición y tamaño
+            VentanaPrefs.Restaurar(this);
             Controls.AddRange(new Control[] { banner, pL, pC, pR, pBtns });
+        
+            VentanaPrefs.Restaurar(this);
         }
 
         private (TrackBar, Label) TrackPanel(Panel parent, string titulo, int val, int y)

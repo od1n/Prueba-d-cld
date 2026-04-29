@@ -5,7 +5,7 @@ using System.Windows.Forms;
 
 namespace SistemaGestion
 {
-    public class FrmBeneficiosLOTTT : Form
+    public class FrmBeneficiosLOTTT : FormBase
     {
         private DataGridView dgv;
         private Label        lblRes;
@@ -15,19 +15,42 @@ namespace SistemaGestion
         {
             Text = "Beneficios Anuales — LOTTT Venezuela";
             Size = new Size(1080, 580); StartPosition = FormStartPosition.CenterParent;
-            BackColor = Color.FromArgb(245, 245, 255);
+            BackColor = Color.FromArgb(240, 244, 250);
 
             var hdr = new Panel { Dock = DockStyle.Top, Height = 50,
-                BackColor = Color.FromArgb(100, 40, 150) };
+                BackColor = Color.FromArgb(26, 74, 138) };
             hdr.Controls.Add(new Label { Text = "Beneficios Anuales — LOTTT",
                 ForeColor = Color.White, Font = new Font("Segoe UI", 12f, FontStyle.Bold),
                 AutoSize = true, Location = new Point(12, 13) });
 
-            var btnCalc   = Btn("Calcular beneficios", Color.FromArgb(40, 160, 80),  new Point(560, 8), 150);
-            var btnPagar  = Btn("Marcar pagado",        Color.FromArgb(60, 110, 190), new Point(720, 8), 120);
-            var btnElim   = Btn("Eliminar",             Color.FromArgb(180, 50, 50),  new Point(850, 8));
-            var btnPdf    = Btn("Reporte PDF",          Color.FromArgb(180, 60, 20),  new Point(948, 8), 100);
-            hdr.Controls.AddRange(new Control[] { btnCalc, btnPagar, btnElim, btnPdf });
+            var btnCalc   = Btn("Calcular beneficios", Color.FromArgb(40, 160, 80));
+            var btnPagar  = Btn("Marcar pagado",        Color.FromArgb(60, 110, 190));
+            var btnElim   = Btn("Eliminar",             Color.FromArgb(180, 50, 50));
+            var btnPdf    = Btn("Reporte PDF",          Color.FromArgb(180, 60, 20));
+            
+            var _btnAy = new Button {
+                Text = "? Ayuda", Size = new Size(80, 32),
+                BackColor = Color.FromArgb(80, 50, 150), ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+                Cursor = Cursors.Hand, Margin = new Padding(0, 0, 4, 0)
+            };
+            _btnAy.FlatAppearance.BorderSize = 0;
+            _btnAy.Click += (s, e) => AyudaService.Mostrar(this, "FrmBeneficiosLOTTT");
+            var pnlHdr = new FlowLayoutPanel {
+                Dock = DockStyle.Right, AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false, BackColor = Color.Transparent,
+                Padding = new Padding(0, 9, 8, 0)
+            };
+            pnlHdr.Controls.AddRange(new Control[] { _btnAy, btnCalc, btnPagar, btnElim, btnPdf });
+            hdr.Controls.Add(pnlHdr);
+            var _tipF = AyudaService.CrearTooltip();
+            AyudaService.Tip(_tipF, _btnAy, "Abrir guía de ayuda de este módulo");
+            AyudaService.Tip(_tipF, btnCalc, "Calcular beneficios LOTTT para todos los empleados activos del año seleccionado");
+            AyudaService.Tip(_tipF, btnPagar, "Marcar como pagado el beneficio seleccionado en la lista");
+            AyudaService.Tip(_tipF, btnElim, "Eliminar el registro de beneficio seleccionado");
+            AyudaService.Tip(_tipF, btnPdf, "Generar reporte PDF de todos los beneficios del año");
 
             // Filtros
             var pnlF = new Panel { Dock = DockStyle.Top, Height = 42,
@@ -39,7 +62,19 @@ namespace SistemaGestion
             for (int y = DateTime.Today.Year; y >= DateTime.Today.Year - 5; y--)
                 cmbAnio.Items.Add(y);
             cmbAnio.SelectedIndex = 0;
+            // Bug previo: este handler solo restauraba VentanaPrefs y ademas
+            // se llamaba a Cargar() ANTES de crear cmbTipo -> NullReference.
+            // Solucion: Cargar() se invoca tras crear AMBOS combos, y el
+            // handler de cmbAnio recarga al cambiar el ano.
             cmbAnio.SelectedIndexChanged += (s, e) => Cargar();
+
+            // Persistencia de tamano/posicion de la ventana
+            VentanaPrefs.Restaurar(this);
+            var _vpT = new System.Windows.Forms.Timer { Interval = 800 };
+            _vpT.Tick        += (s, e) => { _vpT.Stop(); VentanaPrefs.Guardar(this); };
+            SizeChanged     += (s, e) => { _vpT.Stop(); _vpT.Start(); };
+            LocationChanged += (s, e) => { _vpT.Stop(); _vpT.Start(); };
+            FormClosed      += (s, e) => { _vpT.Stop(); _vpT.Dispose(); };
 
             pnlF.Controls.Add(new Label { Text = "Tipo:", Location = new Point(165, 13),
                 AutoSize = true, Font = new Font("Segoe UI", 9f, FontStyle.Bold) });
@@ -50,6 +85,9 @@ namespace SistemaGestion
             cmbTipo.SelectedIndex = 0;
             cmbTipo.SelectedIndexChanged += (s, e) => Cargar();
             pnlF.Controls.AddRange(new Control[] { cmbAnio, cmbTipo });
+
+            // Carga inicial -- DESPUES de que ambos combos esten creados.
+            Cargar();
 
             // Info LOTTT
             var pnlInfo = new Panel { Dock = DockStyle.Top, Height = 60,
@@ -103,36 +141,57 @@ namespace SistemaGestion
 
         private void Cargar()
         {
-            int anio   = (int)cmbAnio.SelectedItem;
-            string tipo = cmbTipo.SelectedItem?.ToString();
+            // Defensa: si el form aun no termino de inicializarse, no hacer nada.
+            if (cmbAnio is null || cmbTipo is null || dgv is null || lblRes is null)
+                return;
 
-            var lista = DatabaseService.ObtenerBeneficios(null, anio);
-            if (tipo != "Todos")
-                lista = lista.Where(b => b.TipoBeneficio == tipo).ToList();
-
-            dgv.DataSource = null;
-            dgv.DataSource = lista.Select(b => new
+            try
             {
-                b.Id,
-                Empleado   = b.NombreEmpleado,
-                b.TipoBeneficio,
-                Dias       = b.DiasCorresponden.ToString("N0"),
-                SalDia     = b.SalarioDiarioUSD.ToString("C2"),
-                MontoUSD   = b.MontoUSD.ToString("C2"),
-                TasaBCV    = b.TasaBCV.ToString("N2"),
-                MontoBs    = b.MontoBs.ToString("N2"),
-                FechaPago  = b.FechaPago.ToShortDateString(),
-                b.Estado,
-                b.Observaciones
-            }).ToList();
+                // SelectedItem puede ser null si todavia no hay item seleccionado.
+                if (cmbAnio.SelectedItem is null) return;
+                int anio    = Convert.ToInt32(cmbAnio.SelectedItem);
+                string tipo = cmbTipo.SelectedItem?.ToString() ?? "Todos";
 
-            decimal totalUSD = lista.Sum(b => b.MontoUSD);
-            decimal pendUSD  = lista.Where(b => b.Estado == "Pendiente").Sum(b => b.MontoUSD);
-            lblRes.Text =
-                "  Registros: " + lista.Count +
-                "   |   Total comprometido: $" + totalUSD.ToString("N2") +
-                "   |   Pendiente de pago: $" + pendUSD.ToString("N2") +
-                "   |   Pagados: " + lista.Count(b => b.Estado == "Pagado");
+                var lista = DatabaseService.ObtenerBeneficios(null, anio)
+                            ?? new System.Collections.Generic.List<BeneficioAnual>();
+                if (tipo != "Todos")
+                    lista = lista.Where(b => b.TipoBeneficio == tipo).ToList();
+
+                dgv.DataSource = null;
+                dgv.DataSource = lista.Select(b => new
+                {
+                    b.Id,
+                    Empleado   = b.NombreEmpleado ?? "",
+                    Tipo       = b.TipoBeneficio  ?? "",
+                    Dias       = b.DiasCorresponden.ToString("N0"),
+                    SalDia     = b.SalarioDiarioUSD.ToString("C2"),
+                    MontoUSD   = b.MontoUSD.ToString("C2"),
+                    TasaBCV    = b.TasaBCV.ToString("N2"),
+                    MontoBs    = (b.MontoUSD * b.TasaBCV).ToString("N2"),  // calculado, no propiedad inexistente
+                    FechaPago  = b.FechaPago.ToShortDateString(),
+                    Estado     = b.Estado ?? "",
+                    Obs        = b.Observaciones ?? ""
+                }).ToList();
+
+                decimal totalUSD = lista.Sum(b => b.MontoUSD);
+                decimal pendUSD  = lista.Where(b => b.Estado == "Pendiente").Sum(b => b.MontoUSD);
+                lblRes.Text =
+                    "  Registros: " + lista.Count +
+                    "   |   Total comprometido: $" + totalUSD.ToString("N2") +
+                    "   |   Pendiente de pago: $" + pendUSD.ToString("N2") +
+                    "   |   Pagados: " + lista.Count(b => b.Estado == "Pagado");
+            }
+            catch (Exception ex)
+            {
+                // En lugar de rebotar al Application.ThreadException global
+                // (que abre un MessageBox genérico), mostramos el detalle aqui.
+                MessageBox.Show(this,
+                    "No se pudieron cargar los beneficios.\n\nDetalle: " + ex.Message +
+                    "\n\nTipo: " + ex.GetType().Name,
+                    "Beneficios LOTTT", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                if (lblRes != null) lblRes.Text = "  Sin datos.";
+                try { DatabaseService.RegistrarAuditoria("ERROR_LOTTT", "BeneficiosAnuales", ex.Message); } catch {}
+            }
         }
 
         private void ColorearFilas()
@@ -237,17 +296,30 @@ namespace SistemaGestion
         private void Eliminar()
         {
             if (dgv.CurrentRow == null) return;
+
+            // ALTA-4 FIX: Verificar permisos Admin antes de eliminar
+            if (!Sesion.EsAdmin)
+            {
+                MessageBox.Show("Solo el administrador puede eliminar registros de beneficios.",
+                    "Sin permiso", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
             int id = (int)dgv.CurrentRow.Cells["Id"].Value;
-            if (MessageBox.Show("Eliminar este registro de beneficio?", "Confirmar",
+            if (MessageBox.Show("¿Eliminar este registro de beneficio?", "Confirmar",
                 MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes)
             {
-                using var c = new Microsoft.Data.Sqlite.SqliteConnection(SecurityService.CadenaConexion);
-                c.Open();
-                var cmd = c.CreateCommand();
-                cmd.CommandText = "DELETE FROM BeneficiosAnuales WHERE Id=$id";
-                cmd.Parameters.AddWithValue("$id", id);
-                cmd.ExecuteNonQuery();
-                Cargar();
+                try
+                {
+                    // ALTA-3 FIX: Usar DatabaseService centralizado — nunca SqliteConnection directo
+                    DatabaseService.EliminarBeneficio(id);
+                    Cargar();
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Error al eliminar: {ex.Message}", "Error",
+                        MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
             }
         }
 
@@ -275,5 +347,14 @@ namespace SistemaGestion
                 Font = new Font("Segoe UI", 8f, FontStyle.Bold), Cursor = Cursors.Hand };
             b.FlatAppearance.BorderSize = 0; return b;
         }
+        private Button Btn(string t, Color c, int w = 90)
+        {
+            var b = new Button { Text = t, Size = new Size(w, 33), BackColor = c,
+                ForeColor = Color.White, FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 8f, FontStyle.Bold), Cursor = Cursors.Hand };
+            b.Margin = new Padding(0, 0, 4, 0);
+            b.FlatAppearance.BorderSize = 0; return b;
+        }
+
     }
 }

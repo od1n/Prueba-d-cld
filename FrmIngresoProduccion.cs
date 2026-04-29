@@ -5,7 +5,7 @@ using System.Windows.Forms;
 
 namespace SistemaGestion
 {
-    public class FrmIngresoProduccion : Form
+    public class FrmIngresoProduccion : FormBase
     {
         private DataGridView dgv;
         private Label lblResumen;

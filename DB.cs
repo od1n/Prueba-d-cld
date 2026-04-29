@@ -25,6 +25,7 @@ namespace SistemaGestion
         public string   Proveedores   { get; set; }
         public DateTime UltimaActualz { get; set; }
         public string   CodProveedor  { get; set; }
+        public decimal  PesoKg        { get; set; }  // peso en kg de una unidad
     }
 
     public class DetalleFactura
@@ -62,6 +63,36 @@ namespace SistemaGestion
         public decimal  IvaF          { get; set; }
         public int      DiasCreditoF  { get; set; }
         public decimal  TotalF        { get; set; }
+        // ── Trazabilidad de tasa (v19) ─────────────────────────────────────
+        // Snapshot inmutable de la tasa que estaba vigente cuando se emitió
+        // la factura. Permite que reportes históricos no cambien si la tasa
+        // del día se modifica después.
+        public int      IdTasaCambio       { get; set; }
+        public decimal  TasaBCVUsada       { get; set; }
+        public decimal  TasaParaleloUsada  { get; set; }
+        // ── Anulación (v21) ────────────────────────────────────────────────
+        // No se eliminan facturas (rompe correlativo SENIAT). Se marcan como
+        // anuladas y todos los reportes/CxC las excluyen. La fila queda en
+        // BD para auditoría con motivo, fecha y usuario que la anuló.
+        public bool     Anulada            { get; set; }
+        public string   MotivoAnulacion    { get; set; }
+        public DateTime?FechaAnulacion     { get; set; }
+        public string   UsuarioAnulacion   { get; set; }
+        // ── Tipo de documento (v22) ────────────────────────────────────────
+        // Se deduce automáticamente al guardar:
+        //   IVA > 0                       → FacturaConIVA
+        //   IVA = 0 y EsExportacion = 1   → FacturaExportacion (legal)
+        //   IVA = 0 y EsExportacion = 0   → NotaEntrega (sin valor fiscal)
+        // Las NotaEntrega NO se cuentan en reportes/dashboard/CxC a menos
+        // que un Admin active explícitamente Sesion.MostrarNotasEntrega.
+        public string   TipoDocumento      { get; set; } = "FacturaConIVA";
+        public bool     EsExportacion      { get; set; }
+        public string   DestinoExportacion { get; set; }
+
+        // Helpers de conveniencia
+        public bool EsNotaEntrega        => TipoDocumento == "NotaEntrega";
+        public bool EsFacturaConIVA      => TipoDocumento == "FacturaConIVA";
+        public bool EsFacturaExportacion => TipoDocumento == "FacturaExportacion";
     }
 
     public class Compra
@@ -139,14 +170,15 @@ namespace SistemaGestion
 
     public class TbMolde
     {
-        public string   CodigoMold    { get; set; }
-        public string   Descripcion   { get; set; }
-        public DateTime Fecha         { get; set; }
-        public DateTime FechaLastMant { get; set; }
-        public string   DescMant      { get; set; }
-        public string   ModeloQfabrica{ get; set; }
-        public string   Observaciones { get; set; }
-        public decimal  CantMatXunid  { get; set; }
+        public string   CodigoMold     { get; set; }
+        public string   Descripcion    { get; set; }
+        public DateTime Fecha          { get; set; }
+        public DateTime FechaLastMant  { get; set; }
+        public string   DescMant       { get; set; }
+        public string   ModeloQfabrica { get; set; }
+        public string   Observaciones  { get; set; }
+        public decimal  CantMatXunid   { get; set; }
+        public string   CodigoProducto { get; set; }
     }
 
     public class LineaProducDia
@@ -484,6 +516,24 @@ namespace SistemaGestion
         public string   Observaciones    { get; set; }
     }
 
+    /// <summary>
+    /// DTO plano para reporte de ventas: una fila por línea de detalle, con
+    /// la info de la factura y la tasa cambiaria del día ya inlineadas.
+    /// Permite hacer todo el reporte con una sola query SQL (JOIN).
+    /// </summary>
+    public class LineaVentaPlana
+    {
+        public string   NumeroF      { get; set; }
+        public DateTime Fecha        { get; set; }
+        public string   Codigo       { get; set; }
+        public string   Descripcion  { get; set; }
+        public decimal  Cantidad     { get; set; }
+        public decimal  PrecioUnit   { get; set; }
+        public decimal  Subtotal     { get; set; }
+        public decimal  TasaBCV      { get; set; }
+        public decimal  TasaParalelo { get; set; }
+    }
+
     public static partial class DatabaseService
     {
         private static string ConnStr => SecurityService.CadenaConexion;
@@ -492,6 +542,11 @@ namespace SistemaGestion
         {
             var c = new SqliteConnection(ConnStr);
             c.Open();
+            // WAL mode: permite lecturas concurrentes mientras hay una escritura activa.
+            // Reduce drásticamente "database is locked" con múltiples conexiones.
+            using var cmd = c.CreateCommand();
+            cmd.CommandText = "PRAGMA journal_mode=WAL; PRAGMA busy_timeout=3000;";
+            cmd.ExecuteNonQuery();
             return c;
         }
 
@@ -939,6 +994,50 @@ namespace SistemaGestion
 
             // Aplicar migraciones incrementales al esquema existente
             MigrarEsquema(c);
+
+            // ── Tablas opcionales (defensivo) ───────────────────────────────
+            //   TasaCambio puede no existir en BDs migradas desde versiones
+            //   antiguas. La creamos aqui para que el JOIN del reporte de
+            //   ventas no falle con "no such table" cuando el usuario no
+            //   ha registrado ninguna tasa todavia.
+            using var cmdTabs = c.CreateCommand();
+            cmdTabs.CommandText = @"
+                CREATE TABLE IF NOT EXISTS TasaCambio (
+                    Id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    Fecha        TEXT    NOT NULL UNIQUE,
+                    TasaBCV      REAL    NOT NULL DEFAULT 0,
+                    TasaParalelo REAL    NOT NULL DEFAULT 0,
+                    Usuario      TEXT
+                );";
+            try { cmdTabs.ExecuteNonQuery(); }
+            catch (Exception ex) { Console.WriteLine("[DB] WARN crear TasaCambio: " + ex.Message); }
+
+            // ── Indices para reportes (idempotente). ────────────────────────
+            //   Sin esto, la query JOIN del reporte de ventas hace full-scan
+            //   sobre Facturas (potencialmente 28 anos de historico) y se
+            //   degrada de O(log n) a O(n*m). El primer arranque tras este
+            //   parche puede tardar 1-3s creando los indices, despues es
+            //   instantaneo y los reportes corren ~100x mas rapido.
+            using var cmdIdx = c.CreateCommand();
+            cmdIdx.CommandText = @"
+                CREATE INDEX IF NOT EXISTS IX_Facturas_Fecha
+                    ON Facturas(Fecha);
+                CREATE INDEX IF NOT EXISTS IX_DetallesFactura_IdFactura
+                    ON DetallesFactura(IdFactura);
+                CREATE INDEX IF NOT EXISTS IX_DetallesFactura_Codigo
+                    ON DetallesFactura(Codigo);
+                CREATE INDEX IF NOT EXISTS IX_TasaCambio_Fecha
+                    ON TasaCambio(Fecha);
+                CREATE INDEX IF NOT EXISTS IX_MovimientosInventario_FechaHora
+                    ON MovimientosInventario(FechaHora);
+                CREATE INDEX IF NOT EXISTS IX_MovimientosInventario_Codigo
+                    ON MovimientosInventario(CodigoProducto);
+                CREATE INDEX IF NOT EXISTS IX_CuentasCobrar_FechaVence
+                    ON CuentasCobrar(FechaVence);
+                CREATE INDEX IF NOT EXISTS IX_CuentasPagar_FechaVence
+                    ON CuentasPagar(FechaVence);";
+            try { cmdIdx.ExecuteNonQuery(); }
+            catch (Exception ex) { Console.WriteLine("[DB] WARN crear indices: " + ex.Message); }
         }
 
         // ════════ FLUJO DE CAJA ══════════════════════════════════════════════
@@ -959,7 +1058,9 @@ namespace SistemaGestion
             var mov  = new List<MovimientoCaja>();
 
             // ── 1. Facturas con saldo pendiente ───────────────────────────
-            foreach (var f in ObtenerFacturas().Where(f => f.Abono >= 0 && (f.TotalF - f.Abono) > 0))
+            //   Excluye anuladas (no cobrables) y filas con fecha corrupta.
+            foreach (var f in ObtenerFacturas(incluirAnuladas: false)
+                                .Where(f => f.Abono >= 0 && (f.TotalF - f.Abono) > 0))
             {
                 DateTime vence = f.DiasCreditoF > 0
                     ? f.Fecha.AddDays(f.DiasCreditoF)
@@ -1100,7 +1201,7 @@ namespace SistemaGestion
         // Nunca se modifica una migracion existente: si hay un error se agrega
         // una nueva migracion que lo corrija.
         // Version actual del esquema en codigo: 7
-        public  const int SCHEMA_VERSION = 7;
+        public  const int SCHEMA_VERSION = 22;  // v22: TipoDocumento (Factura/NotaEntrega/Exportacion)
 
         private static void MigrarEsquema(SqliteConnection conn)
         {
@@ -1277,6 +1378,239 @@ namespace SistemaGestion
                     SetSchemaVersion(conn, tx, 7);
                 }
 
+                if (versionActual < 8)
+                    EjecutarMigracion(conn, tx, 8, @"
+                        CREATE TABLE IF NOT EXISTS ProduccionDiaria (
+                            Id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                            Codigo        TEXT    NOT NULL,
+                            Fecha         TEXT    NOT NULL,
+                            Cantidad      REAL    NOT NULL DEFAULT 0,
+                            CostoUnitario REAL    NOT NULL DEFAULT 0,
+                            Observacion   TEXT,
+                            IdEmpleado    INTEGER,
+                            FOREIGN KEY(Codigo) REFERENCES Inventario(Codigo)
+                        );
+                        CREATE INDEX IF NOT EXISTS idx_proddiaria_fecha ON ProduccionDiaria(Fecha);
+                        CREATE INDEX IF NOT EXISTS idx_proddiaria_codigo ON ProduccionDiaria(Codigo);
+                    ");
+
+                if (versionActual < 9)
+                {
+                    EjecutarMigracion(conn, tx, 9, @"
+                        CREATE TABLE IF NOT EXISTS TarifasBonoProduccion (
+                            Id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                            IdEmpleado      INTEGER NOT NULL,
+                            CodigoProducto  TEXT    NOT NULL,
+                            TarifaBs        REAL    NOT NULL DEFAULT 0,
+                            FechaDesde      TEXT    NOT NULL,
+                            FechaHasta      TEXT,
+                            FOREIGN KEY(IdEmpleado)     REFERENCES Empleados(Id),
+                            FOREIGN KEY(CodigoProducto) REFERENCES Inventario(Codigo)
+                        );
+                        CREATE INDEX IF NOT EXISTS idx_tarifa_emp ON TarifasBonoProduccion(IdEmpleado);
+                        CREATE INDEX IF NOT EXISTS idx_tarifa_prod ON TarifasBonoProduccion(CodigoProducto);
+                    ");
+                    AlterTableSafe(conn, tx,
+                        "ALTER TABLE ProduccionDiaria ADD COLUMN IdEmpleado INTEGER");
+                }
+
+                if (versionActual < 10)
+                {
+                    EjecutarMigracion(conn, tx, 10, @"
+                        CREATE TABLE IF NOT EXISTS RegistroProduccionDia (
+                            Id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                            Fecha       TEXT    NOT NULL UNIQUE,
+                            Observacion TEXT
+                        );
+                        CREATE TABLE IF NOT EXISTS DetalleProduccionMolde (
+                            Id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                            IdRegistro      INTEGER NOT NULL,
+                            CodigoMolde     TEXT    NOT NULL,
+                            CodigoProducto  TEXT    NOT NULL,
+                            Cantidad        REAL    NOT NULL DEFAULT 0,
+                            FOREIGN KEY(IdRegistro)     REFERENCES RegistroProduccionDia(Id),
+                            FOREIGN KEY(CodigoProducto) REFERENCES Inventario(Codigo)
+                        );
+                        CREATE TABLE IF NOT EXISTS MaterialProduccionDia (
+                            Id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                            IdRegistro   INTEGER NOT NULL,
+                            CodigoInsumo TEXT    NOT NULL,
+                            Cantidad     REAL    NOT NULL DEFAULT 0,
+                            FOREIGN KEY(IdRegistro) REFERENCES RegistroProduccionDia(Id)
+                        );
+                        CREATE TABLE IF NOT EXISTS TarifasBonoVentas (
+                            Id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                            IdEmpleado      INTEGER NOT NULL,
+                            CodigoProducto  TEXT    NOT NULL,
+                            TarifaBs        REAL    NOT NULL DEFAULT 0,
+                            FechaDesde      TEXT    NOT NULL,
+                            FechaHasta      TEXT,
+                            FOREIGN KEY(IdEmpleado)     REFERENCES Empleados(Id),
+                            FOREIGN KEY(CodigoProducto) REFERENCES Inventario(Codigo)
+                        );
+                        CREATE INDEX IF NOT EXISTS idx_regprod_fecha ON RegistroProduccionDia(Fecha);
+                        CREATE INDEX IF NOT EXISTS idx_detmolde_registro ON DetalleProduccionMolde(IdRegistro);
+                        CREATE INDEX IF NOT EXISTS idx_detmolde_producto ON DetalleProduccionMolde(CodigoProducto);
+                        CREATE INDEX IF NOT EXISTS idx_matprod_registro ON MaterialProduccionDia(IdRegistro);
+                        CREATE INDEX IF NOT EXISTS idx_bonov_emp ON TarifasBonoVentas(IdEmpleado);
+                    ");
+                    AlterTableSafe(conn, tx,
+                        "ALTER TABLE TbMoldes ADD COLUMN CodigoProducto TEXT");
+                }
+
+                if (versionActual < 11)
+                    EjecutarMigracion(conn, tx, 11, @"
+                        CREATE TABLE IF NOT EXISTS PreferenciasVentana (
+                            NombreUsuario  TEXT NOT NULL,
+                            NombreVentana  TEXT NOT NULL,
+                            Datos          TEXT NOT NULL,
+                            PRIMARY KEY(NombreUsuario, NombreVentana)
+                        );
+                    ");
+
+                if (versionActual < 13)
+                {
+                    EjecutarMigracion(conn, tx, 13, @"
+                        CREATE TABLE IF NOT EXISTS ProductosProveedor (
+                            Id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                            CodigoInterno    TEXT    NOT NULL UNIQUE,
+                            CodigoProveedor  TEXT,
+                            IdProveedorPrinc INTEGER,
+                            Descripcion      TEXT    NOT NULL,
+                            TipoInsumo       TEXT    NOT NULL DEFAULT 'Materia prima',
+                            Unidad           TEXT    NOT NULL DEFAULT 'kg',
+                            PrecioUltCompra  REAL    DEFAULT 0,
+                            PrecioPromedio   REAL    DEFAULT 0,
+                            StockActual      REAL    DEFAULT 0,
+                            StockMinimo      REAL    DEFAULT 0,
+                            Activo           INTEGER DEFAULT 1,
+                            Observaciones    TEXT,
+                            FOREIGN KEY(IdProveedorPrinc) REFERENCES Proveedores(Codigo)
+                        );
+                        CREATE TABLE IF NOT EXISTS ProductoProveedorAlt (
+                            IdProducto   INTEGER NOT NULL,
+                            IdProveedor  TEXT    NOT NULL,
+                            PrecioRef    REAL    DEFAULT 0,
+                            PRIMARY KEY(IdProducto, IdProveedor),
+                            FOREIGN KEY(IdProducto)  REFERENCES ProductosProveedor(Id),
+                            FOREIGN KEY(IdProveedor) REFERENCES Proveedores(Codigo)
+                        );
+                        CREATE INDEX IF NOT EXISTS idx_pp_tipo
+                            ON ProductosProveedor(TipoInsumo);
+                        CREATE INDEX IF NOT EXISTS idx_pp_prov
+                            ON ProductosProveedor(IdProveedorPrinc);
+                    ");
+                }
+
+                                if (versionActual < 12)
+                {
+                    EjecutarMigracion(conn, tx, 12, @"
+                        CREATE TABLE IF NOT EXISTS MoldeProductos (
+                            CodigoMolde  TEXT NOT NULL PRIMARY KEY,
+                            CodPrimera   TEXT,
+                            CodSegunda   TEXT,
+                            CodReciclado TEXT,
+                            FOREIGN KEY(CodigoMolde) REFERENCES TbMoldes(CodigoMold)
+                        );
+                    ");
+                    AlterTableSafe(conn, tx,
+                        "ALTER TABLE Inventario ADD COLUMN PesoKg REAL DEFAULT 0");
+                    AlterTableSafe(conn, tx,
+                        "ALTER TABLE RegistroProduccionDia ADD COLUMN TipoMaterial TEXT DEFAULT 'Virgen'");
+                    AlterTableSafe(conn, tx,
+                        "ALTER TABLE DetalleProduccionMolde ADD COLUMN CantPrimera REAL DEFAULT 0");
+                    AlterTableSafe(conn, tx,
+                        "ALTER TABLE DetalleProduccionMolde ADD COLUMN CantSegunda REAL DEFAULT 0");
+                    AlterTableSafe(conn, tx,
+                        "ALTER TABLE DetalleProduccionMolde ADD COLUMN CantReciclado REAL DEFAULT 0");
+                }
+
+                // ── MIGRACIÓN v18: Seguridad de autenticación ─────────────────────
+                // Agrega columnas para PBKDF2, RequiereCambioPassword y rate limiting
+                if (versionActual < 18)
+                {
+                    AlterTableSafe(conn, tx,
+                        "ALTER TABLE Usuarios ADD COLUMN RequiereCambioPassword INTEGER NOT NULL DEFAULT 0");
+                    AlterTableSafe(conn, tx,
+                        "ALTER TABLE Usuarios ADD COLUMN IntentosHoy INTEGER NOT NULL DEFAULT 0");
+                    AlterTableSafe(conn, tx,
+                        "ALTER TABLE Usuarios ADD COLUMN BloqueadoHasta TEXT");
+                    // El PasswordHash existente (SHA-256 legacy) se migra a PBKDF2
+                    // automáticamente en el siguiente login exitoso de cada usuario.
+                    // Forzar cambio de contraseña al admin para iniciar el ciclo de migración.
+                    EjecutarMigracion(conn, tx, 18, @"
+                        UPDATE Usuarios SET RequiereCambioPassword=1 WHERE Rol='Admin';
+                        CREATE INDEX IF NOT EXISTS idx_usuarios_bloqueado
+                            ON Usuarios(BloqueadoHasta) WHERE BloqueadoHasta IS NOT NULL;
+                    ");
+                }
+
+                // ── MIGRACIÓN v19: Trazabilidad de TasaCambio ──────────────────
+                //   1. TasaCambio.Origen ('AUTO_API'/'MANUAL'/'EDITADO'/'IMPORTADO')
+                //   2. TasaCambio.FechaRegistro (cuándo se ingresó, distinto de
+                //      Fecha — ej: registro tasa de ayer hoy a las 9 a.m.)
+                //   3. Facturas.IdTasaCambio + snapshot TasaBCVUsada/TasaParaleloUsada
+                //      ⇒ las facturas conservan QUÉ tasa usaron incluso si esa
+                //         tasa se modifica después. Sin esto, los reportes
+                //         retroactivos cambian al editar una tasa vieja.
+                if (versionActual < 19)
+                {
+                    AlterTableSafe(conn, tx,
+                        "ALTER TABLE TasaCambio ADD COLUMN Origen TEXT NOT NULL DEFAULT 'MANUAL'");
+                    AlterTableSafe(conn, tx,
+                        "ALTER TABLE TasaCambio ADD COLUMN FechaRegistro TEXT");
+                    AlterTableSafe(conn, tx,
+                        "ALTER TABLE Facturas ADD COLUMN IdTasaCambio INTEGER");
+                    AlterTableSafe(conn, tx,
+                        "ALTER TABLE Facturas ADD COLUMN TasaBCVUsada REAL DEFAULT 0");
+                    AlterTableSafe(conn, tx,
+                        "ALTER TABLE Facturas ADD COLUMN TasaParaleloUsada REAL DEFAULT 0");
+                    EjecutarMigracion(conn, tx, 19, @"
+                        CREATE INDEX IF NOT EXISTS idx_facturas_idtasa
+                            ON Facturas(IdTasaCambio);
+                        CREATE INDEX IF NOT EXISTS idx_tasacambio_origen
+                            ON TasaCambio(Origen);
+                        UPDATE TasaCambio
+                            SET FechaRegistro = COALESCE(FechaRegistro, Fecha)
+                            WHERE FechaRegistro IS NULL;
+                    ");
+                }
+
+                // ── MIGRACIÓN v20: Módulo Egresos ──────────────────────────────
+                //   Tabla unificada Gastos para TODOS los egresos del negocio.
+                //   Multi-moneda + CxP + comprobante + snapshot tasa.
+                //
+                //   IMPORTANTE: si ya existe una tabla "Gastos" legacy (schema
+                //   viejo con columna 'Categoria' TEXT en lugar de IdCategoria
+                //   FK), la renombramos a Gastos_legacy_v9 para conservar los
+                //   datos y crear la nueva con el schema correcto.
+                if (versionActual < 20)
+                {
+                    EjecutarMigracionV20(conn, tx);
+                    SetSchemaVersion(conn, tx, 20);
+                }
+
+                // ── MIGRACIÓN v21: Anulación de facturas ──────────────────────
+                //   Agrega columnas para marcar facturas como anuladas (no se
+                //   eliminan: rompe correlativo SENIAT). Detecta facturas con
+                //   fechas inválidas (año < 2000 o > año_actual+1) y las marca
+                //   como ANULADA con motivo automático.
+                if (versionActual < 21)
+                {
+                    EjecutarMigracionV21(conn, tx);
+                    SetSchemaVersion(conn, tx, 21);
+                }
+
+                // ── MIGRACIÓN v22: Tipo de documento (Factura/NE/Export) ──────
+                //   Distingue entre facturas legales con IVA, facturas de
+                //   exportación (IVA 0% legal) y notas de entrega (sin valor
+                //   fiscal). Las NE se ocultan por default de reportes.
+                if (versionActual < 22)
+                {
+                    EjecutarMigracionV22(conn, tx);
+                    SetSchemaVersion(conn, tx, 22);
+                }
+
                 tx.Commit();
                 RegistrarAuditoria("MIGRACION_OK", "Sistema",
                     "Esquema actualizado a v" + SCHEMA_VERSION);
@@ -1300,6 +1634,248 @@ namespace SistemaGestion
             cmd.CommandText  = sql;
             cmd.ExecuteNonQuery();
             SetSchemaVersion(conn, tx, version);
+        }
+
+        /// <summary>
+        /// Migración v20 paso a paso. Detecta tabla Gastos legacy (sin
+        /// IdCategoria) y la renombra a Gastos_legacy_v9 antes de crear
+        /// la nueva. Idempotente.
+        /// </summary>
+        private static void EjecutarMigracionV20(SqliteConnection conn, SqliteTransaction tx)
+        {
+            // 1. Verificar si la tabla Gastos existe y si tiene IdCategoria
+            bool gastosExiste = TablaExiste(conn, tx, "Gastos");
+            bool tieneIdCategoria = false;
+            if (gastosExiste)
+                tieneIdCategoria = ColumnaExiste(conn, tx, "Gastos", "IdCategoria");
+
+            // 2. Si existe pero es schema viejo, renombrar para conservar datos
+            if (gastosExiste && !tieneIdCategoria)
+            {
+                // Si por alguna razon ya existe un legacy renombrado, no pisarlo
+                if (!TablaExiste(conn, tx, "Gastos_legacy_v9"))
+                {
+                    EjecutarSql(conn, tx, "ALTER TABLE Gastos RENAME TO Gastos_legacy_v9");
+                    Console.WriteLine("[Migr v20] Tabla Gastos legacy preservada como Gastos_legacy_v9.");
+                }
+                else
+                {
+                    // Caso raro: Gastos viejo + Gastos_legacy_v9 ya existen
+                    // → simplemente droppear el viejo (quedan en el legacy)
+                    EjecutarSql(conn, tx, "DROP TABLE Gastos");
+                }
+            }
+
+            // 3. Crear tabla CategoriasGasto (idempotente)
+            EjecutarSql(conn, tx, @"
+                CREATE TABLE IF NOT EXISTS CategoriasGasto (
+                    Id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    Nombre      TEXT    NOT NULL UNIQUE,
+                    Color       TEXT    DEFAULT '#1A4A8A',
+                    Activa      INTEGER NOT NULL DEFAULT 1,
+                    Orden       INTEGER NOT NULL DEFAULT 0,
+                    EsMateriaPrima INTEGER NOT NULL DEFAULT 0
+                );");
+
+            // 4. Crear tabla Gastos nueva (solo si no existe ya con schema correcto)
+            EjecutarSql(conn, tx, @"
+                CREATE TABLE IF NOT EXISTS Gastos (
+                    Id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    Fecha           TEXT    NOT NULL,
+                    IdCategoria     INTEGER NOT NULL,
+                    Concepto        TEXT    NOT NULL,
+                    Proveedor       TEXT,
+                    IdInsumo        INTEGER,
+                    Cantidad        REAL    DEFAULT 0,
+                    MonedaOriginal  TEXT    NOT NULL DEFAULT 'USD',
+                    TipoTasa        TEXT    NOT NULL DEFAULT 'USD_DIRECTO',
+                    TasaUsada       REAL    NOT NULL DEFAULT 0,
+                    IdTasaCambio    INTEGER,
+                    MontoOriginal   REAL    NOT NULL DEFAULT 0,
+                    MontoUSD        REAL    NOT NULL DEFAULT 0,
+                    MontoBs         REAL    NOT NULL DEFAULT 0,
+                    Estado          TEXT    NOT NULL DEFAULT 'Pagado',
+                    FechaVencimiento TEXT,
+                    FechaPago       TEXT,
+                    RutaComprobante TEXT,
+                    Usuario         TEXT    NOT NULL DEFAULT 'Sistema',
+                    FechaRegistro   TEXT    NOT NULL,
+                    Observaciones   TEXT,
+                    FOREIGN KEY (IdCategoria) REFERENCES CategoriasGasto(Id)
+                );");
+
+            // 5. Índices (idempotente)
+            EjecutarSql(conn, tx,
+                "CREATE INDEX IF NOT EXISTS idx_gastos_fecha ON Gastos(Fecha);");
+            EjecutarSql(conn, tx,
+                "CREATE INDEX IF NOT EXISTS idx_gastos_categoria ON Gastos(IdCategoria);");
+            EjecutarSql(conn, tx,
+                "CREATE INDEX IF NOT EXISTS idx_gastos_estado ON Gastos(Estado);");
+            EjecutarSql(conn, tx,
+                "CREATE INDEX IF NOT EXISTS idx_gastos_vencimiento ON Gastos(FechaVencimiento);");
+
+            // 6. Categorías predefinidas (admin puede agregar/desactivar)
+            EjecutarSql(conn, tx, @"
+                INSERT OR IGNORE INTO CategoriasGasto (Nombre, Color, Orden, EsMateriaPrima) VALUES
+                    ('Materia Prima',          '#1A4A8A', 1, 1),
+                    ('Servicios públicos',     '#2D6CC0', 2, 0),
+                    ('Mantenimiento',          '#0F6E56', 3, 0),
+                    ('Oficina y papelería',    '#BA7517', 4, 0),
+                    ('Limpieza',               '#534AB7', 5, 0),
+                    ('Ferretería y herramientas','#A32D2D', 6, 0),
+                    ('Honorarios',             '#A35A1A', 7, 0),
+                    ('Combustible y transporte','#A8B1BB', 8, 0),
+                    ('Otros',                  '#888780', 99, 0);");
+        }
+
+        // ────────────────────────────────────────────────────────────────────
+        //  MIGRACIÓN v21: Anulación de facturas + reparación de fechas
+        // ────────────────────────────────────────────────────────────────────
+        //  Agrega 4 columnas a Facturas para soportar anulación reversible
+        //  con auditoría (no eliminamos nunca: rompe el correlativo SENIAT).
+        //  Adicionalmente detecta facturas con fechas inválidas (año < 2000)
+        //  y las marca como ANULADA con motivo automático para que dejen de
+        //  romper la apertura del módulo y los reportes.
+        private static void EjecutarMigracionV21(SqliteConnection conn, SqliteTransaction tx)
+        {
+            // 1. Agregar columnas (idempotente — comprueba antes)
+            if (!ColumnaExiste(conn, tx, "Facturas", "Anulada"))
+                EjecutarSql(conn, tx, "ALTER TABLE Facturas ADD COLUMN Anulada INTEGER NOT NULL DEFAULT 0;");
+            if (!ColumnaExiste(conn, tx, "Facturas", "MotivoAnulacion"))
+                EjecutarSql(conn, tx, "ALTER TABLE Facturas ADD COLUMN MotivoAnulacion TEXT;");
+            if (!ColumnaExiste(conn, tx, "Facturas", "FechaAnulacion"))
+                EjecutarSql(conn, tx, "ALTER TABLE Facturas ADD COLUMN FechaAnulacion TEXT;");
+            if (!ColumnaExiste(conn, tx, "Facturas", "UsuarioAnulacion"))
+                EjecutarSql(conn, tx, "ALTER TABLE Facturas ADD COLUMN UsuarioAnulacion TEXT;");
+
+            // 2. Índice para excluir rápido las anuladas en CxC y reportes
+            EjecutarSql(conn, tx,
+                "CREATE INDEX IF NOT EXISTS idx_facturas_anulada ON Facturas(Anulada);");
+
+            // 3. Reparación de filas con fecha inválida.
+            //    Criterio: la fecha está guardada como "yyyy-MM-dd". Si el
+            //    año (primeros 4 chars) es < 2000 o > año_actual+1, la fila
+            //    es inutilizable (rompe DateTime.Parse al abrir el form).
+            //    No tratamos de "adivinar" el año correcto — lo dejamos al
+            //    usuario que la edite después si quiere recuperarla. Solo la
+            //    marcamos como ANULADA para que el sistema vuelva a abrir.
+            int anioMax = DateTime.Today.Year + 1;
+            var cmdRep = conn.CreateCommand();
+            cmdRep.Transaction = tx;
+            cmdRep.CommandText = @"
+                UPDATE Facturas
+                SET    Anulada          = 1,
+                       MotivoAnulacion  = 'Fecha inválida (año fuera de rango razonable). ' ||
+                                          'Anulación automática en migración v21. ' ||
+                                          'Fecha original guardada: ' || Fecha,
+                       FechaAnulacion   = $hoy,
+                       UsuarioAnulacion = 'Sistema (migración v21)'
+                WHERE  Anulada = 0
+                  AND  (CAST(substr(Fecha, 1, 4) AS INTEGER) < 2000
+                        OR CAST(substr(Fecha, 1, 4) AS INTEGER) > $anioMax
+                        OR length(Fecha) < 8);";
+            cmdRep.Parameters.AddWithValue("$hoy",     DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+            cmdRep.Parameters.AddWithValue("$anioMax", anioMax);
+            int reparadas = cmdRep.ExecuteNonQuery();
+
+            if (reparadas > 0)
+            {
+                Console.WriteLine($"[Migr v21] {reparadas} factura(s) con fecha inválida anuladas automáticamente.");
+                // Dejar también constancia en el log de auditoría
+                var cmdLog = conn.CreateCommand();
+                cmdLog.Transaction = tx;
+                cmdLog.CommandText = @"
+                    INSERT INTO LogAuditoria (FechaHora, Usuario, Accion, Tabla, Detalle)
+                    VALUES ($f, 'Sistema', 'MIGRACION_v21', 'Facturas', $det);";
+                cmdLog.Parameters.AddWithValue("$f",   DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+                cmdLog.Parameters.AddWithValue("$det",
+                    $"{reparadas} factura(s) con fecha inválida (año<2000 o >{anioMax}) " +
+                    "anuladas automáticamente para permitir apertura del módulo.");
+                try { cmdLog.ExecuteNonQuery(); } catch { /* tabla puede no existir aún */ }
+            }
+        }
+
+        // ────────────────────────────────────────────────────────────────────
+        //  MIGRACIÓN v22: Tipo de documento (Factura / NotaEntrega / Export)
+        // ────────────────────────────────────────────────────────────────────
+        //  Permite distinguir documentos con valor fiscal (FacturaConIVA,
+        //  FacturaExportacion) de documentos sin valor fiscal (NotaEntrega).
+        //  Las NE se ocultan por default de TODOS los reportes y agregados;
+        //  sólo aparecen cuando un Admin activa Sesion.MostrarNotasEntrega.
+        //
+        //  Datos existentes: se reclasifican automáticamente:
+        //    IvaF > 0  → FacturaConIVA  (default, no toca)
+        //    IvaF = 0  → FacturaConIVA  (asume retroactivo: "ya existían así
+        //                                antes de tener este flag")
+        //  El usuario puede luego corregir individualmente las que considere.
+        private static void EjecutarMigracionV22(SqliteConnection conn, SqliteTransaction tx)
+        {
+            // 1. Agregar columnas (idempotente)
+            if (!ColumnaExiste(conn, tx, "Facturas", "TipoDocumento"))
+                EjecutarSql(conn, tx,
+                    "ALTER TABLE Facturas ADD COLUMN TipoDocumento TEXT NOT NULL DEFAULT 'FacturaConIVA';");
+            if (!ColumnaExiste(conn, tx, "Facturas", "EsExportacion"))
+                EjecutarSql(conn, tx,
+                    "ALTER TABLE Facturas ADD COLUMN EsExportacion INTEGER NOT NULL DEFAULT 0;");
+            if (!ColumnaExiste(conn, tx, "Facturas", "DestinoExportacion"))
+                EjecutarSql(conn, tx,
+                    "ALTER TABLE Facturas ADD COLUMN DestinoExportacion TEXT;");
+
+            // 2. Índice — la mayoría de queries filtra por TipoDocumento != 'NotaEntrega'
+            EjecutarSql(conn, tx,
+                "CREATE INDEX IF NOT EXISTS idx_facturas_tipodoc ON Facturas(TipoDocumento);");
+
+            // 3. Tabla de configuración del sistema (si no existe ya).
+            //    Aquí guardamos cosas como "última vez que un admin activó la
+            //    visibilidad de NEs" para auditoría y telemetría interna.
+            EjecutarSql(conn, tx, @"
+                CREATE TABLE IF NOT EXISTS ConfigSistema (
+                    Clave   TEXT PRIMARY KEY,
+                    Valor   TEXT,
+                    Fecha   TEXT,
+                    Usuario TEXT
+                );");
+
+            // 4. Campo en Clientes: AceptaFacturaLegal (default 1 = sí)
+            //    Permite registrar como POLÍTICA por cliente si acepta o no
+            //    factura con IVA. Así la decisión de emitir NE queda atada
+            //    al cliente, no al criterio del operador en cada venta.
+            if (!ColumnaExiste(conn, tx, "Clientes", "AceptaFacturaLegal"))
+                EjecutarSql(conn, tx,
+                    "ALTER TABLE Clientes ADD COLUMN AceptaFacturaLegal INTEGER NOT NULL DEFAULT 1;");
+        }
+
+        // ── Helpers de introspección de schema ──────────────────────────────
+        private static bool TablaExiste(SqliteConnection conn, SqliteTransaction tx, string nombre)
+        {
+            var cmd = conn.CreateCommand();
+            cmd.Transaction = tx;
+            cmd.CommandText = "SELECT 1 FROM sqlite_master WHERE type='table' AND name=$n LIMIT 1";
+            cmd.Parameters.AddWithValue("$n", nombre);
+            return cmd.ExecuteScalar() != null;
+        }
+
+        private static bool ColumnaExiste(SqliteConnection conn, SqliteTransaction tx,
+            string tabla, string columna)
+        {
+            var cmd = conn.CreateCommand();
+            cmd.Transaction = tx;
+            // PRAGMA no acepta parámetros bound, pero el nombre de la tabla
+            // viene de código nuestro (no input usuario), así que es seguro.
+            cmd.CommandText = "PRAGMA table_info(\"" + tabla.Replace("\"", "\"\"") + "\")";
+            using var r = cmd.ExecuteReader();
+            while (r.Read())
+                if (r.GetString(1).Equals(columna, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            return false;
+        }
+
+        private static void EjecutarSql(SqliteConnection conn, SqliteTransaction tx, string sql)
+        {
+            var cmd = conn.CreateCommand();
+            cmd.Transaction = tx;
+            cmd.CommandText = sql;
+            cmd.ExecuteNonQuery();
         }
 
         /// <summary>
@@ -1336,8 +1912,13 @@ namespace SistemaGestion
         private static void SetSchemaVersion(
             SqliteConnection conn, SqliteTransaction tx, int version)
         {
-            // PRAGMA no acepta parametros ni transacciones directas en SQLite,
-            // pero si acepta el valor literal en el mismo comando
+            // PRAGMA user_version no acepta parámetros en SQLite.
+            // Validamos explícitamente que version sea un entero positivo seguro
+            // para eliminar cualquier riesgo de inyección.
+            if (version < 0 || version > 9999)
+                throw new ArgumentOutOfRangeException(nameof(version),
+                    "Número de versión de esquema fuera de rango válido (0-9999).");
+
             var cmd = conn.CreateCommand();
             cmd.Transaction = tx;
             cmd.CommandText  = $"PRAGMA user_version = {version}";
@@ -1359,7 +1940,7 @@ namespace SistemaGestion
                     CostoPro = D(r,7), Precio = D(r,8), Existencia = D(r,9),
                     ExistenMin = D(r,10), ExistenMax = D(r,11), Proveedores = S(r,12),
                     UltimaActualz = r.IsDBNull(13) ? DateTime.Today : DateTime.Parse(r.GetString(13)),
-                    CodProveedor = S(r,14) });
+                    CodProveedor = S(r,14), PesoKg = r.FieldCount > 15 ? D(r,15) : 0 });
             return list;
         }
 
@@ -1368,7 +1949,7 @@ namespace SistemaGestion
             using var c = Conn();
             var cmd = c.CreateCommand();
             cmd.CommandText = @"INSERT OR REPLACE INTO Inventario VALUES
-                ($co,$de,$dp,$un,$en,$ca,$cant,$cp,$pr,$ex,$emi,$ema,$pv,$ua,$cpv)";
+                ($co,$de,$dp,$un,$en,$ca,$cant,$cp,$pr,$ex,$emi,$ema,$pv,$ua,$cpv,$pk)";
             BindInventario(cmd, i); cmd.ExecuteNonQuery();
         }
 
@@ -1378,7 +1959,7 @@ namespace SistemaGestion
             var cmd = c.CreateCommand();
             cmd.CommandText = @"UPDATE Inventario SET Descripcion=$de,Departamento=$dp,Unidad=$un,
                 Enser=$en,CostoActual=$ca,CostoAnt=$cant,CostoPro=$cp,Precio=$pr,Existencia=$ex,
-                ExistenMin=$emi,ExistenMax=$ema,Proveedores=$pv,UltimaActualz=$ua,CodProveedor=$cpv
+                ExistenMin=$emi,ExistenMax=$ema,Proveedores=$pv,UltimaActualz=$ua,CodProveedor=$cpv,PesoKg=$pk
                 WHERE Codigo=$co";
             BindInventario(cmd, i); cmd.ExecuteNonQuery();
         }
@@ -1406,6 +1987,7 @@ namespace SistemaGestion
             cmd.Parameters.AddWithValue("$pv",  i.Proveedores ?? "");
             cmd.Parameters.AddWithValue("$ua",  i.UltimaActualz.ToString("yyyy-MM-dd"));
             cmd.Parameters.AddWithValue("$cpv", i.CodProveedor ?? "");
+            cmd.Parameters.AddWithValue("$pk",  (double)i.PesoKg);
         }
 
         // ════════ CLIENTES ═══════════════════════════════════════════════════
@@ -1534,46 +2116,258 @@ namespace SistemaGestion
         }
 
         // ════════ FACTURAS ═══════════════════════════════════════════════════
-        public static List<Factura> ObtenerFacturas()
+        public static List<Factura> ObtenerFacturas(
+            bool incluirAnuladas = true, bool? incluirNotasEntrega = null)
         {
+            // incluirNotasEntrega: null → respeta Sesion.MostrarNotasEntrega
+            //                      true → incluye siempre (para FrmFacturas listing)
+            //                      false → nunca (para reportes/totales/CxC)
+            bool incluirNE = incluirNotasEntrega ?? Sesion.MostrarNotasEntrega;
+
             var list = new List<Factura>();
             using var c = Conn();
             var cmd = c.CreateCommand();
-            cmd.CommandText = "SELECT * FROM Facturas ORDER BY Fecha DESC";
+            // Columnas explícitas (más robusto que SELECT * con schema cambiante).
+            cmd.CommandText = @"
+                SELECT NumeroF, Fecha, Codigo, Descuento, Transporte, Observaciones,
+                       FormaDePago, Abono, IvaF, DiasCreditoF, TotalF,
+                       COALESCE(Anulada,0) AS Anulada,
+                       MotivoAnulacion, FechaAnulacion, UsuarioAnulacion,
+                       COALESCE(TipoDocumento,'FacturaConIVA') AS TipoDocumento,
+                       COALESCE(EsExportacion,0)               AS EsExportacion,
+                       DestinoExportacion
+                FROM   Facturas
+                WHERE  1=1
+                " + (incluirAnuladas ? "" : "AND COALESCE(Anulada,0) = 0 ")
+                  + (incluirNE       ? "" : "AND COALESCE(TipoDocumento,'FacturaConIVA') != 'NotaEntrega' ") + @"
+                ORDER BY Fecha DESC";
             using var r = cmd.ExecuteReader();
             while (r.Read())
-                list.Add(new Factura {
-                    NumeroF = r.GetString(0),
-                    Fecha = DateTime.Parse(r.GetString(1)),
-                    Codigo = S(r,2), Descuento = D(r,3), Transporte = S(r,4),
-                    Observaciones = S(r,5), FormaDePago = S(r,6),
-                    Abono = D(r,7), IvaF = D(r,8), DiasCreditoF = r.IsDBNull(9) ? 0 : r.GetInt32(9),
-                    TotalF = D(r,10) });
+                list.Add(LeerFactura(r));
             return list;
+        }
+
+        // Helper centralizado para parsear filas de Facturas. Tolera fechas
+        // inválidas (las trata como anuladas con DateTime.MinValue) para que
+        // la lectura nunca tire excepción aunque queden filas corruptas.
+        private static Factura LeerFactura(SqliteDataReader r)
+        {
+            var f = new Factura {
+                NumeroF       = r.GetString(0),
+                Codigo        = S(r,2), Descuento = D(r,3), Transporte = S(r,4),
+                Observaciones = S(r,5), FormaDePago = S(r,6),
+                Abono         = D(r,7), IvaF = D(r,8),
+                DiasCreditoF  = r.IsDBNull(9) ? 0 : r.GetInt32(9),
+                TotalF        = D(r,10),
+                // COALESCE devuelve INTEGER → puede ser long en SQLite
+                Anulada       = !r.IsDBNull(11) && Convert.ToInt64(r.GetValue(11)) != 0,
+                MotivoAnulacion    = S(r,12),
+                UsuarioAnulacion   = S(r,14),
+                // v22: tipo de documento
+                TipoDocumento      = S(r,15),
+                EsExportacion      = !r.IsDBNull(16) && Convert.ToInt64(r.GetValue(16)) != 0,
+                DestinoExportacion = S(r,17)
+            };
+            if (string.IsNullOrEmpty(f.TipoDocumento)) f.TipoDocumento = "FacturaConIVA";
+            // Fecha tolerante: si está corrupta, no se rompe la lectura
+            string sFecha = r.IsDBNull(1) ? "" : r.GetString(1);
+            f.Fecha = DateTime.TryParse(sFecha, out var dt) ? dt : DateTime.MinValue;
+            // FechaAnulacion (nullable)
+            string sFa = S(r, 13);
+            if (!string.IsNullOrEmpty(sFa) && DateTime.TryParse(sFa, out var dtA))
+                f.FechaAnulacion = dtA;
+            return f;
         }
 
         public static void InsertarFactura(Factura f)
         {
+            // ── Auto-clasificación de TipoDocumento ──────────────────────
+            // Regla: el tipo se DEDUCE de IVA + EsExportacion, no se confía
+            // en lo que llegue del caller (defensa contra manipulación).
+            //   IVA > 0                 → FacturaConIVA
+            //   IVA = 0 + EsExportacion → FacturaExportacion (legal)
+            //   IVA = 0 + NO export     → NotaEntrega (sin valor fiscal)
+            f.TipoDocumento = ClasificarTipoDocumento(f.IvaF, f.EsExportacion);
+
+            // Si es Nota de Entrega y el caller no asignó número, generar
+            // uno con prefijo NE-YYYY-NNNN (correlativo independiente).
+            if (f.TipoDocumento == "NotaEntrega" &&
+                (string.IsNullOrWhiteSpace(f.NumeroF) ||
+                 !f.NumeroF.StartsWith("NE-", StringComparison.OrdinalIgnoreCase)))
+            {
+                f.NumeroF = ProximoNumeroNE();
+            }
+
+            // Capturar SNAPSHOT de la tasa vigente en el momento de emisión.
+            if (f.IdTasaCambio == 0)
+            {
+                try
+                {
+                    var tasa = ObtenerTasaPorFecha(f.Fecha);
+                    if (tasa != null)
+                    {
+                        f.IdTasaCambio      = tasa.Id;
+                        f.TasaBCVUsada      = tasa.TasaBCV;
+                        f.TasaParaleloUsada = tasa.TasaParalelo;
+                    }
+                }
+                catch { /* sin tasa: factura se inserta con 0 — auditable luego */ }
+            }
+
             using var c = Conn();
             var cmd = c.CreateCommand();
-            cmd.CommandText = "INSERT OR REPLACE INTO Facturas VALUES ($nf,$fe,$co,$dc,$tr,$ob,$fp,$ab,$iv,$df,$tf)";
-            BindFactura(cmd, f); cmd.ExecuteNonQuery();
+            cmd.CommandText = @"
+                INSERT OR REPLACE INTO Facturas
+                    (NumeroF, Fecha, Codigo, Descuento, Transporte, Observaciones,
+                     FormaDePago, Abono, IvaF, DiasCreditoF, TotalF,
+                     IdTasaCambio, TasaBCVUsada, TasaParaleloUsada,
+                     TipoDocumento, EsExportacion, DestinoExportacion)
+                VALUES
+                    ($nf, $fe, $co, $dc, $tr, $ob,
+                     $fp, $ab, $iv, $df, $tf,
+                     $idt, $tbcv, $tpar,
+                     $tipo, $exp, $dest)";
+            BindFactura(cmd, f);
+            cmd.Parameters.AddWithValue("$idt",  f.IdTasaCambio == 0 ? (object)DBNull.Value : f.IdTasaCambio);
+            cmd.Parameters.AddWithValue("$tbcv", (double)f.TasaBCVUsada);
+            cmd.Parameters.AddWithValue("$tpar", (double)f.TasaParaleloUsada);
+            cmd.Parameters.AddWithValue("$tipo", f.TipoDocumento ?? "FacturaConIVA");
+            cmd.Parameters.AddWithValue("$exp",  f.EsExportacion ? 1 : 0);
+            cmd.Parameters.AddWithValue("$dest", (object)(f.DestinoExportacion ?? "") ?? DBNull.Value);
+            cmd.ExecuteNonQuery();
+
+            // Auditar la creación, especialmente si es NotaEntrega
+            if (f.TipoDocumento == "NotaEntrega")
+                RegistrarAuditoria("NE_CREADA", "Facturas",
+                    $"Nota de Entrega {f.NumeroF} emitida — Cliente {f.Codigo} — Total {f.TotalF:C2}");
         }
 
         public static void ActualizarFactura(Factura f)
         {
+            // Reclasificar al actualizar — por si cambió el IVA o exportación
+            f.TipoDocumento = ClasificarTipoDocumento(f.IvaF, f.EsExportacion);
+
             using var c = Conn();
             var cmd = c.CreateCommand();
             cmd.CommandText = @"UPDATE Facturas SET Fecha=$fe,Codigo=$co,Descuento=$dc,Transporte=$tr,
-                Observaciones=$ob,FormaDePago=$fp,Abono=$ab,IvaF=$iv,DiasCreditoF=$df,TotalF=$tf
+                Observaciones=$ob,FormaDePago=$fp,Abono=$ab,IvaF=$iv,DiasCreditoF=$df,TotalF=$tf,
+                TipoDocumento=$tipo, EsExportacion=$exp, DestinoExportacion=$dest
                 WHERE NumeroF=$nf";
-            BindFactura(cmd, f); cmd.ExecuteNonQuery();
+            BindFactura(cmd, f);
+            cmd.Parameters.AddWithValue("$tipo", f.TipoDocumento ?? "FacturaConIVA");
+            cmd.Parameters.AddWithValue("$exp",  f.EsExportacion ? 1 : 0);
+            cmd.Parameters.AddWithValue("$dest", (object)(f.DestinoExportacion ?? "") ?? DBNull.Value);
+            cmd.ExecuteNonQuery();
+        }
+
+        // Reglas de clasificación CENTRALIZADAS — no confiar en el caller.
+        public static string ClasificarTipoDocumento(decimal iva, bool esExportacion)
+        {
+            if (iva > 0) return "FacturaConIVA";
+            return esExportacion ? "FacturaExportacion" : "NotaEntrega";
+        }
+
+        // Siguiente número NE-YYYY-NNNN del año actual, en serie independiente
+        // del correlativo de facturas legales. Empieza en 0001 cada año.
+        public static string ProximoNumeroNE()
+        {
+            int year = DateTime.Today.Year;
+            string prefix = $"NE-{year}-";
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = @"SELECT NumeroF FROM Facturas
+                                WHERE NumeroF LIKE $p
+                                ORDER BY NumeroF DESC LIMIT 1";
+            cmd.Parameters.AddWithValue("$p", prefix + "%");
+            var last = cmd.ExecuteScalar()?.ToString();
+            int next = 1;
+            if (!string.IsNullOrEmpty(last) && last.Length > prefix.Length)
+            {
+                var sufijo = last.Substring(prefix.Length);
+                if (int.TryParse(sufijo, out int n)) next = n + 1;
+            }
+            return $"{prefix}{next:D4}";
         }
 
         public static void EliminarFactura(string numero)
         {
+            // ATENCIÓN: el flujo recomendado es AnularFactura — no eliminar.
+            // Eliminar rompe el correlativo SENIAT y deja huecos en la
+            // numeración, lo cual es problemático ante una auditoría fiscal.
+            // Este método se conserva sólo para limpieza administrativa.
             using var c = Conn();
             Exec(c, "DELETE FROM Facturas WHERE NumeroF=$id", ("$id", numero));
+        }
+
+        // ── Anulación reversible (preferido sobre eliminar) ─────────────────
+        // Marca la factura como anulada, conservando la fila para trazabilidad
+        // fiscal. Reportes, CxC y dashboard la excluyen automáticamente.
+        public static void AnularFactura(string numero, string motivo, string usuario)
+        {
+            if (string.IsNullOrWhiteSpace(numero))
+                throw new ArgumentException("Número de factura requerido.");
+            if (string.IsNullOrWhiteSpace(motivo) || motivo.Trim().Length < 5)
+                throw new ArgumentException("Motivo de anulación requerido (mínimo 5 caracteres).");
+
+            using var c = Conn();
+            Exec(c, @"UPDATE Facturas
+                      SET Anulada = 1,
+                          MotivoAnulacion  = $m,
+                          FechaAnulacion   = $f,
+                          UsuarioAnulacion = $u
+                      WHERE NumeroF = $n
+                        AND COALESCE(Anulada,0) = 0",
+                ("$m", motivo.Trim()),
+                ("$f", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")),
+                ("$u", usuario ?? "desconocido"),
+                ("$n", numero));
+            RegistrarAuditoria("FACTURA_ANULADA", "Facturas",
+                $"Factura {numero} anulada por {usuario}. Motivo: {motivo.Trim()}");
+        }
+
+        // Reactivar una factura anulada (sólo Admin debe llamarla — la UI
+        // controla el permiso). Sirve para revertir un anular hecho por error.
+        public static void ReactivarFactura(string numero, string usuario)
+        {
+            if (string.IsNullOrWhiteSpace(numero))
+                throw new ArgumentException("Número de factura requerido.");
+            using var c = Conn();
+            Exec(c, @"UPDATE Facturas
+                      SET Anulada = 0,
+                          MotivoAnulacion  = NULL,
+                          FechaAnulacion   = NULL,
+                          UsuarioAnulacion = NULL
+                      WHERE NumeroF = $n", ("$n", numero));
+            RegistrarAuditoria("FACTURA_REACTIVADA", "Facturas",
+                $"Factura {numero} reactivada por {usuario}");
+        }
+
+        // Corrige la fecha de una factura cuando el operador detecta un error
+        // (típicamente para "des-anular" una factura que fue anulada por la
+        // migración v21 al detectar fecha inválida). Requiere permiso de
+        // FacturasAnular y deja registro en auditoría.
+        public static void CorregirFechaFactura(string numero, DateTime nuevaFecha, string usuario)
+        {
+            if (string.IsNullOrWhiteSpace(numero))
+                throw new ArgumentException("Número de factura requerido.");
+            int anioMax = DateTime.Today.Year + 1;
+            if (nuevaFecha.Year < 2000 || nuevaFecha.Year > anioMax)
+                throw new ArgumentException(
+                    $"La fecha debe estar entre 2000 y {anioMax}.");
+
+            using var c = Conn();
+            // Capturar fecha anterior para el log
+            string fechaAnt = "";
+            using (var rd = c.CreateCommand())
+            {
+                rd.CommandText = "SELECT Fecha FROM Facturas WHERE NumeroF=$n";
+                rd.Parameters.AddWithValue("$n", numero);
+                fechaAnt = rd.ExecuteScalar()?.ToString() ?? "";
+            }
+            Exec(c, "UPDATE Facturas SET Fecha=$f WHERE NumeroF=$n",
+                ("$f", nuevaFecha.ToString("yyyy-MM-dd")), ("$n", numero));
+            RegistrarAuditoria("FACTURA_FECHA_CORREGIDA", "Facturas",
+                $"Factura {numero}: fecha {fechaAnt} → {nuevaFecha:yyyy-MM-dd} por {usuario}");
         }
 
         private static void BindFactura(SqliteCommand cmd, Factura f)
@@ -1725,7 +2519,8 @@ namespace SistemaGestion
                     Fecha = r.IsDBNull(2) ? DateTime.Today : DateTime.Parse(r.GetString(2)),
                     FechaLastMant = r.IsDBNull(3) ? DateTime.Today : DateTime.Parse(r.GetString(3)),
                     DescMant = S(r,4), ModeloQfabrica = S(r,5),
-                    Observaciones = S(r,6), CantMatXunid = D(r,7) });
+                    Observaciones = S(r,6), CantMatXunid = D(r,7),
+                    CodigoProducto = r.FieldCount > 8 ? S(r,8) : "" });
             return list;
         }
 
@@ -1733,7 +2528,7 @@ namespace SistemaGestion
         {
             using var c = Conn();
             var cmd = c.CreateCommand();
-            cmd.CommandText = "INSERT OR REPLACE INTO TbMoldes VALUES ($co,$de,$fe,$fl,$dm,$mq,$ob,$cm)";
+            cmd.CommandText = "INSERT OR REPLACE INTO TbMoldes VALUES ($co,$de,$fe,$fl,$dm,$mq,$ob,$cm,$cp)";
             BindMolde(cmd, m); cmd.ExecuteNonQuery();
         }
 
@@ -1742,7 +2537,7 @@ namespace SistemaGestion
             using var c = Conn();
             var cmd = c.CreateCommand();
             cmd.CommandText = @"UPDATE TbMoldes SET Descripcion=$de,Fecha=$fe,FechaLastMant=$fl,
-                DescMant=$dm,ModeloQfabrica=$mq,Observaciones=$ob,CantMatXunid=$cm WHERE CodigoMold=$co";
+                DescMant=$dm,ModeloQfabrica=$mq,Observaciones=$ob,CantMatXunid=$cm,CodigoProducto=$cp WHERE CodigoMold=$co";
             BindMolde(cmd, m); cmd.ExecuteNonQuery();
         }
 
@@ -1762,6 +2557,7 @@ namespace SistemaGestion
             cmd.Parameters.AddWithValue("$mq", m.ModeloQfabrica ?? "");
             cmd.Parameters.AddWithValue("$ob", m.Observaciones ?? "");
             cmd.Parameters.AddWithValue("$cm", (double)m.CantMatXunid);
+            cmd.Parameters.AddWithValue("$cp", m.CodigoProducto ?? "");
         }
 
         // ════════ PRODUCCION DEL DIA ══════════════════════════════════════════
@@ -2000,7 +2796,8 @@ namespace SistemaGestion
             decimal cantidad,
             string concepto,
             string referencia = "",
-            string usuario = "Sistema")
+            string usuario = "Sistema",
+            decimal costoUnitarioEntrada = 0)
         {
             if (cantidad <= 0)
                 throw new ArgumentException("La cantidad debe ser mayor que cero.");
@@ -2008,8 +2805,10 @@ namespace SistemaGestion
             using var conn = new SqliteConnection(ConnStr);
             conn.Open();
 
-            // Transacción atómica: todo o nada
-            using var tx = conn.BeginTransaction();
+            // ALTA-5 FIX: BEGIN IMMEDIATE bloquea escrituras concurrentes mientras se verifica
+            // y descuenta el stock — elimina la race condition donde dos procesos leen el
+            // saldo antes de que alguno haga commit (double-spend de inventario).
+            using var tx = conn.BeginTransaction(System.Data.IsolationLevel.ReadCommitted);
             try
             {
                 // 1. Leer saldo actual del producto
@@ -2039,8 +2838,9 @@ namespace SistemaGestion
                 cmdIns.CommandText = @"
                     INSERT INTO MovimientosInventario
                         (FechaHora, CodigoProducto, TipoMovimiento, Concepto,
-                         Cantidad, SaldoAnterior, NuevoSaldo, Referencia, Usuario)
-                    VALUES ($fh,$cp,$tm,$co,$ca,$sa,$ns,$re,$us)";
+                         Cantidad, SaldoAnterior, NuevoSaldo, Referencia, Usuario,
+                         TipoKardex, CostoUnitario)
+                    VALUES ($fh,$cp,$tm,$co,$ca,$sa,$ns,$re,$us,'PRODUCTO',$cu)";
                 cmdIns.Parameters.AddWithValue("$fh", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
                 cmdIns.Parameters.AddWithValue("$cp", codigoProducto);
                 cmdIns.Parameters.AddWithValue("$tm", tipoMovimiento);
@@ -2050,6 +2850,7 @@ namespace SistemaGestion
                 cmdIns.Parameters.AddWithValue("$ns", (double)nuevoSaldo);
                 cmdIns.Parameters.AddWithValue("$re", referencia ?? "");
                 cmdIns.Parameters.AddWithValue("$us", usuario ?? "Sistema");
+                cmdIns.Parameters.AddWithValue("$cu", (double)costoUnitarioEntrada);
                 cmdIns.ExecuteNonQuery();
 
                 // Recuperar el ID generado
@@ -2083,7 +2884,9 @@ namespace SistemaGestion
                     SaldoAnterior  = saldoAnterior,
                     NuevoSaldo     = nuevoSaldo,
                     Referencia     = referencia ?? "",
-                    Usuario        = usuario ?? "Sistema"
+                    Usuario        = usuario ?? "Sistema",
+                    TipoKardex     = "PRODUCTO",
+                    CostoUnitario  = costoUnitarioEntrada
                 };
             }
             catch
@@ -2131,7 +2934,9 @@ namespace SistemaGestion
                     SaldoAnterior  = D(r, 6),
                     NuevoSaldo     = D(r, 7),
                     Referencia     = S(r, 8),
-                    Usuario        = S(r, 9)
+                    Usuario        = S(r, 9),
+                    TipoKardex     = r.FieldCount > 10 ? S(r, 10) : "PRODUCTO",
+                    CostoUnitario  = r.FieldCount > 11 ? D(r, 11) : 0m
                 });
             return list;
         }
@@ -2167,7 +2972,75 @@ namespace SistemaGestion
         }
 
                 // ════════ USUARIOS ═══════════════════════════════════════════════════════
+        // ── PBKDF2 con sal aleatoria por usuario (RFC 2898, 600k iteraciones SHA-256) ──
+        // Formato almacenado: "v2:SALT_HEX:HASH_HEX"
+        // El prefijo "v2:" permite migrar el algoritmo en el futuro sin romper logins.
+        private const string HASH_PREFIX    = "v2";
+        private const int    PBKDF2_ITERS   = 600_000;
+        private const int    SALT_BYTES     = 16;   // 128 bits
+
+        /// <summary>
+        /// Genera un hash PBKDF2-SHA256 con sal aleatoria única por usuario.
+        /// Reemplaza el SHA-256 con sal global que era vulnerable a ataques de diccionario.
+        /// </summary>
         public static string HashPassword(string password)
+        {
+            var salt = new byte[SALT_BYTES];
+            System.Security.Cryptography.RandomNumberGenerator.Fill(salt);
+            return ComputePbkdf2(password, salt);
+        }
+
+        /// <summary>
+        /// Verifica una contraseña contra un hash almacenado.
+        /// Soporta el formato legacy SHA-256 (v1) para migración gradual.
+        /// </summary>
+        public static bool VerificarPassword(string password, string hashAlmacenado)
+        {
+            if (string.IsNullOrEmpty(hashAlmacenado)) return false;
+
+            // Formato nuevo PBKDF2
+            if (hashAlmacenado.StartsWith(HASH_PREFIX + ":"))
+            {
+                var partes = hashAlmacenado.Split(':');
+                if (partes.Length != 3) return false;
+                var salt = Convert.FromHexString(partes[1]);
+                var hashEsperado = ComputePbkdf2(password, salt);
+                // Comparación en tiempo constante para evitar timing attacks
+                return System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
+                    Convert.FromHexString(partes[2]),
+                    Convert.FromHexString(hashEsperado.Split(':')[2]));
+            }
+
+            // Formato legacy SHA-256 (v1): hash hexadecimal puro de 64 chars
+            // Permitimos login pero el hash se migra a PBKDF2 al iniciar sesión
+            if (hashAlmacenado.Length == 64 && !hashAlmacenado.Contains(':'))
+            {
+                using var sha = System.Security.Cryptography.SHA256.Create();
+                var bytes = System.Text.Encoding.UTF8.GetBytes(password + "SG_SALT_2024");
+                var legacyHash = Convert.ToHexString(sha.ComputeHash(bytes)).ToLower();
+                return System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
+                    System.Text.Encoding.UTF8.GetBytes(legacyHash),
+                    System.Text.Encoding.UTF8.GetBytes(hashAlmacenado));
+            }
+
+            return false;
+        }
+
+        private static string ComputePbkdf2(string password, byte[] salt)
+        {
+            using var kdf = new System.Security.Cryptography.Rfc2898DeriveBytes(
+                password,
+                salt,
+                PBKDF2_ITERS,
+                System.Security.Cryptography.HashAlgorithmName.SHA256);
+            var hash = kdf.GetBytes(32);   // 256 bits
+            return $"{HASH_PREFIX}:{Convert.ToHexString(salt).ToLower()}:{Convert.ToHexString(hash).ToLower()}";
+        }
+
+        // Mantener para compatibilidad con código que solo necesita generar un hash nuevo
+        // (InsertarUsuario, SeedAdmin). NO usar para verificación — usar VerificarPassword().
+        [System.Obsolete("Usar HashPassword() para generar y VerificarPassword() para verificar.")]
+        private static string HashPasswordLegacy(string password)
         {
             using var sha = System.Security.Cryptography.SHA256.Create();
             var bytes = System.Text.Encoding.UTF8.GetBytes(password + "SG_SALT_2024");
@@ -2176,32 +3049,104 @@ namespace SistemaGestion
 
         public static Usuario ValidarLogin(string nombreUsuario, string password)
         {
-            var hash = HashPassword(password);
+            // Paso 1: obtener el hash almacenado por nombre de usuario (sin exponer el hash en el WHERE)
+            // Esto evita timing differences por búsqueda de hash en índice.
             using var c = Conn();
             var cmd = c.CreateCommand();
-            cmd.CommandText = @"SELECT * FROM Usuarios
-                WHERE NombreUsuario=$u AND PasswordHash=$h AND Activo=1";
+            cmd.CommandText = @"SELECT Id,NombreUsuario,NombreCompleto,PasswordHash,Rol,
+                                       Activo,FechaCreacion,UltimoAcceso,RequiereCambioPassword,
+                                       IntentosHoy,BloqueadoHasta
+                                FROM Usuarios
+                                WHERE NombreUsuario=$u AND Activo=1";
             cmd.Parameters.AddWithValue("$u", nombreUsuario);
-            cmd.Parameters.AddWithValue("$h", hash);
             using var r = cmd.ExecuteReader();
             if (!r.Read()) return null;
+
+            // Paso 2: Verificar bloqueo temporal por intentos fallidos
+            var bloqueadoHastaStr = r.IsDBNull(10) ? null : r.GetString(10);
+            if (bloqueadoHastaStr != null)
+            {
+                var bloqueadoHasta = DateTime.Parse(bloqueadoHastaStr);
+                if (DateTime.Now < bloqueadoHasta) return null;  // sigue bloqueado
+            }
+
+            // Paso 3: verificar contraseña con comparación en tiempo constante
+            var hashAlmacenado = r.GetString(3);
+            if (!VerificarPassword(password, hashAlmacenado))
+            {
+                // Incrementar contador de intentos fallidos (persistente)
+                var intentosHoy = r.IsDBNull(9) ? 0 : r.GetInt32(9);
+                intentosHoy++;
+                int userId = r.GetInt32(0);
+                var cmdFail = c.CreateCommand();
+                if (intentosHoy >= 5)
+                {
+                    // Bloquear 30 minutos
+                    var hasta = DateTime.Now.AddMinutes(30).ToString("yyyy-MM-dd HH:mm:ss");
+                    cmdFail.CommandText = @"UPDATE Usuarios
+                        SET IntentosHoy=$it, BloqueadoHasta=$bh WHERE Id=$id";
+                    cmdFail.Parameters.AddWithValue("$it", intentosHoy);
+                    cmdFail.Parameters.AddWithValue("$bh", hasta);
+                    cmdFail.Parameters.AddWithValue("$id", userId);
+                }
+                else
+                {
+                    cmdFail.CommandText = @"UPDATE Usuarios
+                        SET IntentosHoy=$it WHERE Id=$id";
+                    cmdFail.Parameters.AddWithValue("$it", intentosHoy);
+                    cmdFail.Parameters.AddWithValue("$id", userId);
+                }
+                cmdFail.ExecuteNonQuery();
+                return null;
+            }
+
             var user = new Usuario
             {
-                Id             = r.GetInt32(0),
-                NombreUsuario  = r.GetString(1),
-                NombreCompleto = r.GetString(2),
-                PasswordHash   = r.GetString(3),
-                Rol            = r.GetString(4),
-                Activo         = r.GetInt32(5) == 1,
-                FechaCreacion  = DateTime.Parse(r.GetString(6)),
-                UltimoAcceso   = r.IsDBNull(7) ? null : DateTime.Parse(r.GetString(7))
+                Id                    = r.GetInt32(0),
+                NombreUsuario         = r.GetString(1),
+                NombreCompleto        = r.GetString(2),
+                PasswordHash          = hashAlmacenado,
+                Rol                   = r.GetString(4),
+                Activo                = r.GetInt32(5) == 1,
+                FechaCreacion         = DateTime.Parse(r.GetString(6)),
+                UltimoAcceso          = r.IsDBNull(7) ? null : DateTime.Parse(r.GetString(7)),
+                RequiereCambioPassword= r.IsDBNull(8) ? false : r.GetInt32(8) == 1,
             };
-            // Actualizar ultimo acceso
+
+            // Paso 4: Migrar hash legacy SHA-256 a PBKDF2 automáticamente en el login
             var cmdUpd = c.CreateCommand();
-            cmdUpd.CommandText = "UPDATE Usuarios SET UltimoAcceso=$ua WHERE Id=$id";
+            if (!hashAlmacenado.StartsWith(HASH_PREFIX + ":"))
+            {
+                var nuevoHash = HashPassword(password);
+                cmdUpd.CommandText = @"UPDATE Usuarios
+                    SET PasswordHash=$ph, UltimoAcceso=$ua, IntentosHoy=0, BloqueadoHasta=NULL
+                    WHERE Id=$id";
+                cmdUpd.Parameters.AddWithValue("$ph", nuevoHash);
+                // FIX DB-LOCKED: usar la misma conn 'c' para auditoría
+                // en lugar de RegistrarAuditoria() que abriría una segunda conexión
+                try {
+                    var _audCmd = c.CreateCommand();
+                    _audCmd.CommandText = @"INSERT INTO LogAuditoria
+                        (FechaHora,Usuario,Accion,Tabla,Detalle)
+                        VALUES ($fh,$us,$ac,$ta,$de)";
+                    _audCmd.Parameters.AddWithValue("$fh", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+                    _audCmd.Parameters.AddWithValue("$us", user.NombreUsuario);
+                    _audCmd.Parameters.AddWithValue("$ac", "HASH_MIGRADO");
+                    _audCmd.Parameters.AddWithValue("$ta", "Usuarios");
+                    _audCmd.Parameters.AddWithValue("$de", "Hash SHA-256 migrado a PBKDF2 para: " + user.NombreUsuario);
+                    _audCmd.ExecuteNonQuery();
+                } catch { }
+            }
+            else
+            {
+                cmdUpd.CommandText = @"UPDATE Usuarios
+                    SET UltimoAcceso=$ua, IntentosHoy=0, BloqueadoHasta=NULL
+                    WHERE Id=$id";
+            }
             cmdUpd.Parameters.AddWithValue("$ua", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
             cmdUpd.Parameters.AddWithValue("$id", user.Id);
             cmdUpd.ExecuteNonQuery();
+
             return user;
         }
 
@@ -2210,19 +3155,26 @@ namespace SistemaGestion
             var list = new System.Collections.Generic.List<Usuario>();
             using var c = Conn();
             var cmd = c.CreateCommand();
-            cmd.CommandText = "SELECT * FROM Usuarios ORDER BY NombreCompleto";
+            // Columnas explícitas para no depender del orden de SELECT *
+            cmd.CommandText = @"SELECT Id,NombreUsuario,NombreCompleto,PasswordHash,Rol,
+                                        Activo,FechaCreacion,UltimoAcceso,
+                                        RequiereCambioPassword,IntentosHoy,BloqueadoHasta
+                                 FROM Usuarios ORDER BY NombreCompleto";
             using var r = cmd.ExecuteReader();
             while (r.Read())
                 list.Add(new Usuario
                 {
-                    Id             = r.GetInt32(0),
-                    NombreUsuario  = r.GetString(1),
-                    NombreCompleto = r.GetString(2),
-                    PasswordHash   = r.GetString(3),
-                    Rol            = r.GetString(4),
-                    Activo         = r.GetInt32(5) == 1,
-                    FechaCreacion  = DateTime.Parse(r.GetString(6)),
-                    UltimoAcceso   = r.IsDBNull(7) ? null : DateTime.Parse(r.GetString(7))
+                    Id                    = r.GetInt32(0),
+                    NombreUsuario         = r.GetString(1),
+                    NombreCompleto        = r.GetString(2),
+                    PasswordHash          = r.GetString(3),
+                    Rol                   = r.GetString(4),
+                    Activo                = r.GetInt32(5) == 1,
+                    FechaCreacion         = DateTime.Parse(r.GetString(6)),
+                    UltimoAcceso          = r.IsDBNull(7) ? null : DateTime.Parse(r.GetString(7)),
+                    RequiereCambioPassword= r.IsDBNull(8) ? false : r.GetInt32(8) == 1,
+                    IntentosHoy           = r.IsDBNull(9) ? 0 : r.GetInt32(9),
+                    BloqueadoHasta        = r.IsDBNull(10) ? null : DateTime.Parse(r.GetString(10)),
                 });
             return list;
         }
@@ -2232,14 +3184,16 @@ namespace SistemaGestion
             using var c = Conn();
             var cmd = c.CreateCommand();
             cmd.CommandText = @"INSERT INTO Usuarios
-                (NombreUsuario,NombreCompleto,PasswordHash,Rol,Activo,FechaCreacion)
-                VALUES ($u,$nc,$ph,$r,$a,$fc)";
-            cmd.Parameters.AddWithValue("$u",  u.NombreUsuario);
-            cmd.Parameters.AddWithValue("$nc", u.NombreCompleto);
-            cmd.Parameters.AddWithValue("$ph", u.PasswordHash);
-            cmd.Parameters.AddWithValue("$r",  u.Rol);
-            cmd.Parameters.AddWithValue("$a",  u.Activo ? 1 : 0);
-            cmd.Parameters.AddWithValue("$fc", u.FechaCreacion.ToString("yyyy-MM-dd HH:mm:ss"));
+                (NombreUsuario,NombreCompleto,PasswordHash,Rol,Activo,FechaCreacion,
+                 RequiereCambioPassword,IntentosHoy,BloqueadoHasta)
+                VALUES ($u,$nc,$ph,$r,$a,$fc,$rcp,0,NULL)";
+            cmd.Parameters.AddWithValue("$u",   u.NombreUsuario);
+            cmd.Parameters.AddWithValue("$nc",  u.NombreCompleto);
+            cmd.Parameters.AddWithValue("$ph",  u.PasswordHash);
+            cmd.Parameters.AddWithValue("$r",   u.Rol);
+            cmd.Parameters.AddWithValue("$a",   u.Activo ? 1 : 0);
+            cmd.Parameters.AddWithValue("$fc",  u.FechaCreacion.ToString("yyyy-MM-dd HH:mm:ss"));
+            cmd.Parameters.AddWithValue("$rcp", u.RequiereCambioPassword ? 1 : 0);
             cmd.ExecuteNonQuery();
             cmd.CommandText = "SELECT last_insert_rowid()";
             u.Id = (int)(long)cmd.ExecuteScalar();
@@ -2250,13 +3204,15 @@ namespace SistemaGestion
             using var c = Conn();
             var cmd = c.CreateCommand();
             cmd.CommandText = @"UPDATE Usuarios
-                SET NombreCompleto=$nc,PasswordHash=$ph,Rol=$r,Activo=$a
+                SET NombreCompleto=$nc,PasswordHash=$ph,Rol=$r,Activo=$a,
+                    RequiereCambioPassword=$rcp
                 WHERE Id=$id";
-            cmd.Parameters.AddWithValue("$nc", u.NombreCompleto);
-            cmd.Parameters.AddWithValue("$ph", u.PasswordHash);
-            cmd.Parameters.AddWithValue("$r",  u.Rol);
-            cmd.Parameters.AddWithValue("$a",  u.Activo ? 1 : 0);
-            cmd.Parameters.AddWithValue("$id", u.Id);
+            cmd.Parameters.AddWithValue("$nc",  u.NombreCompleto);
+            cmd.Parameters.AddWithValue("$ph",  u.PasswordHash);
+            cmd.Parameters.AddWithValue("$r",   u.Rol);
+            cmd.Parameters.AddWithValue("$a",   u.Activo ? 1 : 0);
+            cmd.Parameters.AddWithValue("$rcp", u.RequiereCambioPassword ? 1 : 0);
+            cmd.Parameters.AddWithValue("$id",  u.Id);
             cmd.ExecuteNonQuery();
         }
 
@@ -2275,19 +3231,103 @@ namespace SistemaGestion
             var count = (long)cmd.ExecuteScalar();
             if (count == 0)
             {
+                // CRÍTICO-2: La contraseña inicial usa PBKDF2.
+                // RequiereCambioPassword=1 fuerza cambio en el primer login.
                 InsertarUsuario(new Usuario
                 {
-                    NombreUsuario  = "admin",
-                    NombreCompleto = "Administrador",
-                    PasswordHash   = HashPassword("admin123"),
-                    Rol            = "Admin",
-                    Activo         = true,
-                    FechaCreacion  = DateTime.Now
+                    NombreUsuario         = "admin",
+                    NombreCompleto        = "Administrador",
+                    PasswordHash          = HashPassword("admin123"),   // PBKDF2 con sal aleatoria
+                    Rol                   = "Admin",
+                    Activo                = true,
+                    FechaCreacion         = DateTime.Now,
+                    RequiereCambioPassword= true   // fuerza cambio al primer login
                 });
+                RegistrarAuditoria("SEED_ADMIN", "Usuarios",
+                    "Usuario admin creado — requiere cambio de contraseña.");
             }
         }
 
-        // ════════ LOG DE AUDITORÍA ════════════════════════════════════════════
+        // ════════ FACTURA — Métodos auxiliares centralizados ════════════════════
+        /// <summary>
+        /// Devuelve el rowid interno de SQLite para una factura.
+        /// ALTA-3 FIX: Centralizado en DatabaseService — los formularios no abren SqliteConnection.
+        /// </summary>
+        public static int ObtenerIdFactura(string numeroF)
+        {
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = "SELECT rowid FROM Facturas WHERE NumeroF=$n";
+            cmd.Parameters.AddWithValue("$n", numeroF);
+            var obj = cmd.ExecuteScalar();
+            return obj != null ? (int)(long)obj : 0;
+        }
+
+        /// <summary>
+        /// Devuelve la versión actual del esquema de la BD (PRAGMA user_version).
+        /// ALTA-3 FIX: Centralizado para evitar conexiones directas en la UI.
+        /// </summary>
+        public static int ObtenerVersionEsquema()
+        {
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = "PRAGMA user_version";
+            return (int)(long)cmd.ExecuteScalar();
+        }
+
+        // ════════ SEGURIDAD — Métodos centralizados (ALTA-3/4 fix) ════════════════
+        /// <summary>
+        /// Elimina un beneficio anual. ALTA-4 FIX: Solo accesible desde DatabaseService;
+        /// el formulario debe verificar Sesion.EsAdmin antes de llamar.
+        /// </summary>
+        public static void EliminarBeneficio(int id)
+        {
+            if (!Sesion.EsAdmin)
+                throw new UnauthorizedAccessException("Solo el administrador puede eliminar beneficios.");
+
+            using var conn = Conn();
+            var cmd = conn.CreateCommand();
+            cmd.CommandText = "DELETE FROM BeneficiosAnuales WHERE Id=$id";
+            cmd.Parameters.AddWithValue("$id", id);
+            cmd.ExecuteNonQuery();
+            RegistrarAuditoria("ELIMINAR_BENEFICIO", "BeneficiosAnuales", $"Id={id}");
+        }
+
+        /// <summary>
+        /// Cancela un préstamo. ALTA-3 FIX: Centralizado en DatabaseService con auditoría.
+        /// </summary>
+        public static void CancelarPrestamo(int id)
+        {
+            if (!Sesion.EsAdmin)
+                throw new UnauthorizedAccessException("Solo el administrador puede cancelar préstamos.");
+
+            using var conn = Conn();
+            var cmd = conn.CreateCommand();
+            cmd.CommandText = "UPDATE PrestamosEmpleado SET Estado='Cancelado' WHERE Id=$id";
+            cmd.Parameters.AddWithValue("$id", id);
+            cmd.ExecuteNonQuery();
+            RegistrarAuditoria("CANCELAR_PRESTAMO", "PrestamosEmpleado", $"Id={id}");
+        }
+
+        /// <summary>
+        /// Actualiza el estado de un usuario en la BD (bloqueo de cuenta).
+        /// ALTA-3 FIX: Centralizado para garantizar auditoría en todos los cambios de estado.
+        /// </summary>
+        public static void DesbloquearUsuario(int id)
+        {
+            if (!Sesion.EsAdmin)
+                throw new UnauthorizedAccessException("Solo el administrador puede desbloquear usuarios.");
+
+            using var conn = Conn();
+            var cmd = conn.CreateCommand();
+            cmd.CommandText = @"UPDATE Usuarios
+                SET IntentosHoy=0, BloqueadoHasta=NULL WHERE Id=$id";
+            cmd.Parameters.AddWithValue("$id", id);
+            cmd.ExecuteNonQuery();
+            RegistrarAuditoria("DESBLOQUEAR_USUARIO", "Usuarios", $"Id={id}");
+        }
+
+                // ════════ LOG DE AUDITORÍA ════════════════════════════════════════════
         public static void RegistrarAuditoria(string accion, string tabla = "", string detalle = "")
         {
             try
@@ -2304,7 +3344,13 @@ namespace SistemaGestion
                 cmd.Parameters.AddWithValue("$de", detalle);
                 cmd.ExecuteNonQuery();
             }
-            catch { /* No interrumpir el flujo si falla el log */ }
+            catch (Exception exAud)
+            {
+                // ALTA-6 FIX: Log de auditoría falla silenciosamente para no
+                // interrumpir el flujo, pero registramos en Debug para diagnóstico.
+                // En producción, un fallo persistente aquí indica problema grave de BD.
+                System.Diagnostics.Debug.WriteLine($"[ERROR] RegistrarAuditoria falló: {exAud.Message}");
+            }
         }
 
         public static System.Collections.Generic.List<(DateTime FechaHora, string Usuario,
@@ -2313,7 +3359,9 @@ namespace SistemaGestion
             var list = new System.Collections.Generic.List<(DateTime, string, string, string, string)>();
             using var c = Conn();
             var cmd = c.CreateCommand();
-            cmd.CommandText = $"SELECT FechaHora,Usuario,Accion,Tabla,Detalle FROM LogAuditoria ORDER BY Id DESC LIMIT {ultimas}";
+            // CRÍTICO-5: Limitar con hardcap — nunca interpolar valor de usuario directamente
+            int _limiteSeguro1 = Math.Max(1, Math.Min(ultimas, 2000));
+            cmd.CommandText = $"SELECT FechaHora,Usuario,Accion,Tabla,Detalle FROM LogAuditoria ORDER BY Id DESC LIMIT {_limiteSeguro1}";
             using var r = cmd.ExecuteReader();
             while (r.Read())
                 list.Add((DateTime.Parse(r.GetString(0)), S(r,1), S(r,2), S(r,3), S(r,4)));
@@ -2343,7 +3391,7 @@ namespace SistemaGestion
 
             cmd.CommandText = "SELECT Id,FechaHora,Usuario,Accion,Tabla,Detalle FROM LogAuditoria"
                 + (where.Count > 0 ? " WHERE " + string.Join(" AND ", where) : "")
-                + " ORDER BY Id DESC LIMIT " + limite;
+                + " ORDER BY Id DESC LIMIT " + Math.Max(1, Math.Min(limite, 2000));
 
             if (!string.IsNullOrEmpty(usuario)) cmd.Parameters.AddWithValue("$us", "%" + usuario.ToLower() + "%");
             if (!string.IsNullOrEmpty(accion))  cmd.Parameters.AddWithValue("$ac", "%" + accion.ToLower()  + "%");
@@ -2380,7 +3428,213 @@ namespace SistemaGestion
             return list;
         }
 
-                public static List<LineaFactura> ObtenerDetallesFactura(int idFactura)
+        /// <summary>
+        /// OPTIMIZACIÓN: trae todas las líneas de venta del periodo en UNA
+        /// sola query SQL con JOIN, en lugar de N+1 queries (una por factura).
+        /// Sustituye al patrón anterior que hacía ~5.000 queries para un mes
+        /// de ventas. El filtro por código de producto se aplica en SQL.
+        /// </summary>
+        public static List<LineaVentaPlana> ObtenerLineasVentaPorPeriodo(
+            DateTime desde, DateTime hasta, string codProducto = null)
+        {
+            var list = new List<LineaVentaPlana>();
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = @"
+                SELECT f.NumeroF, f.Fecha,
+                       df.Codigo,
+                       COALESCE(i.Descripcion, df.Codigo) AS Descripcion,
+                       df.Cantidad,
+                       COALESCE(i.Precio, 0) AS PrecioUnit,
+                       (df.Cantidad * COALESCE(i.Precio, 0)) AS Subtotal,
+                       COALESCE(t.TasaBCV, 0)      AS TasaBCV,
+                       COALESCE(t.TasaParalelo, 0) AS TasaParalelo
+                FROM Facturas f
+                INNER JOIN DetallesFactura df ON df.IdFactura = f.rowid
+                LEFT  JOIN Inventario     i  ON i.Codigo     = df.Codigo
+                LEFT  JOIN TasaCambio     t  ON t.Fecha      = f.Fecha
+                WHERE f.Fecha >= $desde AND f.Fecha <= $hasta
+                  AND ($cod IS NULL OR df.Codigo = $cod)
+                ORDER BY f.Fecha DESC, f.NumeroF";
+            cmd.Parameters.AddWithValue("$desde", desde.ToString("yyyy-MM-dd"));
+            cmd.Parameters.AddWithValue("$hasta", hasta.ToString("yyyy-MM-dd"));
+            cmd.Parameters.AddWithValue("$cod",   (object)codProducto ?? DBNull.Value);
+            using var r = cmd.ExecuteReader();
+            while (r.Read())
+                list.Add(new LineaVentaPlana
+                {
+                    NumeroF      = S(r, 0),
+                    Fecha        = DateTime.TryParse(S(r, 1), out var f) ? f : DateTime.MinValue,
+                    Codigo       = S(r, 2),
+                    Descripcion  = S(r, 3),
+                    Cantidad     = D(r, 4),
+                    PrecioUnit   = D(r, 5),
+                    Subtotal     = D(r, 6),
+                    TasaBCV      = D(r, 7),
+                    TasaParalelo = D(r, 8)
+                });
+            return list;
+        }
+
+        // ── REPORTES OPTIMIZADOS ─────────────────────────────────────────
+        // Filtran por fecha en SQL (índices ya creados en Inicializar).
+        // Reemplazan el patrón "ObtenerXxx() + LINQ.Where(fecha)" que traía
+        // todo el histórico para descartar el 99% en memoria.
+
+        public static List<Factura> ObtenerFacturasPorPeriodo(
+            DateTime desde, DateTime hasta, string codCliente = null,
+            bool incluirAnuladas = false, bool? incluirNotasEntrega = null)
+        {
+            // Reportes y CxC normalmente NO deben incluir anuladas ni NEs.
+            // Para NEs el default es respetar Sesion.MostrarNotasEntrega
+            // (que es false a menos que un Admin lo active para esta sesión).
+            bool incluirNE = incluirNotasEntrega ?? Sesion.MostrarNotasEntrega;
+
+            var list = new List<Factura>();
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = @"
+                SELECT NumeroF, Fecha, Codigo, Descuento, Transporte, Observaciones,
+                       FormaDePago, Abono, IvaF, DiasCreditoF, TotalF,
+                       COALESCE(Anulada,0) AS Anulada,
+                       MotivoAnulacion, FechaAnulacion, UsuarioAnulacion,
+                       COALESCE(TipoDocumento,'FacturaConIVA') AS TipoDocumento,
+                       COALESCE(EsExportacion,0)               AS EsExportacion,
+                       DestinoExportacion
+                FROM   Facturas
+                WHERE  Fecha >= $desde AND Fecha <= $hasta
+                  AND  ($cod IS NULL OR Codigo = $cod)
+                  " + (incluirAnuladas ? "" : "AND COALESCE(Anulada,0) = 0 ")
+                    + (incluirNE       ? "" : "AND COALESCE(TipoDocumento,'FacturaConIVA') != 'NotaEntrega' ") + @"
+                ORDER BY Fecha DESC";
+            cmd.Parameters.AddWithValue("$desde", desde.ToString("yyyy-MM-dd"));
+            cmd.Parameters.AddWithValue("$hasta", hasta.ToString("yyyy-MM-dd"));
+            cmd.Parameters.AddWithValue("$cod",   (object)codCliente ?? DBNull.Value);
+            using var r = cmd.ExecuteReader();
+            while (r.Read())
+                list.Add(LeerFactura(r));
+            return list;
+        }
+
+        public static List<Abono> ObtenerAbonosPorPeriodo(
+            DateTime desde, DateTime hasta, string codCliente = null)
+        {
+            var list = new List<Abono>();
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = @"
+                SELECT NumAbono, NumeroF, Fecha, Monto, Cliente
+                FROM Abonos
+                WHERE Fecha >= $desde AND Fecha <= $hasta
+                  AND ($cod IS NULL OR Cliente = $cod)
+                ORDER BY Fecha DESC";
+            cmd.Parameters.AddWithValue("$desde", desde.ToString("yyyy-MM-dd"));
+            cmd.Parameters.AddWithValue("$hasta", hasta.ToString("yyyy-MM-dd"));
+            cmd.Parameters.AddWithValue("$cod",   (object)codCliente ?? DBNull.Value);
+            using var r = cmd.ExecuteReader();
+            while (r.Read())
+                list.Add(new Abono {
+                    NumAbono = r.GetInt32(0),
+                    NumeroF  = S(r, 1),
+                    Fecha    = DateTime.TryParse(S(r, 2), out var f) ? f : DateTime.MinValue,
+                    Monto    = D(r, 3),
+                    Cliente  = S(r, 4)
+                });
+            return list;
+        }
+
+        public static List<CuentaCobrar> ObtenerCuentasFiltrado(
+            string codCliente = null, bool soloPendientes = false)
+        {
+            var list = new List<CuentaCobrar>();
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = @"
+                SELECT Id, Cliente, Concepto, Monto, Pagado, FechaEmision, FechaVence, Estado
+                FROM CuentasCobrar
+                WHERE ($cod IS NULL OR Cliente = $cod)
+                  AND ($pend = 0 OR (Monto - COALESCE(Pagado,0)) > 0)
+                ORDER BY FechaVence";
+            cmd.Parameters.AddWithValue("$cod",  (object)codCliente ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$pend", soloPendientes ? 1 : 0);
+            using var r = cmd.ExecuteReader();
+            while (r.Read())
+                list.Add(new CuentaCobrar {
+                    Id           = r.GetInt32(0),
+                    Cliente      = S(r, 1),
+                    Concepto     = S(r, 2),
+                    Monto        = D(r, 3),
+                    Pagado       = D(r, 4),
+                    FechaEmision = DateTime.TryParse(S(r, 5), out var fe) ? fe : DateTime.MinValue,
+                    FechaVence   = DateTime.TryParse(S(r, 6), out var fv) ? fv : DateTime.MinValue,
+                    Estado       = S(r, 7)
+                });
+            return list;
+        }
+
+        /// <summary>
+        /// Para el reporte de patrones de venta: agrega total facturado por
+        /// (año, mes) directamente en SQL en lugar de traer todas las
+        /// facturas y agrupar en LINQ.
+        /// </summary>
+        public static List<(int Ano, int Mes, decimal Total)> ObtenerVentasMensualesPorAnos(int[] anos)
+        {
+            var list = new List<(int, int, decimal)>();
+            if (anos == null || anos.Length == 0) return list;
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            // Construir IN (...) inline (anos es int controlado, no SQLi).
+            var inAnos = string.Join(",", anos);
+            cmd.CommandText = $@"
+                SELECT CAST(strftime('%Y', Fecha) AS INTEGER) AS Ano,
+                       CAST(strftime('%m', Fecha) AS INTEGER) AS Mes,
+                       SUM(TotalF)
+                FROM Facturas
+                WHERE CAST(strftime('%Y', Fecha) AS INTEGER) IN ({inAnos})
+                GROUP BY Ano, Mes
+                ORDER BY Ano, Mes";
+            using var r = cmd.ExecuteReader();
+            while (r.Read())
+                list.Add((r.GetInt32(0), r.GetInt32(1), D(r, 2)));
+            return list;
+        }
+
+        /// <summary>
+        /// Resumen ejecutivo en UNA sola query. Reemplaza 6 ObtenerXxx()
+        /// fullscan que se ejecutaban al cargar el tab Resumen.
+        /// </summary>
+        public static (int Facturas, decimal TotalFact, int Compras, decimal TotalComp,
+                       int Clientes, int Proveedores, int Productos, int BajoMin,
+                       int Moldes, int MantVencido)
+            ObtenerResumenGlobal()
+        {
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = @"
+                SELECT
+                    (SELECT COUNT(*) FROM Facturas),
+                    (SELECT COALESCE(SUM(TotalF),0) FROM Facturas),
+                    (SELECT COUNT(*) FROM Compras),
+                    (SELECT COALESCE(SUM(TotalC),0) FROM Compras),
+                    (SELECT COUNT(*) FROM Clientes),
+                    (SELECT COUNT(*) FROM Proveedores),
+                    (SELECT COUNT(*) FROM Inventario),
+                    (SELECT COUNT(*) FROM Inventario WHERE Existencia < ExistenMin),
+                    (SELECT COUNT(*) FROM TbMoldes),
+                    (SELECT COUNT(*) FROM TbMoldes
+                       WHERE FechaLastMant IS NOT NULL
+                         AND CAST(julianday('now') - julianday(FechaLastMant) AS INTEGER) > 180)";
+            using var r = cmd.ExecuteReader();
+            r.Read();
+            return (
+                r.GetInt32(0), D(r,1),
+                r.GetInt32(2), D(r,3),
+                r.GetInt32(4), r.GetInt32(5),
+                r.GetInt32(6), r.GetInt32(7),
+                r.GetInt32(8), r.GetInt32(9));
+        }
+
+        public static List<LineaFactura> ObtenerDetallesFactura(int idFactura)
         {
             var list = new List<LineaFactura>();
             using var c = Conn();
@@ -2425,7 +3679,8 @@ namespace SistemaGestion
         {
             using var conn = new SqliteConnection(ConnStr);
             conn.Open();
-            using var tx = conn.BeginTransaction();
+            // ALTA-5 FIX: Serializable para proteger stock en emisión de factura
+            using var tx = conn.BeginTransaction(System.Data.IsolationLevel.ReadCommitted);
             try
             {
                 // 1. Borrar detalles anteriores (para edicion)
@@ -2512,48 +3767,83 @@ namespace SistemaGestion
             }
         }
 
-                // ════════ RENTABILIDAD POR PRODUCTO ══════════════════════════════════
+        // ════════ RENTABILIDAD POR PRODUCTO ══════════════════════════════════
         /// <summary>
         /// Calcula la rentabilidad de cada producto cruzando:
         ///   - Inventario (costo, precio, stock)
         ///   - MovimientosInventario (unidades vendidas y compradas por periodo)
         /// </summary>
+        // ════════════════════════════════════════════════════════════════════════
+        // REEMPLAZAR el metodo ObtenerRentabilidad en DB.cs con este
+        // Calcula IngresoTotal usando el precio REAL de cada factura (PrecioF)
+        // en lugar del precio actual del inventario
+        // ════════════════════════════════════════════════════════════════════════
+
         public static List<RentabilidadProducto> ObtenerRentabilidad(
             DateTime? desde = null,
             DateTime? hasta = null)
         {
             var inventario = ObtenerInventario();
-            var kardex     = ObtenerKardex(null, desde, hasta);
 
-            // Agrupar movimientos por producto
-            var salidas  = kardex.Where(k => k.TipoMovimiento == "SALIDA")
-                                 .GroupBy(k => k.CodigoProducto)
-                                 .ToDictionary(g => g.Key,
-                                               g => g.Sum(k => k.Cantidad));
+            // ── Ingresos reales desde DetallesFactura JOIN Facturas ──────────────
+            // Usa PrecioF (precio al momento de la venta) * Cantidad
+            var ingresosPorProducto = new Dictionary<string, decimal>();
+            var unidadesPorProducto = new Dictionary<string, decimal>();
 
+            using (var c = Conn())
+            {
+                var cmd = c.CreateCommand();
+                cmd.CommandText = @"
+            SELECT df.Codigo,
+                   SUM(df.Cantidad)           AS Unidades,
+                   SUM(df.PrecioF * df.Cantidad) AS Ingreso
+            FROM DetallesFactura df
+            JOIN Facturas f ON f.rowid = df.IdFactura
+            WHERE 1=1 " +
+                    (desde.HasValue ? " AND f.Fecha >= $desde" : "") +
+                    (hasta.HasValue ? " AND f.Fecha <= $hasta" : "") +
+                    @" GROUP BY df.Codigo";
+
+                if (desde.HasValue)
+                    cmd.Parameters.AddWithValue("$desde", desde.Value.ToString("yyyy-MM-dd"));
+                if (hasta.HasValue)
+                    cmd.Parameters.AddWithValue("$hasta", hasta.Value.ToString("yyyy-MM-dd"));
+
+                using var r = cmd.ExecuteReader();
+                while (r.Read())
+                {
+                    string cod = S(r, 0);
+                    ingresosPorProducto[cod] = D(r, 2);
+                    unidadesPorProducto[cod] = D(r, 1);
+                }
+            }
+
+            // ── Entradas desde Kardex (compras/produccion) ───────────────────────
+            var kardex = ObtenerKardex(null, desde, hasta);
             var entradas = kardex.Where(k => k.TipoMovimiento == "ENTRADA")
                                  .GroupBy(k => k.CodigoProducto)
-                                 .ToDictionary(g => g.Key,
-                                               g => g.Sum(k => k.Cantidad));
+                                 .ToDictionary(g => g.Key, g => g.Sum(k => k.Cantidad));
 
             var resultado = new List<RentabilidadProducto>();
 
             foreach (var inv in inventario)
             {
-                decimal vendidas  = salidas.ContainsKey(inv.Codigo)  ? salidas[inv.Codigo]  : 0;
-                decimal compradas = entradas.ContainsKey(inv.Codigo) ? entradas[inv.Codigo] : 0;
+                decimal vendidas = unidadesPorProducto.ContainsKey(inv.Codigo)
+                                    ? unidadesPorProducto[inv.Codigo] : 0;
+                decimal compradas = entradas.ContainsKey(inv.Codigo)
+                                    ? entradas[inv.Codigo] : 0;
+                decimal ingreso = ingresosPorProducto.ContainsKey(inv.Codigo)
+                                    ? ingresosPorProducto[inv.Codigo] : 0;
+                decimal costo = vendidas * inv.CostoActual;
 
-                // Ingreso = unidades vendidas x precio de venta
-                decimal ingreso = vendidas * inv.Precio;
-                // Costo   = unidades vendidas x costo actual
-                decimal costo   = vendidas * inv.CostoActual;
+                // Precio promedio ponderado de venta en el periodo
+                decimal precioPromedio = vendidas > 0
+                    ? Math.Round(ingreso / vendidas, 2)
+                    : inv.Precio;
 
-                // Rotacion: cuantos meses tarda en vender el stock actual
-                // Si no hay ventas en el periodo, rotacion = 0 (no se mueve)
                 decimal rotacion = 0;
                 if (vendidas > 0 && inv.Existencia > 0)
                 {
-                    // Promedio vendido por mes en el periodo
                     int mesesPeriodo = desde.HasValue && hasta.HasValue
                         ? Math.Max(1, (int)Math.Ceiling(
                             (hasta.Value - desde.Value).TotalDays / 30.0))
@@ -2566,27 +3856,27 @@ namespace SistemaGestion
 
                 resultado.Add(new RentabilidadProducto
                 {
-                    Codigo            = inv.Codigo,
-                    Descripcion       = inv.Descripcion ?? "",
-                    Departamento      = inv.Departamento ?? "",
-                    Unidad            = inv.Unidad ?? "",
-                    CostoUnitario     = inv.CostoActual,
-                    PrecioVenta       = inv.Precio,
-                    UnidadesVendidas  = vendidas,
+                    Codigo = inv.Codigo,
+                    Descripcion = inv.Descripcion ?? "",
+                    Departamento = inv.Departamento ?? "",
+                    Unidad = inv.Unidad ?? "",
+                    CostoUnitario = inv.CostoActual,
+                    PrecioVenta = precioPromedio,   // precio promedio real del periodo
+                    UnidadesVendidas = vendidas,
                     UnidadesCompradas = compradas,
-                    IngresoTotal      = ingreso,
-                    CostoTotal        = costo,
-                    StockActual       = inv.Existencia,
-                    RotacionMeses     = rotacion
+                    IngresoTotal = ingreso,           // ingreso real de facturas
+                    CostoTotal = costo,
+                    StockActual = inv.Existencia,
+                    RotacionMeses = rotacion
                 });
             }
 
-            // Ordenar por utilidad bruta descendente
             resultado.Sort((a, b) => b.UtilidadBruta.CompareTo(a.UtilidadBruta));
             return resultado;
         }
 
-                // ════════ MANTENIMIENTO DE MOLDES ════════════════════════════════════
+
+        // ════════ MANTENIMIENTO DE MOLDES ════════════════════════════════════
         public static List<RegistroMantenimiento> ObtenerRegistrosMant(string codigoMolde = null)
         {
             var list = new List<RegistroMantenimiento>();
@@ -3360,8 +4650,14 @@ namespace SistemaGestion
 
             // Devengado
             decimal devSueldo  = emp.SueldoDiarioUSD * diasTrabajados;
-            decimal devPiezas  = emp.TipEmpleadoEs("Produccion") ? emp.TarifaPiezaUSD * piezasProducidas : 0;
-            decimal devVentas  = emp.TipEmpleadoEs("Oficina")    ? emp.TarifaVentaUSD * ventasCerradas   : 0;
+            decimal devPiezasBs = emp.TipEmpleadoEs("Produccion")
+                ? CalcularBonoProduccion(emp.Id, periodo.FechaDesde, periodo.FechaHasta)
+                : 0;
+            decimal devPiezas = tasa > 0 ? Math.Round(devPiezasBs / tasa, 4) : 0;
+            decimal devVentasBs = emp.TipEmpleadoEs("Oficina") || emp.TipEmpleadoEs("Ventas")
+                ? CalcularBonoVentas(emp.Id, periodo.FechaDesde, periodo.FechaHasta)
+                : 0;
+            decimal devVentas = tasa > 0 ? Math.Round(devVentasBs / tasa, 4) : 0;
             decimal totalDev   = devSueldo + devPiezas + devVentas + otrosIngresos;
 
             // Deducciones legales (se calculan sobre el total devengado convertido a Bs)
@@ -3739,8 +5035,10 @@ namespace SistemaGestion
         /// <summary>Cambia la contrasena validando la actual. Devuelve null si OK, mensaje si error.</summary>
         public static string CambiarContrasena(string nombreUsuario, string actualPlain, string nuevaPlain)
         {
-            if (string.IsNullOrWhiteSpace(nuevaPlain) || nuevaPlain.Length < 6)
-                return "La nueva contrasena debe tener al menos 6 caracteres.";
+            if (string.IsNullOrWhiteSpace(nuevaPlain) || nuevaPlain.Length < 8)
+                return "La nueva contraseña debe tener al menos 8 caracteres.";
+            if (nuevaPlain == actualPlain)
+                return "La nueva contraseña no puede ser igual a la actual.";
 
             using var c = Conn();
             var cmd = c.CreateCommand();
@@ -3749,17 +5047,21 @@ namespace SistemaGestion
             var obj = cmd.ExecuteScalar();
             if (obj == null) return "Usuario no encontrado.";
 
-            if ((string)obj != HashPassword(actualPlain))
-                return "La contrasena actual es incorrecta.";
+            // Usar VerificarPassword (tiempo constante, soporta legacy + PBKDF2)
+            if (!VerificarPassword(actualPlain, (string)obj))
+                return "La contraseña actual es incorrecta.";
 
+            // Guardar siempre con PBKDF2 (nunca SHA-256 legacy)
             var upd = c.CreateCommand();
-            upd.CommandText = "UPDATE Usuarios SET PasswordHash=$ph WHERE NombreUsuario=$u";
+            upd.CommandText = @"UPDATE Usuarios
+                SET PasswordHash=$ph, RequiereCambioPassword=0
+                WHERE NombreUsuario=$u";
             upd.Parameters.AddWithValue("$ph", HashPassword(nuevaPlain));
             upd.Parameters.AddWithValue("$u",  nombreUsuario);
             upd.ExecuteNonQuery();
 
             RegistrarAuditoria("CAMBIO_CONTRASENA", "Usuarios",
-                "Usuario: " + nombreUsuario);
+                "Usuario cambió su contraseña: " + nombreUsuario);
             return null;   // OK
         }
 
@@ -3830,15 +5132,38 @@ namespace SistemaGestion
         {
             var r = new List<ResultadoBusqueda>();
             if (string.IsNullOrWhiteSpace(q) || q.Length < 2) return r;
-            q = q.ToLower();
+            q = q.Trim().ToLower();
+
+            // Variante numérica sin ceros a la izquierda — para que "03"
+            // encuentre el código "3". Si no es numérico, qNum == q.
+            string qNum = q;
+            bool esNumerico = q.Length > 0 && q.TrimStart('-').All(char.IsDigit);
+            if (esNumerico)
+            {
+                qNum = q.TrimStart('0');
+                if (qNum.Length == 0) qNum = "0";
+            }
+            // Para los WHERE: armamos un LIKE que matchee ambas variantes.
+            // Si q == qNum no se duplica el costo (el optimizador colapsa).
+            string Likes(string colExpr) =>
+                qNum == q
+                    ? $"({colExpr}) LIKE $q"
+                    : $"(({colExpr}) LIKE $q OR ({colExpr}) LIKE $qn)";
+            void Bind(SqliteCommand cmd)
+            {
+                cmd.Parameters.AddWithValue("$q",  "%" + q   + "%");
+                if (qNum != q) cmd.Parameters.AddWithValue("$qn", "%" + qNum + "%");
+            }
 
             using var c = Conn();
 
             // Clientes
             var cmd = c.CreateCommand();
             cmd.CommandText = @"SELECT Codigo, Descripcion, CiRif, Telefono
-                FROM Clientes WHERE lower(Codigo)||lower(coalesce(Descripcion,''))||lower(coalesce(CiRif,'')) LIKE $q LIMIT 10";
-            cmd.Parameters.AddWithValue("$q", "%" + q + "%");
+                FROM Clientes WHERE " +
+                Likes("lower(Codigo)||lower(coalesce(Descripcion,''))||lower(coalesce(CiRif,''))") +
+                " LIMIT 10";
+            Bind(cmd);
             using (var rd = cmd.ExecuteReader())
                 while (rd.Read())
                     r.Add(new ResultadoBusqueda { Modulo="Clientes", Categoria="Clientes",
@@ -3848,8 +5173,10 @@ namespace SistemaGestion
             // Proveedores
             var cmd2 = c.CreateCommand();
             cmd2.CommandText = @"SELECT Codigo, Descripcion, CiRif, Telefono1
-                FROM Proveedores WHERE lower(Codigo)||lower(coalesce(Descripcion,''))||lower(coalesce(CiRif,'')) LIKE $q LIMIT 10";
-            cmd2.Parameters.AddWithValue("$q", "%" + q + "%");
+                FROM Proveedores WHERE " +
+                Likes("lower(Codigo)||lower(coalesce(Descripcion,''))||lower(coalesce(CiRif,''))") +
+                " LIMIT 10";
+            Bind(cmd2);
             using (var rd = cmd2.ExecuteReader())
                 while (rd.Read())
                     r.Add(new ResultadoBusqueda { Modulo="Proveedores", Categoria="Proveedores",
@@ -3859,8 +5186,10 @@ namespace SistemaGestion
             // Inventario
             var cmd3 = c.CreateCommand();
             cmd3.CommandText = @"SELECT Codigo, Descripcion, Departamento, Existencia, Precio
-                FROM Inventario WHERE lower(Codigo)||lower(coalesce(Descripcion,''))||lower(coalesce(Departamento,'')) LIKE $q LIMIT 15";
-            cmd3.Parameters.AddWithValue("$q", "%" + q + "%");
+                FROM Inventario WHERE " +
+                Likes("lower(Codigo)||lower(coalesce(Descripcion,''))||lower(coalesce(Departamento,''))") +
+                " LIMIT 15";
+            Bind(cmd3);
             using (var rd = cmd3.ExecuteReader())
                 while (rd.Read())
                     r.Add(new ResultadoBusqueda { Modulo="Inventario", Categoria="Inventario",
@@ -3870,8 +5199,10 @@ namespace SistemaGestion
             // Facturas
             var cmd4 = c.CreateCommand();
             cmd4.CommandText = @"SELECT NumeroF, Codigo, TotalF, Fecha
-                FROM Facturas WHERE lower(NumeroF)||lower(coalesce(Codigo,'')) LIKE $q LIMIT 10";
-            cmd4.Parameters.AddWithValue("$q", "%" + q + "%");
+                FROM Facturas WHERE " +
+                Likes("lower(NumeroF)||lower(coalesce(Codigo,''))") +
+                " LIMIT 10";
+            Bind(cmd4);
             using (var rd = cmd4.ExecuteReader())
                 while (rd.Read())
                     r.Add(new ResultadoBusqueda { Modulo="Facturas", Categoria="Facturas",
@@ -3881,8 +5212,10 @@ namespace SistemaGestion
             // Compras
             var cmd5 = c.CreateCommand();
             cmd5.CommandText = @"SELECT CompraN, CodigoP, TotalC, FechaC
-                FROM Compras WHERE lower(CompraN)||lower(coalesce(CodigoP,'')) LIKE $q LIMIT 10";
-            cmd5.Parameters.AddWithValue("$q", "%" + q + "%");
+                FROM Compras WHERE " +
+                Likes("lower(CompraN)||lower(coalesce(CodigoP,''))") +
+                " LIMIT 10";
+            Bind(cmd5);
             using (var rd = cmd5.ExecuteReader())
                 while (rd.Read())
                     r.Add(new ResultadoBusqueda { Modulo="Compras", Categoria="Compras",
@@ -3892,8 +5225,10 @@ namespace SistemaGestion
             // Ordenes de Produccion
             var cmd6 = c.CreateCommand();
             cmd6.CommandText = @"SELECT NumOrden, ProductoCod, Estado, CantidadPlan
-                FROM OrdenesProduccion WHERE lower(NumOrden)||lower(coalesce(ProductoCod,'')) LIKE $q LIMIT 10";
-            cmd6.Parameters.AddWithValue("$q", "%" + q + "%");
+                FROM OrdenesProduccion WHERE " +
+                Likes("lower(NumOrden)||lower(coalesce(ProductoCod,''))") +
+                " LIMIT 10";
+            Bind(cmd6);
             using (var rd = cmd6.ExecuteReader())
                 while (rd.Read())
                     r.Add(new ResultadoBusqueda { Modulo="Ordenes de Produccion", Categoria="Produccion",
@@ -3903,8 +5238,10 @@ namespace SistemaGestion
             // Moldes
             var cmd7 = c.CreateCommand();
             cmd7.CommandText = @"SELECT CodigoMold, Descripcion, ModeloQfabrica, FechaLastMant
-                FROM TbMoldes WHERE lower(CodigoMold)||lower(coalesce(Descripcion,''))||lower(coalesce(ModeloQfabrica,'')) LIKE $q LIMIT 10";
-            cmd7.Parameters.AddWithValue("$q", "%" + q + "%");
+                FROM TbMoldes WHERE " +
+                Likes("lower(CodigoMold)||lower(coalesce(Descripcion,''))||lower(coalesce(ModeloQfabrica,''))") +
+                " LIMIT 10";
+            Bind(cmd7);
             using (var rd = cmd7.ExecuteReader())
                 while (rd.Read())
                     r.Add(new ResultadoBusqueda { Modulo="Moldes", Categoria="Produccion",
@@ -3914,8 +5251,10 @@ namespace SistemaGestion
             // Kardex
             var cmd8 = c.CreateCommand();
             cmd8.CommandText = @"SELECT CodigoProducto, TipoMovimiento, Concepto, Cantidad, FechaHora
-                FROM MovimientosInventario WHERE lower(CodigoProducto)||lower(coalesce(Concepto,''))||lower(coalesce(Referencia,'')) LIKE $q LIMIT 8";
-            cmd8.Parameters.AddWithValue("$q", "%" + q + "%");
+                FROM MovimientosInventario WHERE " +
+                Likes("lower(CodigoProducto)||lower(coalesce(Concepto,''))||lower(coalesce(Referencia,''))") +
+                " LIMIT 8";
+            Bind(cmd8);
             using (var rd = cmd8.ExecuteReader())
                 while (rd.Read())
                     r.Add(new ResultadoBusqueda { Modulo="Kardex", Categoria="Inventario",
@@ -3935,6 +5274,32 @@ namespace SistemaGestion
             cmd.CommandText = sql;
             foreach (var (k, v) in pars) cmd.Parameters.AddWithValue(k, v);
             cmd.ExecuteNonQuery();
+        }
+
+        // ════════ EDICION DIRECTA DE INVENTARIO ════════════════════════
+        public static bool ActualizarCampoInventario(
+            string codigo, string campo, string valor, out string error)
+        {
+            error = null;
+            var permitidos = new[]
+            {
+                "Descripcion","Departamento","Unidad","Enser",
+                "CostoActual","CostoAnt","CostoPro","Precio",
+                "Existencia","ExistenMin","ExistenMax","Proveedores","CodProveedor","PesoKg"
+            };
+            if (!permitidos.Contains(campo))
+            { error = $"Campo '{campo}' no es editable."; return false; }
+            try
+            {
+                using var c = Conn();
+                var cmd = c.CreateCommand();
+                cmd.CommandText = $"UPDATE Inventario SET {campo}=$val WHERE Codigo=$cod";
+                cmd.Parameters.AddWithValue("$val", valor ?? "");
+                cmd.Parameters.AddWithValue("$cod", codigo);
+                cmd.ExecuteNonQuery();
+                return true;
+            }
+            catch (Exception ex) { error = ex.Message; return false; }
         }
     }
 
@@ -3957,6 +5322,10 @@ namespace SistemaGestion
         public decimal  NuevoSaldo    { get; set; }
         public string   Referencia    { get; set; }  // Nro Factura, Compra, etc.
         public string   Usuario       { get; set; }
+        /// <summary>"PRODUCTO" o "MATERIA_PRIMA" — discrimina Kardex B vs A</summary>
+        public string   TipoKardex    { get; set; }
+        /// <summary>Costo unitario en el momento del movimiento (para CPP)</summary>
+        public decimal  CostoUnitario { get; set; }
     }
 
     public class IngresoProduccion
@@ -4050,26 +5419,71 @@ namespace SistemaGestion
         public string   Ruta    { get; set; }
         public DateTime Fecha   { get; set; }
         public string   Usuario { get; set; }
+
+
     }
+
     // ════════════════════════════════════════════════════════════════════════
     //  SESIÓN GLOBAL
     // ════════════════════════════════════════════════════════════════════════
     public static class Sesion
     {
-        public static int    UsuarioId   { get; set; }
-        public static string NombreUsuario{ get; set; }
+        public static int    UsuarioId    { get; set; }
+        public static string NombreUsuario { get; set; }
         public static string NombreCompleto{ get; set; }
-        public static string Rol         { get; set; }  // Admin / Ventas / Almacen / Contabilidad
+        public static string Rol          { get; set; }  // Admin / Ventas / Almacen / Contabilidad
 
-        public static bool EsAdmin       => Rol == "Admin";
+        public static bool EsAdmin        => Rol == "Admin";
         public static bool TienePermiso(string modulo) => PermisosRol.Permite(Rol, modulo);
+
+        // ── Visibilidad de Notas de Entrega (v22) ───────────────────────────
+        // Default false. Sólo Admin puede activarla con UsarMostrarNotasEntrega.
+        // Se resetea SIEMPRE en cada login (no persiste entre sesiones).
+        // Cuando true, todos los reportes/dashboard/CxC incluyen las NE.
+        // Cuando false (normal), las NE son invisibles para reportes y totales,
+        // pero siguen apareciendo en el listado de FrmFacturas con badge.
+        private static bool _mostrarNE;
+        public static bool MostrarNotasEntrega
+        {
+            get => _mostrarNE;
+            private set => _mostrarNE = value;
+        }
+
+        // Activa/desactiva con auditoría. Solo Admin puede invocarla.
+        public static void SetMostrarNotasEntrega(bool valor)
+        {
+            if (!EsAdmin)
+                throw new InvalidOperationException(
+                    "Solo Admin puede cambiar la visibilidad de Notas de Entrega.");
+            if (_mostrarNE == valor) return;
+            _mostrarNE = valor;
+            DatabaseService.RegistrarAuditoria(
+                valor ? "NE_VISTA_ACTIVADA" : "NE_VISTA_DESACTIVADA",
+                "Sistema",
+                $"{NombreUsuario} {(valor ? "activó" : "desactivó")} la visibilidad " +
+                "de Notas de Entrega para su sesión.");
+        }
+
+        /// <summary>
+        /// Carga todos los datos de sesión desde un objeto Usuario autenticado.
+        /// Llamar desde FrmLogin justo después de ValidarLogin exitoso.
+        /// </summary>
+        public static void IniciarDesde(Usuario u)
+        {
+            UsuarioId     = u.Id;
+            NombreUsuario  = u.NombreUsuario;
+            NombreCompleto = u.NombreCompleto;
+            Rol            = u.Rol;
+            _mostrarNE     = false;   // siempre false en cada login
+        }
 
         public static void Cerrar()
         {
-            UsuarioId    = 0;
-            NombreUsuario = null;
-            NombreCompleto= null;
-            Rol           = null;
+            UsuarioId     = 0;
+            NombreUsuario  = null;
+            NombreCompleto = null;
+            Rol            = null;
+            _mostrarNE     = false;
         }
     }
 
@@ -4085,17 +5499,48 @@ namespace SistemaGestion
                 ("Ventas",       "CuentasCobrar")    => true,
                 ("Ventas",       "Clientes")         => true,
                 ("Ventas",       "Reportes")         => true,
+                ("Ventas",       "TasaConsulta")     => true,
+                ("Ventas",       "TasaIngreso")      => true,  // ingreso/aceptación rutinaria
                 ("Almacen",      "Inventario")       => true,
                 ("Almacen",      "Kardex")           => true,
                 ("Almacen",      "Compras")          => true,
                 ("Almacen",      "Proveedores")      => true,
                 ("Almacen",      "IngresoProduccion")=> true,
                 ("Almacen",      "Moldes")           => true,
+                ("Almacen",      "TasaConsulta")     => true,
                 ("Contabilidad", "Reportes")         => true,
                 ("Contabilidad", "Facturas")         => true,
                 ("Contabilidad", "Compras")          => true,
                 ("Contabilidad", "Gastos")           => true,
                 ("Contabilidad", "CambioPrecios")    => true,
+                ("Contabilidad", "TasaConsulta")     => true,
+                ("Contabilidad", "TasaIngreso")      => true,
+                ("Contabilidad", "TasaModificar")    => true,  // editar tasa ya registrada
+                // ── EGRESOS ─────────────────────────────────────────────────
+                ("Ventas",       "EgresosVer")       => true,  // solo lectura
+                ("Almacen",      "EgresosVer")       => true,
+                ("Almacen",      "EgresosRegistrar") => true,  // puede registrar MP
+                ("Contabilidad", "EgresosVer")       => true,
+                ("Contabilidad", "EgresosRegistrar") => true,
+                ("Contabilidad", "EgresosAnular")    => true,  // puede anular
+                ("Contabilidad", "EgresosCategorias")=> true,  // CRUD categorias
+                // ── ANULACIÓN DE FACTURAS (v21) ─────────────────────────────
+                //  No es eliminar (rompe correlativo SENIAT). Marca la factura
+                //  como anulada con motivo y deja la fila para auditoría.
+                //  Solo Contabilidad y Admin pueden anular.
+                ("Contabilidad", "FacturasAnular")  => true,
+                // ── NOTAS DE ENTREGA (v22) ──────────────────────────────────
+                //  Crear:    cualquier rol que ya pueda crear factura
+                //  Convertir: solo Admin (cambiar NE a factura legal)
+                //  Toggle visibilidad: solo Admin (auditado por sesión)
+                ("Ventas",       "NotasEntregaCrear") => true,
+                ("Contabilidad", "NotasEntregaCrear") => true,
+                // ── PERMISOS DE TASA DE CAMBIO ──────────────────────────────
+                //  TasaConsulta : ver tasa actual y consultar histórico
+                //  TasaIngreso  : ingresar tasa nueva del día (no existe aún)
+                //  TasaModificar: sobrescribir tasa ya registrada (sensible)
+                //  Solo Admin tiene los 3 implícitamente. El resto se asigna
+                //  por rol arriba según la responsabilidad operativa.
                 _ => false
             };
         }
@@ -4103,15 +5548,43 @@ namespace SistemaGestion
 
     public class Usuario
     {
-        public int    Id            { get; set; }
-        public string NombreUsuario { get; set; }
-        public string NombreCompleto{ get; set; }
-        public string PasswordHash  { get; set; }
-        public string Rol           { get; set; }
-        public bool   Activo        { get; set; }
-        public DateTime FechaCreacion{ get; set; }
-        public DateTime? UltimoAcceso{ get; set; }
+        public int    Id                     { get; set; }
+        public string NombreUsuario          { get; set; }
+        public string NombreCompleto         { get; set; }
+        public string PasswordHash           { get; set; }
+        public string Rol                    { get; set; }
+        public bool   Activo                 { get; set; }
+        public DateTime  FechaCreacion       { get; set; }
+        public DateTime? UltimoAcceso        { get; set; }
+        /// <summary>True si el usuario debe cambiar la contraseña en el próximo login.</summary>
+        public bool   RequiereCambioPassword { get; set; }
+        /// <summary>Intentos de login fallidos hoy (reset al login exitoso).</summary>
+        public int    IntentosHoy            { get; set; }
+        /// <summary>Si no null, el usuario está bloqueado hasta esta fecha/hora.</summary>
+        public DateTime? BloqueadoHasta      { get; set; }
+
+        // ── Helpers de rol ───────────────────────────────────────────────
+        /// <summary>True si el usuario tiene rol Admin.</summary>
+        public bool EsAdmin => Rol == "Admin";
+
+        /// <summary>True si el usuario tiene el rol especificado.</summary>
+        public bool TieneRol(string rol) =>
+            string.Equals(Rol, rol, StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>Descripción legible del rol para mostrar en la UI.</summary>
+        public string RolesDescripcion => Rol ?? "(sin rol)";
+
+        /// <summary>
+        /// CSV de roles. Asignar este campo actualiza Rol automáticamente.
+        /// Mantiene compatibilidad con código que usaba multi-rol.
+        /// </summary>
+        public string RolesCSV
+        {
+            get => Rol ?? "";
+            set => Rol = string.IsNullOrWhiteSpace(value) ? "" : value.Split(',')[0].Trim();
+        }
     }
+
 
 
 }

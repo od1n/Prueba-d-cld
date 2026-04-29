@@ -10,7 +10,7 @@ namespace SistemaGestion
     // ══════════════════════════════════════════════════════════════════════════
     //  PROGRAMA DE MANTENIMIENTO DE MOLDES
     // ══════════════════════════════════════════════════════════════════════════
-    public class FrmMantenimientoMoldes : Form
+    public class FrmMantenimientoMoldes : FormBase
     {
         private TabControl tabs;
 

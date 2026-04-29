@@ -4,182 +4,208 @@ using System.Windows.Forms;
 
 namespace SistemaGestion
 {
-    public class FrmLogin : Form
+    public class FrmLogin : FormBase
     {
-        private TextBox txtUsuario;
-        private TextBox txtPassword;
-        private Label   lblError;
-        private Button  btnEntrar;
-        private int     _intentosFallidos = 0;
-        private const int MAX_INTENTOS = 5;
+        private TextBox txtUsuario = null!;
+        private TextBox txtPassword = null!;
+        private Label   lblError = null!;
+        private Button  btnEntrar = null!;
+        private CheckBox chkMostrar = null!;
+        private ValidacionInline _v = null!;
+
+        private int _intentosFallidosSesion = 0;
 
         public FrmLogin()
         {
+            ConstruirUI();
+        }
+
+        // ── Construcción de la UI ────────────────────────────────────────────
+        private void ConstruirUI()
+        {
             Text            = "Iniciar Sesión — Sistema de Gestión";
-            Size            = new Size(420, 480);
+            ClientSize      = new Size(440, 520);
             StartPosition   = FormStartPosition.CenterScreen;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox     = false;
             MinimizeBox     = false;
-            BackColor       = Color.FromArgb(245, 247, 252);
+            BackColor       = UITheme.Fondo;
+            DoubleBuffered  = true;   // evita parpadeo al redimensionar/DPI
 
-            // ── Banner superior ───────────────────────────────────────────
+            // ── Layout raíz: 3 filas (banner / contenido / mensaje) ────────
+            var root = new TableLayoutPanel
+            {
+                Dock       = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount    = 3,
+                BackColor  = UITheme.Fondo
+            };
+            root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 100f));   // banner
+            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));    // contenido
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 36f));    // mensaje
+
+            // ── Banner ────────────────────────────────────────────────────
             var banner = new Panel
             {
-                Dock      = DockStyle.Top,
-                Height    = 110,
-                BackColor = Color.FromArgb(30, 70, 140)
+                Dock      = DockStyle.Fill,
+                BackColor = UITheme.AzulOscuro,
+                Tag       = "no-theme"
             };
-            banner.Controls.Add(new Label
+            var lblTituloBanner = new Label
             {
                 Text      = "SISTEMA DE GESTIÓN",
-                Font      = new Font("Segoe UI", 16f, FontStyle.Bold),
+                Font      = new Font("Segoe UI", 17f, FontStyle.Bold),
                 ForeColor = Color.White,
+                BackColor = UITheme.AzulOscuro,
                 AutoSize  = false,
                 TextAlign = ContentAlignment.MiddleCenter,
                 Dock      = DockStyle.Fill
-            });
+            };
+            banner.Controls.Add(lblTituloBanner);
+            root.Controls.Add(banner, 0, 0);
 
-            // ── Formulario centrado ───────────────────────────────────────
+            // ── Contenido (formulario) ─────────────────────────────────────
+            var contenido = new TableLayoutPanel
+            {
+                Dock        = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount    = 8,
+                Padding     = new Padding(48, 24, 48, 24),
+                BackColor   = UITheme.Fondo
+            };
+            contenido.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+            // Subtitulo / lblU / txtU / lblP / txtP / chkMostrar / btnEntrar : todos AutoSize.
+            for (int i = 0; i < 7; i++)
+                contenido.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            // Ultima fila: spacer flexible que absorbe el espacio sobrante
+            // para que el boton no se "estire" hasta el fondo del form.
+            contenido.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+
             var lblTitulo = new Label
             {
                 Text      = "Ingresa tus credenciales",
-                Font      = new Font("Segoe UI", 10f),
-                ForeColor = Color.FromArgb(80, 80, 100),
+                Font      = UITheme.Body,
+                ForeColor = UITheme.TextoTenue,
                 AutoSize  = false,
                 TextAlign = ContentAlignment.MiddleCenter,
-                Location  = new Point(40, 128),
-                Size      = new Size(330, 24)
+                Dock      = DockStyle.Fill,
+                Height    = 24,
+                Margin    = new Padding(0, 0, 0, 12)
             };
+            contenido.Controls.Add(lblTitulo, 0, 0);
 
-            // ── Usuario ───────────────────────────────────────────────────
             var lblU = new Label
             {
-                Text     = "Usuario",
-                Font     = new Font("Segoe UI", 9f, FontStyle.Bold),
-                Location = new Point(50, 168),
-                AutoSize = true,
-                ForeColor= Color.FromArgb(50, 50, 80)
+                Text      = "Usuario",
+                Font      = UITheme.BodyBold,
+                ForeColor = UITheme.AzulOscuro,
+                AutoSize  = true,
+                Margin    = new Padding(0, 0, 0, 4)
             };
+            contenido.Controls.Add(lblU, 0, 1);
+
             txtUsuario = new TextBox
             {
-                Location    = new Point(50, 188),
-                Size        = new Size(310, 32),
                 Font        = new Font("Segoe UI", 11f),
                 BorderStyle = BorderStyle.FixedSingle,
-                MaxLength   = 50
+                MaxLength   = 50,
+                Dock        = DockStyle.Fill,
+                Margin      = new Padding(0, 0, 0, 12)
             };
             txtUsuario.KeyDown += (s, e) =>
             {
-                if (e.KeyCode == Keys.Enter) txtPassword.Focus();
+                if (e.KeyCode == Keys.Enter) { txtPassword.Focus(); e.SuppressKeyPress = true; }
             };
+            contenido.Controls.Add(txtUsuario, 0, 2);
 
-            // ── Contraseña ────────────────────────────────────────────────
             var lblP = new Label
             {
-                Text     = "Contraseña",
-                Font     = new Font("Segoe UI", 9f, FontStyle.Bold),
-                Location = new Point(50, 234),
-                AutoSize = true,
-                ForeColor= Color.FromArgb(50, 50, 80)
+                Text      = "Contraseña",
+                Font      = UITheme.BodyBold,
+                ForeColor = UITheme.AzulOscuro,
+                AutoSize  = true,
+                Margin    = new Padding(0, 0, 0, 4)
             };
+            contenido.Controls.Add(lblP, 0, 3);
+
             txtPassword = new TextBox
             {
-                Location      = new Point(50, 254),
-                Size          = new Size(310, 32),
                 Font          = new Font("Segoe UI", 11f),
                 BorderStyle   = BorderStyle.FixedSingle,
                 PasswordChar  = '●',
-                MaxLength     = 100
+                MaxLength     = 100,
+                Dock          = DockStyle.Fill,
+                Margin        = new Padding(0, 0, 0, 8)
             };
             txtPassword.KeyDown += (s, e) =>
             {
-                if (e.KeyCode == Keys.Enter) Intentar();
+                if (e.KeyCode == Keys.Enter) { Intentar(); e.SuppressKeyPress = true; }
             };
+            contenido.Controls.Add(txtPassword, 0, 4);
 
-            // Mostrar/ocultar contraseña
-            var chkMostrar = new CheckBox
+            chkMostrar = new CheckBox
             {
-                Text     = "Mostrar contraseña",
-                Location = new Point(50, 292),
-                AutoSize = true,
-                Font     = new Font("Segoe UI", 8.5f),
-                ForeColor= Color.FromArgb(100, 100, 120)
+                Text      = "Mostrar contraseña",
+                AutoSize  = true,
+                Font      = UITheme.Body,
+                ForeColor = UITheme.TextoTenue,
+                Margin    = new Padding(0, 0, 0, 16)
             };
             chkMostrar.CheckedChanged += (s, e) =>
                 txtPassword.PasswordChar = chkMostrar.Checked ? '\0' : '●';
+            contenido.Controls.Add(chkMostrar, 0, 5);
 
-            // ── Mensaje de error ──────────────────────────────────────────
+            btnEntrar = UITheme.BotonPrimario("Entrar");
+            // Anchor.Top|Left|Right en lugar de Dock.Fill: el boton crece en
+            // ancho con el contenedor pero NO se estira en altura cuando
+            // sobra espacio vertical. Mantiene altura fija de 44px.
+            btnEntrar.Anchor   = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            btnEntrar.Height   = 44;
+            btnEntrar.Margin   = new Padding(0, 0, 0, 0);
+            btnEntrar.AutoSize = false;
+            btnEntrar.Click += (s, e) => Intentar();
+            contenido.Controls.Add(btnEntrar, 0, 6);
+
+            root.Controls.Add(contenido, 0, 1);
+
+            // ── Mensaje de error (fila inferior) ───────────────────────────
             lblError = new Label
             {
                 Text      = "",
-                Font      = new Font("Segoe UI", 9f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(180, 40, 40),
-                Location  = new Point(50, 318),
-                Size      = new Size(310, 40),
-                TextAlign = ContentAlignment.MiddleCenter
-            };
-
-            // ── Botón entrar ──────────────────────────────────────────────
-            btnEntrar = new Button
-            {
-                Text      = "Entrar",
-                Location  = new Point(50, 364),
-                Size      = new Size(310, 44),
-                Font      = new Font("Segoe UI", 11f, FontStyle.Bold),
-                BackColor = Color.FromArgb(30, 70, 140),
-                ForeColor = Color.White,
-                FlatStyle = FlatStyle.Flat,
-                Cursor    = Cursors.Hand
-            };
-            btnEntrar.FlatAppearance.BorderSize = 0;
-            btnEntrar.Click += (s, e) => Intentar();
-
-            // Hover effect
-            btnEntrar.MouseEnter += (s, e) => btnEntrar.BackColor = Color.FromArgb(50, 100, 180);
-            btnEntrar.MouseLeave += (s, e) => btnEntrar.BackColor = Color.FromArgb(30, 70, 140);
-
-            // ── Footer de versión ─────────────────────────────────────────
-            var lblVersion = new Label
-            {
-                Text      = "v1.0  —  usuario por defecto: admin / admin123",
-                Font      = new Font("Segoe UI", 7.5f),
-                ForeColor = Color.FromArgb(160, 160, 175),
+                Dock      = DockStyle.Fill,
+                Font      = UITheme.BodyBold,
+                ForeColor = UITheme.Rojo,
+                BackColor = Color.FromArgb(253, 235, 235),
                 AutoSize  = false,
                 TextAlign = ContentAlignment.MiddleCenter,
-                Location  = new Point(40, 422),
-                Size      = new Size(330, 20)
+                Visible   = false
             };
+            root.Controls.Add(lblError, 0, 2);
 
-            Controls.AddRange(new Control[]
-            {
-                banner, lblTitulo, lblU, txtUsuario,
-                lblP, txtPassword, chkMostrar,
-                lblError, btnEntrar, lblVersion
-            });
+            this.Controls.Add(root);
+            this.AcceptButton = btnEntrar;
 
-            // Foco inicial
-            Shown += (s, e) => txtUsuario.Focus();
+            _v = new ValidacionInline(this);
+            this.FormClosed += (s, e) => _v?.Dispose();
+            this.Shown      += (s, e) => txtUsuario.Focus();
         }
 
-        // ── Lógica de autenticación ───────────────────────────────────────
+        // ── Lógica de autenticación ──────────────────────────────────────────
         private void Intentar()
         {
-            lblError.Text = "";
-
-            if (string.IsNullOrWhiteSpace(txtUsuario.Text))
+            _v.Limpiar();
+            _v.Requerido(txtUsuario, "Ingresa tu nombre de usuario.")
+              .MaxLongitud(txtUsuario, 50)
+              .Requerido(txtPassword, "Ingresa tu contraseña.")
+              .MaxLongitud(txtPassword, 100);
+            if (!_v.EsValido)
             {
-                MostrarError("Ingresa tu nombre de usuario.");
-                txtUsuario.Focus();
-                return;
-            }
-            if (string.IsNullOrWhiteSpace(txtPassword.Text))
-            {
-                MostrarError("Ingresa tu contraseña.");
-                txtPassword.Focus();
+                (txtUsuario.Text.Trim().Length == 0 ? txtUsuario : txtPassword).Focus();
                 return;
             }
 
+            OcultarError();
             btnEntrar.Enabled = false;
             btnEntrar.Text    = "Verificando...";
 
@@ -189,36 +215,53 @@ namespace SistemaGestion
 
             if (usuario != null)
             {
-                // Login exitoso — cargar sesión
-                Sesion.UsuarioId      = usuario.Id;
-                Sesion.NombreUsuario  = usuario.NombreUsuario;
-                Sesion.NombreCompleto = usuario.NombreCompleto;
-                Sesion.Rol            = usuario.Rol;
+                Sesion.IniciarDesde(usuario);
 
                 DatabaseService.RegistrarAuditoria("LOGIN", "Usuarios",
                     $"Acceso exitoso — Rol: {usuario.Rol}");
+
+                if (usuario.RequiereCambioPassword)
+                {
+                    var msg = usuario.NombreUsuario == "admin"
+                        ? "Primer acceso detectado.\n\nDebe cambiar la contraseña antes de continuar.\n\nLa contraseña inicial 'admin123' no es segura."
+                        : "Su contraseña debe ser cambiada antes de continuar.";
+
+                    MessageBox.Show(this, msg, "Cambio de contraseña requerido",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+
+                    using var frmCambio = new FrmCambioContrasena(usuario.NombreUsuario, forzado: true);
+                    if (frmCambio.ShowDialog(this) != DialogResult.OK)
+                    {
+                        Sesion.Cerrar();
+                        MostrarError("Debe cambiar la contraseña para acceder al sistema.");
+                        return;
+                    }
+                }
 
                 DialogResult = DialogResult.OK;
                 Close();
             }
             else
             {
-                _intentosFallidos++;
-                DatabaseService.RegistrarAuditoria("LOGIN_FALLIDO", "Usuarios",
-                    $"Intento fallido para usuario: {txtUsuario.Text.Trim()}");
+                _intentosFallidosSesion++;
 
-                if (_intentosFallidos >= MAX_INTENTOS)
+                var usuarioAnon = txtUsuario.Text.Trim().Length > 0
+                    ? txtUsuario.Text.Trim()[0] + "***"
+                    : "(vacío)";
+
+                DatabaseService.RegistrarAuditoria("LOGIN_FALLIDO", "Usuarios",
+                    $"Intento fallido — usuario: {usuarioAnon}");
+
+                if (_intentosFallidosSesion >= 5)
                 {
-                    MostrarError($"Demasiados intentos fallidos.\nEl sistema se cerrará.");
-                    System.Threading.Tasks.Task.Delay(2000)
-                        .ContinueWith(_ => Application.Exit());
+                    MostrarError("Demasiados intentos fallidos. La cuenta ha sido bloqueada 30 minutos.");
+                    System.Threading.Tasks.Task.Delay(2500)
+                        .ContinueWith(_ => this.Invoke(() => Application.Exit()),
+                            System.Threading.Tasks.TaskScheduler.Default);
                     return;
                 }
 
-                MostrarError(
-                    $"Usuario o contraseña incorrectos.\n" +
-                    $"Intentos restantes: {MAX_INTENTOS - _intentosFallidos}");
-
+                MostrarError("Usuario o contraseña incorrectos.");
                 txtPassword.Clear();
                 txtPassword.Focus();
 
@@ -229,9 +272,11 @@ namespace SistemaGestion
 
         private void MostrarError(string msg)
         {
-            lblError.Text     = msg;
+            lblError.Text     = "  " + msg;
+            lblError.Visible  = true;
             btnEntrar.Enabled = true;
             btnEntrar.Text    = "Entrar";
         }
+        private void OcultarError() => lblError.Visible = false;
     }
 }

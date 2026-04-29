@@ -8,7 +8,7 @@ using System.Windows.Forms;
 
 namespace SistemaGestion
 {
-    public class FrmAlertas : Form
+    public class FrmAlertas : FormBase
     {
         private readonly AlertasData _data;
         private TabControl tabControl;
@@ -81,41 +81,47 @@ namespace SistemaGestion
         private void InitializeComponent()
         {
             this.Text = "Alertas del Sistema";
-            this.Size = new Size(780, 560);
+            this.Size = new Size(880, 600);
+            this.MinimumSize = new Size(720, 480);
             this.StartPosition = FormStartPosition.CenterScreen;
-            this.FormBorderStyle = FormBorderStyle.FixedDialog;
-            this.MaximizeBox = false;
-            this.MinimizeBox = false;
-            this.BackColor = Color.FromArgb(245, 247, 250);
-            this.Font = new Font("Segoe UI", 9f);
+            this.FormBorderStyle = FormBorderStyle.Sizable;  // permite VentanaPrefs auto
+            this.MaximizeBox = true;
+            this.MinimizeBox = true;
+            this.BackColor = UITheme.Fondo;
+            this.Font = UITheme.Body;
 
-            // --- Header ---
+            // ── Colores unificados con MenuPrincipalV2 ────────────────
+            Color cAzulOsc = Color.FromArgb(15, 45, 85);
+            Color cBarra   = Color.FromArgb(15, 20, 30);
+            Color cCyan    = Color.FromArgb(0, 180, 216);
+            Color cWarn    = Color.FromArgb(210, 153, 34);
+
+            // --- Header (oscuro, consistente con MenuPrincipalV2) ---
             var pnlHeader = new Panel
             {
-                Dock = DockStyle.Top,
-                Height = 56,
-                BackColor = Color.FromArgb(180, 30, 30)
+                Dock = DockStyle.Top, Height = 64,
+                BackColor = cAzulOsc
             };
             pnlHeader.Paint += (s, e) =>
             {
                 var g = e.Graphics;
                 g.SmoothingMode = SmoothingMode.AntiAlias;
-                using var f = new Font("Segoe UI", 22f);
-                g.DrawString("⚠", f, Brushes.White, 12, 10);
-                using var fTit = new Font("Segoe UI", 13f, FontStyle.Bold);
-                g.DrawString("Alertas Pendientes", fTit, Brushes.White, 52, 8);
-                using var fSub = new Font("Segoe UI", 8.5f);
-                g.DrawString($"Revise los items que requieren atencion — {DateTime.Now:dd/MM/yyyy}",
-                    fSub, new SolidBrush(Color.FromArgb(220, 200, 200)), 54, 32);
+                using var fIco = new Font("Segoe UI", 22f);
+                g.DrawString("⚠", fIco, new SolidBrush(cWarn), 16, 14);
+                using var fTit = new Font("Segoe UI", 14f, FontStyle.Bold);
+                g.DrawString("Alertas Pendientes", fTit, Brushes.White, 56, 12);
+                using var fSub = new Font("Segoe UI", 9.5f);
+                g.DrawString($"Revisa los items que requieren atención — {DateTime.Now:dd/MM/yyyy}",
+                    fSub, new SolidBrush(Color.FromArgb(168, 177, 187)), 58, 36);
             };
 
             // --- Badges resumen ---
             var pnlBadges = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 48,
-                BackColor = Color.FromArgb(235, 237, 240),
-                Padding = new Padding(10, 8, 10, 8)
+                Height = 52,
+                BackColor = UITheme.FondoCard,
+                Padding = new Padding(12, 10, 12, 10)
             };
             pnlBadges.Paint += PnlBadges_Paint;
 
@@ -123,55 +129,80 @@ namespace SistemaGestion
             tabControl = new TabControl
             {
                 Dock = DockStyle.Fill,
-                Font = new Font("Segoe UI", 9f),
-                Padding = new Point(12, 4)
+                Font = UITheme.Body,
+                Padding = new Point(14, 6)
             };
 
-            // --- Footer ---
+            // --- Footer CLARO con buen contraste (estilo unificado) ---
             var pnlFooter = new Panel
             {
-                Dock = DockStyle.Bottom,
-                Height = 46,
-                BackColor = Color.FromArgb(235, 237, 240)
+                Dock = DockStyle.Bottom, Height = 52,
+                BackColor = UITheme.FondoCard
+            };
+            pnlFooter.Paint += (s, e) =>
+            {
+                using var pen = new Pen(UITheme.Borde, 1f);
+                e.Graphics.DrawLine(pen, 0, 0, pnlFooter.Width, 0);
             };
 
             var lblNota = new Label
             {
-                Text = "\"Ignorar hoy\" oculta la alerta hasta manana.",
-                AutoSize = true,
-                Location = new Point(10, 15),
-                ForeColor = Color.FromArgb(120, 120, 120),
-                Font = new Font("Segoe UI", 8f, FontStyle.Italic)
+                Text = "  Tip: \"Ignorar hoy\" oculta la alerta hasta mañana.",
+                AutoSize = false, Dock = DockStyle.Fill,
+                ForeColor = UITheme.TextoTenue,
+                BackColor = UITheme.FondoCard,
+                Font = new Font("Segoe UI", 9.5f, FontStyle.Italic),
+                TextAlign = ContentAlignment.MiddleLeft,
+                Padding = new Padding(20, 0, 0, 0)
             };
 
+            // Ignorar = botón secundario (ghost gris)
             var btnIgnorar = new Button
             {
                 Text = "Ignorar esta alerta hoy",
-                Size = new Size(170, 30),
-                Location = new Point(385, 8),
                 FlatStyle = FlatStyle.Flat,
-                BackColor = Color.FromArgb(127, 140, 141),
-                ForeColor = Color.White,
-                Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
-                FlatAppearance = { BorderSize = 0 },
-                Cursor = Cursors.Hand
+                BackColor = UITheme.FondoCard,
+                ForeColor = UITheme.TextoTenue,
+                Font = new Font("Segoe UI", 10f, FontStyle.Bold),
+                Cursor = Cursors.Hand,
+                Width = 200, Height = 36
             };
+            btnIgnorar.FlatAppearance.BorderSize = 1;
+            btnIgnorar.FlatAppearance.BorderColor = UITheme.Borde;
+            btnIgnorar.FlatAppearance.MouseOverBackColor = UITheme.Borde;
             btnIgnorar.Click += BtnIgnorar_Click;
 
+            // Cerrar = botón primario azul (acción principal)
             btnCerrar = new Button
             {
                 Text = "Entendido — Cerrar",
-                Size = new Size(160, 30),
-                Location = new Point(565, 8),
                 FlatStyle = FlatStyle.Flat,
-                BackColor = Color.FromArgb(44, 62, 80),
+                BackColor = UITheme.Azul,
                 ForeColor = Color.White,
-                Font = new Font("Segoe UI", 9f, FontStyle.Bold),
-                FlatAppearance = { BorderSize = 0 },
+                Font = new Font("Segoe UI", 10f, FontStyle.Bold),
+                Cursor = Cursors.Hand,
+                Width = 180, Height = 36,
                 DialogResult = DialogResult.OK
             };
+            btnCerrar.FlatAppearance.BorderSize = 0;
+            btnCerrar.FlatAppearance.MouseOverBackColor = UITheme.AzulHover;
 
-            pnlFooter.Controls.AddRange(new Control[] { lblNota, btnIgnorar, btnCerrar });
+            // Wrap derecho con FlowLayoutPanel (RightToLeft: el primero queda más a la derecha)
+            var pnlR = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Right, Width = 410,
+                BackColor = UITheme.FondoCard,
+                FlowDirection = FlowDirection.RightToLeft, WrapContents = false,
+                Padding = new Padding(0, 7, 16, 7)
+            };
+            btnCerrar.Margin   = new Padding(0, 0, 0, 0);
+            btnIgnorar.Margin  = new Padding(0, 0, 8, 0);
+            pnlR.Controls.Add(btnCerrar);
+            pnlR.Controls.Add(btnIgnorar);
+
+            // Orden importante: Dock=Fill primero, Dock=Right al final
+            pnlFooter.Controls.Add(lblNota);
+            pnlFooter.Controls.Add(pnlR);
 
             this.Controls.Add(tabControl);
             this.Controls.Add(pnlBadges);
