@@ -11,21 +11,23 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="LibVLCSharp.WinForms" Version="3.9.7.1" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.0" />
     <PackageReference Include="QuestPDF" Version="2024.3.4" />
+    <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.23.1" />
   </ItemGroup>
 
   <!-- Excluir el subproyecto API: comparte carpeta raíz pero es un csproj
        independiente. Sin esto, el SDK incluye sus .cs y obj/ en este build. -->
   <ItemGroup>
-    <Compile      Remove="SistemaGestion.Api\**" />
-    <Content      Remove="SistemaGestion.Api\**" />
+    <Compile Remove="SistemaGestion.Api\**" />
+    <Content Remove="SistemaGestion.Api\**" />
     <EmbeddedResource Remove="SistemaGestion.Api\**" />
-    <None         Remove="SistemaGestion.Api\**" />
-    <Compile      Remove="RepositorioNuevo\**" />
-    <Content      Remove="RepositorioNuevo\**" />
+    <None Remove="SistemaGestion.Api\**" />
+    <Compile Remove="RepositorioNuevo\**" />
+    <Content Remove="RepositorioNuevo\**" />
     <EmbeddedResource Remove="RepositorioNuevo\**" />
-    <None         Remove="RepositorioNuevo\**" />
+    <None Remove="RepositorioNuevo\**" />
   </ItemGroup>
 
 </Project>

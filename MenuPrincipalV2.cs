@@ -462,6 +462,8 @@ namespace SistemaGestion
                 // vía Transacciones → Egresos (categoría Materia Prima).
                 ("◎", "Nómina",        "Empleados y períodos",              "Nomina",
                  () => new FrmNomina().ShowDialog(),                     Color.FromArgb(30, 90, 100)),
+                ("◉", "Cámaras",       "Vigilancia EZVIZ en vivo",          "Camaras",
+                 () => new FrmCamaras().ShowDialog(),                    Color.FromArgb(150, 60, 60)),
             };
 
             int cols = 3;
@@ -502,7 +504,27 @@ namespace SistemaGestion
         private Panel TarjetaModulo(string icono, string titulo, string subtitulo,
             string permiso, Action accion, Color colorAcento)
         {
-            bool tieneAcceso = Sesion.EsAdmin || Sesion.TienePermiso(permiso);
+            // Cámaras es una excepción: el "permiso" es per-usuario (PermisosCamara),
+            // no rol-basado (PermisosRol). Si el usuario no es admin, hay que
+            // consultar la tabla para saber si tiene alguna cámara asignada.
+            bool tieneAcceso;
+            if (permiso == "Camaras")
+            {
+                if (Sesion.EsAdmin) tieneAcceso = true;
+                else
+                {
+                    try
+                    {
+                        tieneAcceso = DatabaseService
+                            .ContarCamarasVisibles(Sesion.UsuarioId, false) > 0;
+                    }
+                    catch { tieneAcceso = false; }
+                }
+            }
+            else
+            {
+                tieneAcceso = Sesion.EsAdmin || Sesion.TienePermiso(permiso);
+            }
 
             // Wash MUY claro del color del modulo: mezcla colorAcento al ~10%
             // sobre blanco. Mucho mas amable que el color sólido y permite

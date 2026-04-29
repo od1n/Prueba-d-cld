@@ -54,6 +54,21 @@ namespace SistemaGestion
             // ── 0. Inicializar QuestPDF (licencia Community gratuita) ─────────
             PdfService.Inicializar();
 
+            // ── 0b. Inicializar LibVLC (binarios nativos x64 de VideoLAN) ────
+            //   Necesario antes de crear cualquier VideoView. Si falta el
+            //   paquete VideoLAN.LibVLC.Windows o el archivo libvlc.dll no
+            //   está en bin/, esto lanza DllNotFoundException — capturamos
+            //   para no romper el arranque, el módulo de cámaras se desactiva.
+            try { LibVLCSharp.Shared.Core.Initialize(); }
+            catch (Exception exVlc)
+            {
+                System.IO.File.AppendAllText(
+                    System.IO.Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                        "SistemaGestion", "arranque_error.log"),
+                    "[" + DateTime.Now + "] LibVLC.Init falló: " + exVlc.Message + "\n");
+            }
+
             // ── 1. Seguridad de archivos (mover BD, permisos NTFS, clave AES)
             SecurityService.Inicializar();
 
