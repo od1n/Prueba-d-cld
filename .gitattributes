@@ -1,0 +1,12 @@
+# Normalizar finales de línea: el repo trabaja en CRLF (Windows-only).
+# Esto evita las advertencias "LF will be replaced by CRLF" en cada commit.
+* text=auto eol=crlf
+
+# Binarios — sin normalizar
+*.db    binary
+*.pfx   binary
+*.png   binary
+*.jpg   binary
+*.ico   binary
+*.docx  binary
+*.pdf   binary

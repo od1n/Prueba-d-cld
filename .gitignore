@@ -32,3 +32,14 @@ packages/
 # OS
 Thumbs.db
 Desktop.ini
+
+# Repos anidados / placeholder
+RepositorioNuevo/
+
+# Artefactos de Claude Code skills (no son código del producto)
+winforms-patterns/
+*.skill
+
+# Documentos Word (revisiones de seguridad, notas internas).
+# Si querés versionar uno específico, agregalo bajo docs/ y excluilo aquí.
+*.docx
