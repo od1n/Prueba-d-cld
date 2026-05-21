@@ -202,6 +202,8 @@ function renderNav(activa) {
         { id: 'kardex',    icon: '⇅', label: 'Kardex',    href: '/pages/kardex.html' },
         { id: 'clientes',  icon: '◎', label: 'Clientes',  href: '/pages/clientes.html' },
         { id: 'facturas',  icon: '▤', label: 'Facturas',  href: '/pages/facturas.html' },
+        { id: 'egresos',   icon: '⊟', label: 'Compras',   href: '/pages/egresos.html' },
+        { id: 'produccion',icon: '⊡', label: 'Scan',      href: '/pages/digitalizador.html' },
     ];
     return `
     <nav class="bottom-nav" role="navigation" aria-label="Navegación principal">
@@ -251,5 +253,5 @@ function tagTipo(tipo) {
         'SALIDA':  '<span class="tag tag-rojo">SALIDA</span>',
         'AJUSTE':  '<span class="tag tag-naranja">AJUSTE</span>',
     };
-    return map[tipo] || `<span class="tag tag-dim">${tipo}</span>`;
+    return map[tipo] || `<span class="tag">${esh(tipo)}</span>`;
 }

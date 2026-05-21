@@ -1,10 +1,15 @@
 // ════════════════════════════════════════════════════════════════════════
 // ARCHIVO: FrmRegistroProduccionDia.cs
+// Cambios v25:
+//   · Columna "Defect." en el grid → CantDefectuosas (no va al kardex)
+//   · Campo "Vueltas" + botón "Calcular x V." → auto-rellena Primera/Reciclado
+//   · Botón "Imprimir Planilla" → genera PDF imprimible con moldes activos
 // ════════════════════════════════════════════════════════════════════════
 
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.IO;
 using System.Linq;
 using System.Windows.Forms;
 
@@ -12,13 +17,15 @@ namespace SistemaGestion
 {
     public class FrmRegistroProduccionDia : FormBase
     {
-        private DateTimePicker dtpFecha;
-        private RadioButton    rbVirgen, rbReciclado;
-        private TextBox        txtObservacion;
-        private Label          lblResumen;
-        private DataGridView   dgvMoldes;
-        private ComboBox[]     cmbMaterial = new ComboBox[3];
-        private NumericUpDown[] nudMaterial = new NumericUpDown[3];
+        private DateTimePicker  dtpFecha;
+        private RadioButton     rbVirgen, rbReciclado;
+        private TextBox         txtObservacion;
+        private Label           lblResumen;
+        private DataGridView    dgvMoldes;
+        private ComboBox[]      cmbMaterial  = new ComboBox[3];
+        private NumericUpDown[] nudMaterial  = new NumericUpDown[3];
+        // Task B: vueltas
+        private NumericUpDown   _nudVueltas;
 
         private RegistroProduccionDia _registro;
         private List<TbMolde>         _moldes;
@@ -28,8 +35,8 @@ namespace SistemaGestion
         public FrmRegistroProduccionDia()
         {
             Text          = "Registro de Produccion Diaria";
-            Size          = new Size(1200, 700);
-            MinimumSize   = new Size(900, 580);
+            Size          = new Size(1280, 720);
+            MinimumSize   = new Size(960, 600);
             StartPosition = FormStartPosition.CenterParent;
             BackColor     = Color.FromArgb(240, 244, 250);
 
@@ -41,13 +48,10 @@ namespace SistemaGestion
                 if (mp != null) _moldeProds[m.CodigoMold] = mp;
             }
 
-            // Restaurar tamaño/posición ANTES de construir la UI
             VentanaPrefs.Restaurar(this);
-
             BuildUI();
             CargarFecha(DateTime.Today);
 
-            // Guardar con debounce al redimensionar o mover
             var _tp = new System.Windows.Forms.Timer { Interval = 800 };
             _tp.Tick        += (s, e) => { _tp.Stop(); VentanaPrefs.Guardar(this); };
             SizeChanged     += (s, e) => { _tp.Stop(); _tp.Start(); };
@@ -57,39 +61,46 @@ namespace SistemaGestion
 
         private void BuildUI()
         {
-            // Header
+            // ── Header ────────────────────────────────────────────────────
             var hdr = new Panel { Dock = DockStyle.Top, Height = 50,
                 BackColor = Color.FromArgb(26, 74, 138) };
             hdr.Controls.Add(new Label {
                 Text = "Registro de Produccion Diaria",
                 Font = new Font("Segoe UI", 13f, FontStyle.Bold),
                 ForeColor = Color.White, AutoSize = true, Location = new Point(14, 13) });
-            var btnCerrar = MkBtn("Cerrar", Color.FromArgb(100,100,120), 90);
-            btnCerrar.Click += (s, e) => Close();
 
             var pnlHdrRight = new FlowLayoutPanel {
                 Dock = DockStyle.Right, AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 FlowDirection = FlowDirection.LeftToRight,
                 WrapContents = false, BackColor = Color.Transparent,
-                Padding = new Padding(0, 11, 8, 0)
+                Padding = new Padding(0, 10, 8, 0)
             };
-            pnlHdrRight.Controls.Add(btnCerrar);
-            hdr.Controls.Add(pnlHdrRight);
-            // ── Ayuda y tooltips ──────────────────────────────────────────
+
             var _tip = AyudaService.CrearTooltip();
-            var _btnAyuda = new Button {
+
+            // Task C: botón Imprimir Planilla
+            var btnPlanilla = MkBtn("Imprimir Planilla", Color.FromArgb(80, 50, 150), 130);
+            btnPlanilla.Click += (s, e) => ImprimirPlanilla();
+            AyudaService.Tip(_tip, btnPlanilla,
+                "Genera una planilla PDF imprimible con los moldes del día");
+
+            var btnAyuda = new Button {
                 Text = "? Ayuda", Size = new Size(90, 30),
                 BackColor = Color.FromArgb(80, 50, 150), ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
                 Cursor = Cursors.Hand, Margin = new Padding(0, 0, 4, 0)
             };
-            _btnAyuda.FlatAppearance.BorderSize = 0;
-            _btnAyuda.Click += (s, e) => AyudaService.Mostrar(this, "FrmRegistroProduccionDia");
-            AyudaService.Tip(_tip, _btnAyuda, "Abrir guía de ayuda de este módulo");
-            pnlHdrRight.Controls.Add(_btnAyuda);
+            btnAyuda.FlatAppearance.BorderSize = 0;
+            btnAyuda.Click += (s, e) => AyudaService.Mostrar(this, "FrmRegistroProduccionDia");
 
-            // Barra superior
+            var btnCerrar = MkBtn("Cerrar", Color.FromArgb(100, 100, 120), 90);
+            btnCerrar.Click += (s, e) => Close();
+
+            pnlHdrRight.Controls.AddRange(new Control[] { btnPlanilla, btnAyuda, btnCerrar });
+            hdr.Controls.Add(pnlHdrRight);
+
+            // ── Barra superior ────────────────────────────────────────────
             var barTop = new Panel { Dock = DockStyle.Top, Height = 52,
                 BackColor = Color.FromArgb(232, 240, 250) };
 
@@ -104,26 +115,46 @@ namespace SistemaGestion
             rbVirgen = new RadioButton { Text = "Virgen",
                 Location = new Point(252, 14), AutoSize = true,
                 Font = new Font("Segoe UI", 10f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(20,100,60), Checked = true };
+                ForeColor = Color.FromArgb(20, 100, 60), Checked = true };
             rbReciclado = new RadioButton { Text = "Reciclado",
                 Location = new Point(330, 14), AutoSize = true,
                 Font = new Font("Segoe UI", 10f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(140,60,10) };
+                ForeColor = Color.FromArgb(140, 60, 10) };
             rbVirgen.CheckedChanged    += (s, e) => { if (rbVirgen.Checked)    ActualizarColumnas(); };
             rbReciclado.CheckedChanged += (s, e) => { if (rbReciclado.Checked) ActualizarColumnas(); };
             barTop.Controls.AddRange(new Control[] { rbVirgen, rbReciclado });
 
-            barTop.Controls.Add(Lbl("Observacion:", 430, 16));
-            txtObservacion = new TextBox { Location = new Point(520, 13), Size = new Size(250, 26) };
+            // Task B: Vueltas
+            barTop.Controls.Add(Lbl("Vueltas:", 418, 16));
+            _nudVueltas = new NumericUpDown { Location = new Point(478, 14),
+                Size = new Size(60, 26), Minimum = 0, Maximum = 9999, DecimalPlaces = 0 };
+            barTop.Controls.Add(_nudVueltas);
+
+            var btnCalcVueltas = new Button {
+                Text = "Calc x V.", Location = new Point(544, 13),
+                Size = new Size(76, 26),
+                BackColor = Color.FromArgb(40, 110, 70), ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 8.5f, FontStyle.Bold), Cursor = Cursors.Hand };
+            btnCalcVueltas.FlatAppearance.BorderSize = 0;
+            btnCalcVueltas.Click += (s, e) => CalcularPorVueltas();
+            AyudaService.Tip(_tip, btnCalcVueltas,
+                "Rellena las cantidades de cada molde según las vueltas del ciclo de producción");
+            barTop.Controls.Add(btnCalcVueltas);
+
+            barTop.Controls.Add(Lbl("Obs.:", 630, 16));
+            txtObservacion = new TextBox { Location = new Point(668, 13), Size = new Size(220, 26) };
             barTop.Controls.Add(txtObservacion);
 
             var btnGuardar = MkBtn("Guardar y Confirmar Merma",
                 Color.FromArgb(26, 74, 138), 190);
             btnGuardar.Dock = DockStyle.Right;
             btnGuardar.Click += (s, e) => Guardar();
+            AyudaService.Tip(_tip, btnGuardar,
+                "Confirmar y guardar la producción del día — actualiza Kardex A y B");
             barTop.Controls.Add(btnGuardar);
 
-            // Resumen
+            // ── Resumen ───────────────────────────────────────────────────
             lblResumen = new Label { Dock = DockStyle.Top, Height = 28,
                 Font = new Font("Segoe UI", 9f, FontStyle.Bold),
                 ForeColor = Color.FromArgb(20, 80, 40),
@@ -131,19 +162,18 @@ namespace SistemaGestion
                 TextAlign = System.Drawing.ContentAlignment.MiddleLeft,
                 Padding   = new Padding(10, 0, 0, 0) };
 
-            // Split — distancia proporcional, se ajusta al ancho real
+            // ── Split ─────────────────────────────────────────────────────
             var split = new SplitContainer {
                 Dock = DockStyle.Fill, Orientation = Orientation.Vertical,
                 BackColor = Color.FromArgb(220, 230, 245) };
 
-            // Aplicar SplitterDistance cuando el form ya tiene tamaño real
             Load += (s, e) => {
                 int dist = (int)(split.Width * 0.73);
                 if (dist > split.Panel1MinSize && dist < split.Width - split.Panel2MinSize)
                     split.SplitterDistance = dist;
             };
 
-            // ── Izquierda: grid moldes ─────────────────────────────────────
+            // ── Izquierda: grid moldes ────────────────────────────────────
             var pnlMoldes = new Panel { Dock = DockStyle.Fill, BackColor = Color.White };
 
             var hdrM = new Panel { Dock = DockStyle.Top, Height = 36,
@@ -151,10 +181,9 @@ namespace SistemaGestion
             hdrM.Controls.Add(new Label { Text = "Produccion por Molde",
                 ForeColor = Color.White, Font = new Font("Segoe UI", 9f, FontStyle.Bold),
                 AutoSize = true, Location = new Point(8, 9) });
-            var bAgr  = MkBtn("+ Molde", Color.FromArgb(40,130,80),  80);
-            var bQuit = MkBtn("Quitar",  Color.FromArgb(180,50,50),  70);
-            AyudaService.Tip(_tip, btnGuardar, "Confirmar y guardar la producción del día — actualiza Kardex A y B");
-            AyudaService.Tip(_tip, bAgr, "Agregar una fila para registrar un molde que produjo hoy");
+            var bAgr  = MkBtn("+ Molde", Color.FromArgb(40, 130, 80), 80);
+            var bQuit = MkBtn("Quitar",  Color.FromArgb(180, 50, 50),  70);
+            AyudaService.Tip(_tip, bAgr,  "Agregar una fila para registrar un molde que produjo hoy");
             AyudaService.Tip(_tip, bQuit, "Quitar la fila de molde seleccionada");
             bAgr.Click  += (s, e) => AgregarFilaMolde();
             bQuit.Click += (s, e) => QuitarFilaMolde();
@@ -187,17 +216,21 @@ namespace SistemaGestion
             var cMolde = new DataGridViewComboBoxColumn {
                 Name = "Molde", HeaderText = "Molde",
                 DisplayStyle = DataGridViewComboBoxDisplayStyle.DropDownButton,
-                FillWeight = 35 };
+                FillWeight = 32 };
             cMolde.Items.Add("");
             _moldes.ForEach(m => cMolde.Items.Add(m.CodigoMold + " — " + m.Descripcion));
 
-            var cPrimera   = new DataGridViewTextBoxColumn { Name="Primera",   HeaderText="Primera",   FillWeight=15 };
-            var cSegunda   = new DataGridViewTextBoxColumn { Name="Segunda",   HeaderText="Segunda",   FillWeight=15 };
-            var cReciclado = new DataGridViewTextBoxColumn { Name="Reciclado", HeaderText="Reciclado", FillWeight=15, Visible=false };
-            var cInfo      = new DataGridViewTextBoxColumn { Name="ProdInfo",  HeaderText="Productos", FillWeight=35, ReadOnly=true };
+            var cPrimera   = new DataGridViewTextBoxColumn { Name="Primera",   HeaderText="Primera",   FillWeight=13 };
+            var cSegunda   = new DataGridViewTextBoxColumn { Name="Segunda",   HeaderText="Segunda",   FillWeight=13 };
+            var cReciclado = new DataGridViewTextBoxColumn { Name="Reciclado", HeaderText="Reciclado", FillWeight=13, Visible=false };
+            // Task A: columna Defectuosas
+            var cDefect    = new DataGridViewTextBoxColumn {
+                Name="Defect", HeaderText="Defect.", FillWeight=11,
+                DefaultCellStyle = { ForeColor = Color.FromArgb(160, 50, 30) } };
+            var cInfo      = new DataGridViewTextBoxColumn { Name="ProdInfo",  HeaderText="Productos", FillWeight=30, ReadOnly=true };
 
             dgvMoldes.Columns.AddRange(new DataGridViewColumn[] {
-                cMolde, cPrimera, cSegunda, cReciclado, cInfo });
+                cMolde, cPrimera, cSegunda, cReciclado, cDefect, cInfo });
 
             dgvMoldes.CurrentCellDirtyStateChanged += (s, e) => {
                 if (dgvMoldes.IsCurrentCellDirty)
@@ -219,7 +252,8 @@ namespace SistemaGestion
             };
             dgvMoldes.CellValidating += (s, e) => {
                 string col = dgvMoldes.Columns[e.ColumnIndex].Name;
-                if (col != "Primera" && col != "Segunda" && col != "Reciclado") return;
+                if (col != "Primera" && col != "Segunda" &&
+                    col != "Reciclado" && col != "Defect") return;
                 if (!decimal.TryParse(e.FormattedValue?.ToString(), out decimal v) || v < 0)
                 {
                     e.Cancel = true;
@@ -232,7 +266,7 @@ namespace SistemaGestion
             pnlMoldes.Controls.Add(dgvMoldes);
             pnlMoldes.Controls.Add(hdrM);
 
-            // ── Derecha: materiales ────────────────────────────────────────
+            // ── Derecha: materiales ───────────────────────────────────────
             var pnlDer = new Panel { Dock = DockStyle.Fill, BackColor = Color.White };
             var hdrMat = new Panel { Dock = DockStyle.Top, Height = 36,
                 BackColor = Color.FromArgb(100, 60, 20) };
@@ -273,6 +307,13 @@ namespace SistemaGestion
                 my += 44;
             }
 
+            // Nota sobre sacos
+            pnlMat.Controls.Add(new Label {
+                Text = "1 saco = 25 kg",
+                Location = new Point(10, my + 6), AutoSize = true,
+                Font = new Font("Segoe UI", 8f, FontStyle.Italic),
+                ForeColor = Color.FromArgb(120, 80, 40) });
+
             pnlDer.Controls.Add(pnlMat);
             pnlDer.Controls.Add(hdrMat);
 
@@ -282,7 +323,8 @@ namespace SistemaGestion
             var footer = new Panel { Dock = DockStyle.Bottom, Height = 28,
                 BackColor = Color.FromArgb(240, 244, 250) };
             footer.Controls.Add(new Label {
-                Text = "  Tip: Configura los productos de cada molde en Tabla de Moldes → Productos Molde",
+                Text = "  Tip: Configura los productos de cada molde en Tabla de Moldes → Productos Molde  |  " +
+                       "Defect. = piezas rechazadas (no van al inventario)",
                 AutoSize = true, Location = new Point(8, 6),
                 Font = new Font("Segoe UI", 8f), ForeColor = Color.FromArgb(40, 80, 50) });
 
@@ -290,6 +332,36 @@ namespace SistemaGestion
         }
 
         private bool EsVirgen => rbVirgen.Checked;
+
+        // ── Task B: calcular cantidades por vueltas ───────────────────────
+        private void CalcularPorVueltas()
+        {
+            decimal vueltas = _nudVueltas.Value;
+            if (vueltas <= 0)
+            {
+                Warn("Ingresa al menos 1 vuelta.");
+                return;
+            }
+            foreach (DataGridViewRow row in dgvMoldes.Rows)
+            {
+                if (row.IsNewRow) continue;
+                if (string.IsNullOrWhiteSpace(row.Cells["Molde"].Value?.ToString())) continue;
+
+                if (EsVirgen)
+                {
+                    row.Cells["Primera"].Value   = vueltas.ToString("N0");
+                    row.Cells["Segunda"].Value   = "0";
+                    row.Cells["Reciclado"].Value = "0";
+                }
+                else
+                {
+                    row.Cells["Primera"].Value   = "0";
+                    row.Cells["Segunda"].Value   = "0";
+                    row.Cells["Reciclado"].Value = vueltas.ToString("N0");
+                }
+            }
+            ActualizarResumen();
+        }
 
         private void ActualizarColumnas()
         {
@@ -300,7 +372,6 @@ namespace SistemaGestion
             if (dgvMoldes.Columns.Contains("Reciclado"))
                 dgvMoldes.Columns["Reciclado"].Visible = !EsVirgen;
 
-            // Actualizar info de productos en todas las filas
             foreach (DataGridViewRow row in dgvMoldes.Rows)
             {
                 if (row.IsNewRow) continue;
@@ -331,6 +402,7 @@ namespace SistemaGestion
                     m.CantPrimera.ToString("N2"),
                     m.CantSegunda.ToString("N2"),
                     m.CantReciclado.ToString("N2"),
+                    m.CantDefectuosas.ToString("N2"),  // Task A
                     ObtenerInfoProductos(m.CodigoMolde));
             }
 
@@ -353,7 +425,7 @@ namespace SistemaGestion
 
         private void AgregarFilaMolde()
         {
-            dgvMoldes.Rows.Add("", "0", "0", "0", "");
+            dgvMoldes.Rows.Add("", "0", "0", "0", "0", "");  // Task A: +defect
             dgvMoldes.CurrentCell =
                 dgvMoldes.Rows[dgvMoldes.Rows.Count - 1].Cells["Molde"];
         }
@@ -381,7 +453,7 @@ namespace SistemaGestion
 
         private void ActualizarResumen()
         {
-            decimal p1 = 0, p2 = 0, pr = 0, pesoTeorico = 0;
+            decimal p1 = 0, p2 = 0, pr = 0, pDef = 0, pesoTeorico = 0;
             foreach (DataGridViewRow row in dgvMoldes.Rows)
             {
                 if (row.IsNewRow) continue;
@@ -392,7 +464,8 @@ namespace SistemaGestion
                 decimal.TryParse(row.Cells["Primera"].Value?.ToString(),   out decimal rp1);
                 decimal.TryParse(row.Cells["Segunda"].Value?.ToString(),   out decimal rp2);
                 decimal.TryParse(row.Cells["Reciclado"].Value?.ToString(), out decimal rpr);
-                p1 += rp1; p2 += rp2; pr += rpr;
+                decimal.TryParse(row.Cells["Defect"].Value?.ToString(),    out decimal rdef);  // Task A
+                p1 += rp1; p2 += rp2; pr += rpr; pDef += rdef;
 
                 if (_moldeProds.ContainsKey(cod))
                 {
@@ -411,14 +484,15 @@ namespace SistemaGestion
                 .Where(i => cmbMaterial[i].SelectedIndex > 0)
                 .Sum(i => nudMaterial[i].Value);
 
-            decimal merma = matIng - pesoTeorico;
-            string pctStr = matIng > 0 ? $" ({merma/matIng*100:N1}%)" : "";
+            decimal merma  = matIng - pesoTeorico;
+            string  pctStr = matIng > 0 ? $" ({merma/matIng*100:N1}%)" : "";
+            string  defStr = pDef > 0   ? $"   Defect.: {pDef:N0}" : "";   // Task A
 
             lblResumen.Text = EsVirgen
-                ? $"  Primera: {p1:N0}   Segunda: {p2:N0}   |   " +
+                ? $"  Primera: {p1:N0}   Segunda: {p2:N0}{defStr}   |   " +
                   $"Peso teórico: {pesoTeorico:N2} kg   " +
                   $"Material: {matIng:N2} kg   Merma est.: {merma:N2} kg{pctStr}"
-                : $"  Reciclado: {pr:N0}   |   " +
+                : $"  Reciclado: {pr:N0}{defStr}   |   " +
                   $"Peso teórico: {pesoTeorico:N2} kg   " +
                   $"Material: {matIng:N2} kg   Merma est.: {merma:N2} kg{pctStr}";
 
@@ -440,7 +514,6 @@ namespace SistemaGestion
             if (!tieneMat)
             { Warn("Ingresa al menos un material con cantidad mayor a 0."); return; }
 
-            // Construir registro
             _registro.Fecha        = dtpFecha.Value;
             _registro.TipoMaterial = EsVirgen ? "Virgen" : "Reciclado";
             _registro.Observacion  = txtObservacion.Text.Trim();
@@ -464,24 +537,28 @@ namespace SistemaGestion
                 decimal.TryParse(row.Cells["Primera"].Value?.ToString(),   out decimal rp1);
                 decimal.TryParse(row.Cells["Segunda"].Value?.ToString(),   out decimal rp2);
                 decimal.TryParse(row.Cells["Reciclado"].Value?.ToString(), out decimal rpr);
-                if (rp1 + rp2 + rpr <= 0) continue;
+                decimal.TryParse(row.Cells["Defect"].Value?.ToString(),    out decimal rdef);  // Task A
+
+                // Solo agrega la fila si hay producción buena (defectuosas solas no cuentan)
+                if (rp1 + rp2 + rpr <= 0 && rdef <= 0) continue;
 
                 var mp    = _moldeProds[codMolde];
                 var molde = _moldes.FirstOrDefault(m => m.CodigoMold == codMolde);
                 _registro.Moldes.Add(new DetalleProduccionMolde {
-                    CodigoMolde    = codMolde,
-                    DescMolde      = molde?.Descripcion ?? codMolde,
-                    CodigoProducto = EsVirgen ? (mp.CodPrimera ?? "") : (mp.CodReciclado ?? ""),
-                    CantPrimera    = EsVirgen  ? rp1 : 0,
-                    CantSegunda    = EsVirgen  ? rp2 : 0,
-                    CantReciclado  = !EsVirgen ? rpr : 0
+                    CodigoMolde     = codMolde,
+                    DescMolde       = molde?.Descripcion ?? codMolde,
+                    CodigoProducto  = EsVirgen ? (mp.CodPrimera ?? "") : (mp.CodReciclado ?? ""),
+                    CantPrimera     = EsVirgen  ? rp1 : 0,
+                    CantSegunda     = EsVirgen  ? rp2 : 0,
+                    CantReciclado   = !EsVirgen ? rpr : 0,
+                    CantDefectuosas = rdef        // Task A — registrado, nunca al kardex
                 });
             }
 
             for (int i = 0; i < 3; i++)
             {
                 if (cmbMaterial[i].SelectedIndex <= 0 || nudMaterial[i].Value <= 0) continue;
-                string cod = cmbMaterial[i].SelectedItem.ToString().Split('—')[0].Trim(); // CodigoInterno del insumo
+                string cod = cmbMaterial[i].SelectedItem.ToString().Split('—')[0].Trim();
                 var inv    = _inventario.FirstOrDefault(x => x.Codigo == cod);
                 _registro.Materiales.Add(new MaterialProduccionDia {
                     CodigoInsumo = cod,
@@ -508,6 +585,53 @@ namespace SistemaGestion
             }
         }
 
+        // ── Task C: Imprimir planilla ─────────────────────────────────────
+        private void ImprimirPlanilla()
+        {
+            // Recopilar moldes activos en el grid
+            var moldesEnGrid = new List<string>();
+            foreach (DataGridViewRow row in dgvMoldes.Rows)
+            {
+                if (row.IsNewRow) continue;
+                string val = row.Cells["Molde"].Value?.ToString() ?? "";
+                if (!string.IsNullOrWhiteSpace(val))
+                    moldesEnGrid.Add(val.Split('—')[0].Trim());
+            }
+
+            using var dlg = new DlgSeleccionarMoldesPlanilla(_moldes, moldesEnGrid);
+            if (dlg.ShowDialog() != DialogResult.OK) return;
+
+            var seleccionados = dlg.MoldesSeleccionados;
+            if (seleccionados.Count == 0)
+            { Warn("Selecciona al menos un molde para la planilla."); return; }
+
+            try
+            {
+                byte[] pdf = PdfService.GenerarPlanillaProduccion(
+                    dtpFecha.Value,
+                    seleccionados,
+                    (int)_nudVueltas.Value,
+                    EsVirgen ? "Virgen" : "Reciclado");
+
+                string nombre = $"Planilla_Prod_{dtpFecha.Value:yyyyMMdd}.pdf";
+                string ruta   = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.Desktop), nombre);
+                File.WriteAllBytes(ruta, pdf);
+
+                var r = MessageBox.Show(
+                    $"Planilla guardada en:\n{ruta}\n\n¿Abrir ahora?",
+                    "Planilla lista", MessageBoxButtons.YesNo, MessageBoxIcon.Information);
+                if (r == DialogResult.Yes)
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(ruta)
+                        { UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Error al generar la planilla:\n" + ex.Message,
+                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
         private void Warn(string msg) =>
             MessageBox.Show(msg, "Validacion", MessageBoxButtons.OK, MessageBoxIcon.Warning);
 
@@ -528,7 +652,113 @@ namespace SistemaGestion
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    //  DIALOGO CONFIRMACION DE MERMA
+    //  Task C: DIALOGO SELECCIÓN DE MOLDES PARA LA PLANILLA
+    // ════════════════════════════════════════════════════════════════════════
+    public class DlgSeleccionarMoldesPlanilla : Form
+    {
+        public List<TbMolde> MoldesSeleccionados { get; private set; } = new();
+        private readonly CheckedListBox _clb;
+        private readonly List<TbMolde> _todos;
+
+        public DlgSeleccionarMoldesPlanilla(List<TbMolde> todos, List<string> preseleccionados)
+        {
+            _todos = todos;
+            Text            = "Seleccionar moldes para la planilla";
+            MinimumSize     = new Size(440, 380);
+            Size            = new Size(480, 500);
+            StartPosition   = FormStartPosition.CenterParent;
+            FormBorderStyle = FormBorderStyle.Sizable;   // redimensionable
+            MaximizeBox     = false;
+            BackColor       = Color.FromArgb(245, 248, 255);
+
+            var hdr = new Panel { Dock = DockStyle.Top, Height = 44,
+                BackColor = Color.FromArgb(26, 74, 138) };
+            hdr.Controls.Add(new Label {
+                Text = "Moldes a incluir en la planilla",
+                ForeColor = Color.White, AutoSize = true,
+                Font = new Font("Segoe UI", 10f, FontStyle.Bold),
+                Location = new Point(12, 12) });
+
+            _clb = new CheckedListBox {
+                Dock        = DockStyle.Fill,
+                Font        = new Font("Segoe UI", 10f),
+                CheckOnClick = true,
+                BorderStyle  = BorderStyle.None,
+                BackColor    = Color.FromArgb(245, 248, 255),
+                ItemHeight   = 26 };
+
+            foreach (var m in todos)
+            {
+                bool pre = preseleccionados.Contains(m.CodigoMold);
+                _clb.Items.Add($"{m.CodigoMold}  —  {m.Descripcion}", pre);
+            }
+
+            // Footer con FlowLayoutPanel — se adapta al ancho sin recortes
+            var footer = new Panel { Dock = DockStyle.Bottom, Height = 56,
+                BackColor = Color.FromArgb(232, 240, 250),
+                Padding = new Padding(8, 10, 8, 10) };
+
+            var flow = new FlowLayoutPanel {
+                Dock = DockStyle.Fill,
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents  = false,
+                AutoSize      = false };
+
+            var btnTodos = new Button {
+                Text = "Todos", Size = new Size(82, 32),
+                FlatStyle = FlatStyle.Flat, Margin = new Padding(0, 0, 4, 0) };
+            btnTodos.Click += (s, e) => {
+                for (int i = 0; i < _clb.Items.Count; i++) _clb.SetItemChecked(i, true); };
+
+            var btnNinguno = new Button {
+                Text = "Ninguno", Size = new Size(82, 32),
+                FlatStyle = FlatStyle.Flat, Margin = new Padding(0, 0, 0, 0) };
+            btnNinguno.Click += (s, e) => {
+                for (int i = 0; i < _clb.Items.Count; i++) _clb.SetItemChecked(i, false); };
+
+            // Spacer empuja los botones de acción a la derecha
+            var spacer = new Panel { Size = new Size(1, 1), Margin = new Padding(0) };
+            flow.Controls.Add(spacer);
+            flow.SetFlowBreak(spacer, false);
+
+            var btnOk = new Button {
+                Text = "Generar PDF",
+                Size = new Size(110, 32),
+                DialogResult = DialogResult.OK,
+                BackColor = Color.FromArgb(26, 74, 138), ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 9f, FontStyle.Bold),
+                Margin = new Padding(0, 0, 6, 0) };
+            btnOk.FlatAppearance.BorderSize = 0;
+            btnOk.Click += (s, e) => {
+                MoldesSeleccionados = _clb.CheckedIndices.Cast<int>()
+                    .Select(i => _todos[i]).ToList();
+            };
+
+            var btnCancelar = new Button {
+                Text = "Cancelar",
+                Size = new Size(90, 32),
+                DialogResult = DialogResult.Cancel,
+                FlatStyle = FlatStyle.Flat,
+                Margin = new Padding(0) };
+
+            flow.Controls.AddRange(new Control[] { btnTodos, btnNinguno, btnOk, btnCancelar });
+
+            // Alinear btnOk y btnCancelar a la derecha usando Anchor del flow
+            flow.Layout += (s, e) => {
+                int anchoIzq = btnTodos.Width + btnNinguno.Width + 4;
+                int anchoDer = btnOk.Width + btnCancelar.Width + 6;
+                spacer.Width = Math.Max(1, flow.Width - anchoIzq - anchoDer - 8);
+            };
+
+            footer.Controls.Add(flow);
+            AcceptButton = btnOk; CancelButton = btnCancelar;
+            Controls.AddRange(new Control[] { _clb, footer, hdr });
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  DIALOGO CONFIRMACION DE MERMA (sin cambios)
     // ════════════════════════════════════════════════════════════════════════
     public class DlgConfirmarMerma : Form
     {
@@ -605,7 +835,7 @@ namespace SistemaGestion
                     Text = "No registrar",
                     Location = new Point(265, 18), Size = new Size(120, 30),
                     DialogResult = DialogResult.Cancel,
-                    BackColor = Color.FromArgb(100,100,120), ForeColor = Color.White,
+                    BackColor = Color.FromArgb(100, 100, 120), ForeColor = Color.White,
                     FlatStyle = FlatStyle.Flat };
                 bNo.FlatAppearance.BorderSize = 0;
                 footer.Controls.AddRange(new Control[] { bSi, bNo });
@@ -616,7 +846,7 @@ namespace SistemaGestion
                 var bOk = new Button {
                     Text = "Aceptar", Location = new Point(190, 18),
                     Size = new Size(120, 30), DialogResult = DialogResult.Cancel,
-                    BackColor = Color.FromArgb(60,100,60), ForeColor = Color.White,
+                    BackColor = Color.FromArgb(60, 100, 60), ForeColor = Color.White,
                     FlatStyle = FlatStyle.Flat };
                 bOk.FlatAppearance.BorderSize = 0;
                 footer.Controls.Add(bOk); CancelButton = bOk;

@@ -158,16 +158,6 @@ namespace SistemaGestion
         public string   Cliente    { get; set; }
     }
 
-    public class Cheque
-    {
-        public string   NumeroCheque  { get; set; }
-        public string   NumFact       { get; set; }
-        public string   Banco         { get; set; }
-        public decimal  Monto         { get; set; }
-        public DateTime FechaC        { get; set; }
-        public string   Observaciones { get; set; }
-    }
-
     public class TbMolde
     {
         public string   CodigoMold     { get; set; }
@@ -675,16 +665,6 @@ namespace SistemaGestion
                 Monto     REAL DEFAULT 0,
                 Cliente   TEXT,
                 FOREIGN KEY(NumeroF) REFERENCES Facturas(NumeroF)
-            );
-
-            CREATE TABLE IF NOT EXISTS Cheques (
-                NumeroCheque  TEXT PRIMARY KEY,
-                NumFact       TEXT,
-                Banco         TEXT,
-                Monto         REAL DEFAULT 0,
-                FechaC        TEXT,
-                Observaciones TEXT,
-                FOREIGN KEY(NumFact) REFERENCES Facturas(NumeroF)
             );
 
             CREATE TABLE IF NOT EXISTS TbMoldes (
@@ -1201,7 +1181,7 @@ namespace SistemaGestion
         // Nunca se modifica una migracion existente: si hay un error se agrega
         // una nueva migracion que lo corrija.
         // Version actual del esquema en codigo: 7
-        public  const int SCHEMA_VERSION = 23;  // v23: Camaras + PermisosCamara (vigilancia EZVIZ)
+        public  const int SCHEMA_VERSION = 25;  // v25: CantDefectuosas en DetalleProduccionMolde
 
         private static void MigrarEsquema(SqliteConnection conn)
         {
@@ -1619,6 +1599,19 @@ namespace SistemaGestion
                 {
                     EjecutarMigracionV23(conn, tx);
                     SetSchemaVersion(conn, tx, 23);
+                }
+
+                if (versionActual < 24)
+                {
+                    MigrarV24(conn, tx);
+                    SetSchemaVersion(conn, tx, 24);
+                }
+
+                // ── v25: CantDefectuosas en DetalleProduccionMolde ─────────────
+                if (versionActual < 25)
+                {
+                    MigrarV25(conn, tx);
+                    SetSchemaVersion(conn, tx, 25);
                 }
 
                 tx.Commit();
@@ -2478,42 +2471,6 @@ namespace SistemaGestion
             cmd.Parameters.AddWithValue("$mo", (double)a.Monto);
             cmd.Parameters.AddWithValue("$cl", a.Cliente ?? "");
             cmd.ExecuteNonQuery();
-        }
-
-        // ════════ CHEQUES ════════════════════════════════════════════════════
-        public static List<Cheque> ObtenerCheques()
-        {
-            var list = new List<Cheque>();
-            using var c = Conn();
-            var cmd = c.CreateCommand();
-            cmd.CommandText = "SELECT * FROM Cheques ORDER BY FechaC DESC";
-            using var r = cmd.ExecuteReader();
-            while (r.Read())
-                list.Add(new Cheque { NumeroCheque = r.GetString(0), NumFact = S(r,1),
-                    Banco = S(r,2), Monto = D(r,3),
-                    FechaC = r.IsDBNull(4) ? DateTime.Today : DateTime.Parse(r.GetString(4)),
-                    Observaciones = S(r,5) });
-            return list;
-        }
-
-        public static void InsertarCheque(Cheque ch)
-        {
-            using var c = Conn();
-            var cmd = c.CreateCommand();
-            cmd.CommandText = "INSERT OR REPLACE INTO Cheques VALUES ($nc,$nf,$ba,$mo,$fe,$ob)";
-            cmd.Parameters.AddWithValue("$nc", ch.NumeroCheque);
-            cmd.Parameters.AddWithValue("$nf", ch.NumFact ?? "");
-            cmd.Parameters.AddWithValue("$ba", ch.Banco ?? "");
-            cmd.Parameters.AddWithValue("$mo", (double)ch.Monto);
-            cmd.Parameters.AddWithValue("$fe", ch.FechaC.ToString("yyyy-MM-dd"));
-            cmd.Parameters.AddWithValue("$ob", ch.Observaciones ?? "");
-            cmd.ExecuteNonQuery();
-        }
-
-        public static void EliminarCheque(string numero)
-        {
-            using var c = Conn();
-            Exec(c, "DELETE FROM Cheques WHERE NumeroCheque=$id", ("$id", numero));
         }
 
         // ════════ MOLDES ═════════════════════════════════════════════════════

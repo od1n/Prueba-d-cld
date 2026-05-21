@@ -124,7 +124,34 @@ namespace SistemaGestion
             p.Controls.Add(btnRefr);
             x += 150;
 
-            // Espaciador + botón nuevo gasto
+            // Botón importar OCR (abre el portal web en el navegador)
+            var btnOcr = new Button { Text = "↗ Importar OCR",
+                FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(21, 101, 192),
+                ForeColor = Color.White, Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
+                Cursor = Cursors.Hand, Size = new Size(150, 32),
+                Anchor = AnchorStyles.Top | AnchorStyles.Right };
+            btnOcr.Location = new Point(p.Width - 350, y - 2);
+            btnOcr.FlatAppearance.BorderSize = 0;
+            btnOcr.Click += (s, e) =>
+            {
+                try
+                {
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName        = "https://localhost:5443/pages/egresos-nuevo.html",
+                        UseShellExecute = true
+                    });
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("No se pudo abrir el portal: " + ex.Message,
+                        "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+            };
+            p.Controls.Add(btnOcr);
+            p.Resize += (s, e) => btnOcr.Location = new Point(p.Width - 350, y - 2);
+
+            // Botón nuevo gasto (manual)
             var btnNuevo = new Button { Text = "+ Nuevo egreso",
                 FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(15, 110, 86),
                 ForeColor = Color.White, Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
@@ -134,7 +161,6 @@ namespace SistemaGestion
             btnNuevo.FlatAppearance.BorderSize = 0;
             btnNuevo.Click += (s, e) => NuevoGasto();
             p.Controls.Add(btnNuevo);
-            p.Resize += (s, e) => btnNuevo.Location = new Point(p.Width - 180, y - 2);
 
             return p;
         }

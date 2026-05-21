@@ -103,7 +103,11 @@ namespace SistemaGestion.Api.Endpoints
 
                     return Results.Ok(new { mensaje = $"{req.Tipo} registrada.", nuevoSaldo = ns });
                 }
-                catch (Exception ex) { return Results.BadRequest(new { error = ex.Message }); }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[KARDEX-B ERROR] {ex}");
+                    return Results.Problem("Error al registrar el movimiento.", statusCode: 500);
+                }
             }).RequireAuthorization();
 
             app.MapPost("/api/kardex/a/movimiento", (KardexAMovRequest req, HttpContext ctx) =>
@@ -175,7 +179,11 @@ namespace SistemaGestion.Api.Endpoints
 
                     return Results.Ok(new { mensaje = $"{req.Tipo} registrada.", nuevoSaldo = ns, nuevoCpp = nuevoCpp });
                 }
-                catch (Exception ex) { return Results.BadRequest(new { error = ex.Message }); }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[KARDEX-A ERROR] {ex}");
+                    return Results.Problem("Error al registrar el movimiento.", statusCode: 500);
+                }
             }).RequireAuthorization();
         }
     }

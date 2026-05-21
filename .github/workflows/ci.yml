@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: [ master, develop ]
+  pull_request:
+    branches: [ master, develop ]
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────
+  # Job 1: Compilar la aplicación de escritorio WinForms
+  # Requiere Windows porque usa LibVLCSharp.WinForms y la referencia a
+  # VideoLAN.LibVLC.Windows solo funciona en windows-latest.
+  # ─────────────────────────────────────────────────────────────────────────
+  build-desktop:
+    name: Build WinForms (Windows)
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore packages
+        run: dotnet restore SistemaGestion.csproj
+
+      - name: Build (Release)
+        run: dotnet build SistemaGestion.csproj --configuration Release --no-restore
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Job 2: Compilar la API LAN
+  # La API es net8.0 puro (sin -windows), pero CertService / TokenService
+  # usan DPAPI que solo existe en Windows. Se compila en windows-latest.
+  # ─────────────────────────────────────────────────────────────────────────
+  build-api:
+    name: Build API LAN (Windows)
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore packages
+        run: dotnet restore SistemaGestion.Api/SistemaGestion.Api.csproj
+
+      - name: Build (Release)
+        run: dotnet build SistemaGestion.Api/SistemaGestion.Api.csproj --configuration Release --no-restore
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Job 3: Tests de integración de la API
+  # Depende del build de la API. Crea una BD SQLite temporal interna,
+  # no requiere que el sistema de escritorio esté corriendo.
+  # ─────────────────────────────────────────────────────────────────────────
+  test-api:
+    name: API Integration Tests (Windows)
+    runs-on: windows-latest
+    needs: build-api
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore packages
+        run: dotnet restore SistemaGestion.Api.Tests/SistemaGestion.Api.Tests.csproj
+
+      - name: Run tests
+        run: >
+          dotnet test SistemaGestion.Api.Tests/SistemaGestion.Api.Tests.csproj
+          --configuration Release
+          --no-restore
+          --logger "trx;LogFileName=test-results.trx"
+          --results-directory TestResults
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: TestResults/*.trx
+          retention-days: 14

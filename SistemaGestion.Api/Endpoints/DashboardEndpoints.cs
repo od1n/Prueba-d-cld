@@ -49,6 +49,21 @@ namespace SistemaGestion.Api.Endpoints
                     }
                     catch { }
 
+                    // Egresos del mes en curso
+                    decimal egresosMesUSD = 0; int egresosMesCant = 0;
+                    var primerDiaMes = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1)
+                                        .ToString("yyyy-MM-dd");
+                    cmd = c.CreateCommand();
+                    cmd.CommandText = @"SELECT COUNT(*), COALESCE(SUM(MontoUSD),0)
+                                        FROM Gastos WHERE Fecha >= $d";
+                    cmd.Parameters.AddWithValue("$d", primerDiaMes);
+                    try
+                    {
+                        using var re = cmd.ExecuteReader();
+                        if (re.Read()) { egresosMesCant = re.GetInt32(0); egresosMesUSD = Db.D(re, 1); }
+                    }
+                    catch { }
+
                     return Results.Ok(new
                     {
                         fecha            = DateTime.Today.ToString("dd/MM/yyyy"),
@@ -56,6 +71,8 @@ namespace SistemaGestion.Api.Endpoints
                         facturasEmitidas = factHoy,
                         cxcVencidas,
                         stockBajo,
+                        egresosMesUSD,
+                        egresosMesCant,
                         alertas = new
                         {
                             stockBajoCount   = stockBajo,
@@ -68,7 +85,8 @@ namespace SistemaGestion.Api.Endpoints
                 }
                 catch (Exception ex)
                 {
-                    return Results.Problem($"Error dashboard: {ex.Message}");
+                    Console.WriteLine($"[DASHBOARD ERROR] {ex}");
+                    return Results.Problem("Error al cargar el dashboard.", statusCode: 500);
                 }
             }).RequireAuthorization();
 
@@ -102,7 +120,11 @@ namespace SistemaGestion.Api.Endpoints
 
                     return Results.Ok(new { stockBajo, cxcVencidas = cxcVenc });
                 }
-                catch (Exception ex) { return Results.Problem(ex.Message); }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[DASHBOARD ALERTAS ERROR] {ex}");
+                    return Results.Problem("Error al cargar las alertas.", statusCode: 500);
+                }
             }).RequireAuthorization();
         }
     }

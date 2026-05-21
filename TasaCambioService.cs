@@ -54,6 +54,44 @@ namespace SistemaGestion
         }
 
         // ── API publica ──────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Intenta registrar la tasa de hoy de forma silenciosa (sin UI).
+        /// Solo actúa si no existe tasa para hoy. No lanza excepciones.
+        /// Retorna true si guardó una tasa nueva, false en cualquier otro caso.
+        /// </summary>
+        public static async Task<bool> ActualizarSilenciosoAsync(string usuario = "auto")
+        {
+            try
+            {
+                // Si ya hay tasa de hoy, no hacer nada
+                var existente = DatabaseService.ObtenerTasaHoy();
+                if (existente != null && existente.Fecha.Date == DateTime.Today)
+                    return false;
+
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                var r = await ObtenerTasasActualesAsync(cts.Token);
+
+                if (!r.HayBCV) return false;   // sin BCV no guardamos
+
+                var t = new TasaCambio
+                {
+                    Fecha         = DateTime.Today,
+                    TasaBCV       = r.BCV,
+                    TasaParalelo  = r.HayParalelo ? r.Paralelo : 0m,
+                    Usuario       = usuario,
+                    Origen        = "AUTO_INICIO",
+                    FechaRegistro = DateTime.Now
+                };
+                DatabaseService.GuardarTasa(t);
+                return true;
+            }
+            catch
+            {
+                return false;   // sin red, sin permisos, etc. — ignorar silenciosamente
+            }
+        }
+
         /// <summary>
         /// Consulta ambas tasas (BCV oficial + paralelo) en paralelo.
         /// No lanza excepciones: si una fuente falla, la otra puede tener exito.

@@ -65,6 +65,12 @@ namespace SistemaGestion
         private Label       _lblVentasHoy = null!, _lblVentasMes = null!,
                             _lblPend = null!, _lblStock = null!, _lblCxC = null!;
 
+        // ── Panel de análisis IA (colapsable) ───────────────────────────────
+        private Panel  _pnlIA       = null!;
+        private Label  _lblIATexto  = null!;
+        private Button _btnAnalizarIA = null!;
+        private bool   _iaVisible   = false;
+
         public FrmDashboardV2()
         {
             Text          = "Dashboard — Resumen del Negocio";
@@ -151,12 +157,11 @@ namespace SistemaGestion
             var p = new Panel { Dock = DockStyle.Fill, BackColor = CSurf };
             var fila = new TableLayoutPanel
             {
-                Dock = DockStyle.Fill, RowCount = 1, ColumnCount = 8,
+                Dock = DockStyle.Fill, RowCount = 1, ColumnCount = 9,
                 BackColor = CSurf, Padding = new Padding(8, 6, 8, 6)
             };
-            // 6 KPIs + spacer + boton — anchos generosos para que numeros
-            // tipo "$ 12.480,00" no se corten ni se partan.
-            int[] anchos = { 130, 130, 90, 90, 140, 260, 0, 170 };
+            // 6 KPIs + spacer + botón IA + botón Actualizar
+            int[] anchos = { 130, 130, 90, 90, 140, 260, 0, 160, 170 };
             foreach (var w in anchos)
                 fila.ColumnStyles.Add(new ColumnStyle(
                     w == 0 ? SizeType.Percent : SizeType.Absolute, w == 0 ? 100f : w));
@@ -168,7 +173,8 @@ namespace SistemaGestion
             fila.Controls.Add(KpiCell("CxC",         out _lblCxC,       "$ 0,00",  CAzul),    4, 0);
             fila.Controls.Add(KpiBcvParalelo(),                                              5, 0);
             fila.Controls.Add(new Panel { BackColor = CSurf },                                6, 0);
-            fila.Controls.Add(BotonActualizar(),                                              7, 0);
+            fila.Controls.Add(BotonAnalizarIA(),                                              7, 0);
+            fila.Controls.Add(BotonActualizar(),                                              8, 0);
 
             p.Controls.Add(fila);
             // borde inferior
@@ -253,8 +259,16 @@ namespace SistemaGestion
             return b;
         }
 
-        private TableLayoutPanel ConstruirContenido()
+        private Panel ConstruirContenido()
         {
+            // Panel contenedor: IA colapsable arriba + contenido principal abajo
+            var wrapper = new Panel { Dock = DockStyle.Fill, BackColor = CFondo };
+
+            _pnlIA = ConstruirPanelIA();
+            _pnlIA.Dock    = DockStyle.Top;
+            _pnlIA.Height  = 0;
+            _pnlIA.Visible = false;
+
             var t = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 2,
@@ -270,7 +284,190 @@ namespace SistemaGestion
 
             t.Controls.Add(ConstruirPanelGrafica(), 1, 0);
             t.Controls.Add(ConstruirPanelFacturas(), 1, 1);
-            return t;
+
+            // Orden crítico en WinForms: Fill primero, luego Top
+            wrapper.Controls.Add(t);
+            wrapper.Controls.Add(_pnlIA);
+            return wrapper;
+        }
+
+        // ── Botón Analizar IA ───────────────────────────────────────────────
+        private Button BotonAnalizarIA()
+        {
+            _btnAnalizarIA = new Button
+            {
+                Text      = "🤖 Analizar",
+                Anchor    = AnchorStyles.Left | AnchorStyles.Right,
+                Height    = 38,
+                FlatStyle = FlatStyle.Flat,
+                BackColor = CMorado,
+                ForeColor = Color.White,
+                Font      = new Font("Segoe UI", 9.5f, FontStyle.Bold),
+                Cursor    = Cursors.Hand,
+                Margin    = new Padding(4, 13, 4, 13),
+                TextAlign = ContentAlignment.MiddleCenter
+            };
+            _btnAnalizarIA.FlatAppearance.BorderSize = 0;
+            _btnAnalizarIA.FlatAppearance.MouseOverBackColor = Color.FromArgb(60, 52, 145);
+            _btnAnalizarIA.Click += async (s, e) => await AnalizarConIAAsync();
+            return _btnAnalizarIA;
+        }
+
+        // ── Panel IA colapsable ─────────────────────────────────────────────
+        private Panel ConstruirPanelIA()
+        {
+            var p = new Panel
+            {
+                BackColor = Color.FromArgb(240, 244, 255),
+                Padding   = new Padding(14, 8, 14, 8)
+            };
+            // Línea inferior separadora
+            p.Paint += (s, e) =>
+            {
+                using var pen = new Pen(Color.FromArgb(190, 210, 245), 1f);
+                e.Graphics.DrawLine(pen, 0, p.Height - 1, p.Width, p.Height - 1);
+            };
+
+            // Barra de título
+            var header = new Panel
+            {
+                Dock = DockStyle.Top, Height = 22,
+                BackColor = Color.Transparent
+            };
+            var lblTit = new Label
+            {
+                Text      = "🤖  Análisis IA — basado en los KPIs actuales",
+                Font      = new Font("Segoe UI", 9f, FontStyle.Bold),
+                ForeColor = CAzul,
+                Dock      = DockStyle.Left,
+                AutoSize  = true,
+                TextAlign = ContentAlignment.MiddleLeft
+            };
+            var lblCerrar = new Label
+            {
+                Text      = "✕",
+                Font      = new Font("Segoe UI", 9f, FontStyle.Bold),
+                ForeColor = CTextoTen,
+                Cursor    = Cursors.Hand,
+                Dock      = DockStyle.Right,
+                Width     = 24,
+                TextAlign = ContentAlignment.MiddleCenter
+            };
+            lblCerrar.Click += (s, e) => OcultarPanelIA();
+            header.Controls.Add(lblTit);
+            header.Controls.Add(lblCerrar);
+
+            // Texto de respuesta
+            _lblIATexto = new Label
+            {
+                Text      = "",
+                Font      = new Font("Segoe UI", 9.5f),
+                ForeColor = CTexto,
+                Dock      = DockStyle.Fill,
+                AutoSize  = false,
+                TextAlign = ContentAlignment.TopLeft,
+                Padding   = new Padding(2, 4, 2, 0)
+            };
+
+            // Orden: Fill primero, luego Top
+            p.Controls.Add(_lblIATexto);
+            p.Controls.Add(header);
+            return p;
+        }
+
+        // ── Análisis asíncrono con Ollama ───────────────────────────────────
+        private async System.Threading.Tasks.Task AnalizarConIAAsync()
+        {
+            if (_data is null)
+            {
+                MessageBox.Show(this,
+                    "Primero actualiza los datos del dashboard (botón ↻ Actualizar).",
+                    "Sin datos", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            MostrarPanelIA("⏳  Consultando Ollama, un momento…");
+            _btnAnalizarIA.Enabled = false;
+
+            try
+            {
+                bool disponible = await OllamaService.IsAvailableAsync();
+                if (!disponible)
+                {
+                    _lblIATexto.Text =
+                        "⚠  Ollama no está disponible en http://localhost:11434.\n\n" +
+                        "Asegúrate de que el servidor Ollama esté corriendo y de que " +
+                        "tengas al menos un modelo descargado (ej: ollama pull llama3).";
+                    return;
+                }
+
+                string modelo  = DatabaseService.ObtenerConfig("OllamaModelo", "llama3");
+                string empresa = DatabaseService.ObtenerConfig("NombreEmpresa", "la empresa");
+
+                // Construir contexto de alertas
+                string alertasTxt = _data.Alertas.Count == 0
+                    ? "ninguna"
+                    : string.Join(", ", _data.Alertas.Select(a =>
+                        $"{a.Categoria} ({a.Texto})"));
+
+                var prompt =
+                    $"Eres un asistente de negocios para una empresa venezolana llamada \"{empresa}\". " +
+                    $"Analiza los siguientes indicadores clave (KPIs) del día de hoy y proporciona " +
+                    $"un análisis conciso en español con recomendaciones prácticas.\n\n" +
+                    $"KPIs actuales:\n" +
+                    $"- Ventas del día: $ {_data.VentasHoy:N2}\n" +
+                    $"- Ventas del mes: $ {_data.VentasMes:N2}\n" +
+                    $"- Facturas pendientes de cobro: {_data.FacturasPendientes}\n" +
+                    $"- Productos con stock bajo: {_data.StockBajo}\n" +
+                    $"- Cuentas por cobrar vencidas: $ {_data.CxCSaldo:N2}\n" +
+                    $"- Tasa BCV: {(_data.TasaBCV > 0 ? _data.TasaBCV.ToString("N2") + " Bs/USD" : "no disponible")}\n" +
+                    $"- Tasa paralelo: {(_data.TasaParalelo > 0 ? _data.TasaParalelo.ToString("N2") + " Bs/USD" : "no disponible")}\n" +
+                    $"- Alertas activas: {alertasTxt}\n\n" +
+                    $"Proporciona:\n" +
+                    $"1. Diagnóstico breve del estado actual (2-3 oraciones)\n" +
+                    $"2. Las 2-3 acciones más urgentes para hoy\n" +
+                    $"3. Un punto positivo si lo hay\n\n" +
+                    $"Sé directo, práctico y usa el contexto venezolano (dólares como moneda de referencia). " +
+                    $"Máximo 180 palabras.";
+
+                string respuesta = await OllamaService.GenerateAsync(modelo, prompt, 400);
+                _lblIATexto.Text = respuesta;
+
+                // Si la respuesta es larga, ampliar el panel
+                if (respuesta.Length > 300 && _pnlIA.Height < 170)
+                {
+                    _pnlIA.Height = 170;
+                }
+            }
+            catch (Exception ex)
+            {
+                _lblIATexto.Text =
+                    $"⚠  Error al contactar Ollama: {ex.Message}\n\n" +
+                    $"Verifica que el servicio esté activo y que el modelo " +
+                    $"\"{DatabaseService.ObtenerConfig("OllamaModelo", "llama3")}\" esté descargado.";
+            }
+            finally
+            {
+                _btnAnalizarIA.Enabled = true;
+            }
+        }
+
+        private void MostrarPanelIA(string textoInicial)
+        {
+            _lblIATexto.Text = textoInicial;
+            if (!_iaVisible)
+            {
+                _iaVisible    = true;
+                _pnlIA.Height = 130;
+                _pnlIA.Visible = true;
+            }
+        }
+
+        private void OcultarPanelIA()
+        {
+            _iaVisible     = false;
+            _pnlIA.Visible = false;
+            _pnlIA.Height  = 0;
         }
 
         // ── Panel: alertas ──────────────────────────────────────────────────

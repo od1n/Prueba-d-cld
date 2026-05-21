@@ -6,6 +6,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Linq;
 using System.Windows.Forms;
 
 namespace SistemaGestion
@@ -139,6 +140,133 @@ namespace SistemaGestion
 
             rtf.SelectionStart = 0; rtf.ScrollToCaret();
 
+            // ── Panel de pregunta libre a Ollama ──────────────────────────
+            var pnlIA = new Panel
+            {
+                Dock = DockStyle.Bottom, Height = 54,
+                BackColor = Color.FromArgb(240, 244, 255)
+            };
+            pnlIA.Paint += (s, e) =>
+            {
+                using var pen = new System.Drawing.Pen(Color.FromArgb(190, 210, 245), 1f);
+                e.Graphics.DrawLine(pen, 0, 0, pnlIA.Width, 0);
+            };
+
+            // Fila de entrada (siempre visible)
+            var pnlRow = new Panel { Dock = DockStyle.Top, Height = 52, BackColor = Color.Transparent };
+            var lblIA  = new Label
+            {
+                Text = "💬 Preguntar a la IA:",
+                Font = new Font("Segoe UI", 9f, FontStyle.Bold),
+                ForeColor = C1, AutoSize = true
+            };
+            var txtPregunta = new TextBox
+            {
+                Font = new Font("Segoe UI", 10f),
+                Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top
+            };
+            var btnPreguntar = new Button
+            {
+                Text = "Preguntar",
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(83, 74, 183), ForeColor = Color.White,
+                Font = new Font("Segoe UI", 9f, FontStyle.Bold),
+                Cursor = Cursors.Hand,
+                Anchor = AnchorStyles.Right | AnchorStyles.Top
+            };
+            btnPreguntar.FlatAppearance.BorderSize = 0;
+            btnPreguntar.FlatAppearance.MouseOverBackColor = Color.FromArgb(60, 52, 145);
+
+            pnlRow.Layout += (s, e) =>
+            {
+                int btnW = 110, pad = 12, gap = 8;
+                int lblW = lblIA.PreferredWidth;
+                lblIA.Location      = new Point(pad, (pnlRow.Height - lblIA.PreferredHeight) / 2);
+                int txtX = pad + lblW + gap;
+                int txtW = pnlRow.Width - txtX - btnW - gap - pad;
+                txtPregunta.Location = new Point(txtX, (pnlRow.Height - txtPregunta.Height) / 2);
+                txtPregunta.Width    = Math.Max(80, txtW);
+                btnPreguntar.Location = new Point(pnlRow.Width - btnW - pad,
+                                                   (pnlRow.Height - 30) / 2);
+                btnPreguntar.Size = new Size(btnW, 30);
+            };
+            pnlRow.Controls.AddRange(new Control[] { lblIA, txtPregunta, btnPreguntar });
+
+            // Área de respuesta (oculta inicialmente)
+            var rtfRespIA = new RichTextBox
+            {
+                Dock = DockStyle.Fill, ReadOnly = true,
+                BorderStyle = BorderStyle.None,
+                BackColor = Color.FromArgb(240, 244, 255),
+                Font = new Font("Segoe UI", 10f),
+                ScrollBars = RichTextBoxScrollBars.Vertical,
+                Padding = new Padding(12, 4, 12, 4),
+                Visible = false
+            };
+
+            // Fill primero, luego Top (orden correcto para WinForms)
+            pnlIA.Controls.Add(rtfRespIA);
+            pnlIA.Controls.Add(pnlRow);
+
+            // Texto plano del contenido estático para contexto Ollama
+            string contextoModulo = _ayudas.ContainsKey(ventana)
+                ? string.Join("\n", _ayudas[ventana].Secciones
+                    .Select(sec => ((sec.Negrita ?? "") + " " + (sec.Texto ?? "")).Trim())
+                    .Where(t => t.Length > 1))
+                : "";
+
+            async void PreguntarClick(object sender, EventArgs ev)
+            {
+                string pregunta = txtPregunta.Text.Trim();
+                if (string.IsNullOrEmpty(pregunta)) return;
+
+                btnPreguntar.Enabled = false;
+                btnPreguntar.Text    = "…";
+                rtfRespIA.Visible    = true;
+                pnlIA.Height         = 220;
+                rtfRespIA.Text       = "⏳  Consultando Ollama…";
+
+                try
+                {
+                    bool disponible = await OllamaService.IsAvailableAsync();
+                    if (!disponible)
+                    {
+                        rtfRespIA.Text =
+                            "⚠  Ollama no está disponible en http://localhost:11434.\n" +
+                            "Asegúrate de que el servidor Ollama esté corriendo y que " +
+                            "tengas un modelo descargado (ej: ollama pull llama3).";
+                        return;
+                    }
+
+                    string modelo = DatabaseService.ObtenerConfig("OllamaModelo", "llama3");
+                    string prompt =
+                        $"Eres un asistente de soporte para el sistema de gestión empresarial " +
+                        $"venezolano \"SistemaGestion\". El usuario está en el módulo \"{titulo}\".\n\n" +
+                        $"Documentación del módulo:\n{contextoModulo}\n\n" +
+                        $"Pregunta del usuario: {pregunta}\n\n" +
+                        $"Responde de forma concisa y práctica en español. Máximo 120 palabras.";
+
+                    string respuesta = await OllamaService.GenerateAsync(modelo, prompt, 300);
+                    rtfRespIA.Text = respuesta;
+                }
+                catch (Exception ex)
+                {
+                    rtfRespIA.Text = $"⚠  Error al contactar Ollama: {ex.Message}";
+                }
+                finally
+                {
+                    btnPreguntar.Enabled = true;
+                    btnPreguntar.Text    = "Preguntar";
+                }
+            }
+
+            btnPreguntar.Click += PreguntarClick;
+            txtPregunta.KeyDown += (s, e) =>
+            {
+                if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; PreguntarClick(s, e); }
+            };
+            // ─────────────────────────────────────────────────────────────
+
             var btnCerrar = new Button {
                 Text = "Cerrar", Dock = DockStyle.Bottom, Height = 42,
                 BackColor = C1, ForeColor = Color.White,
@@ -146,7 +274,7 @@ namespace SistemaGestion
             };
             btnCerrar.FlatAppearance.BorderSize = 0;
             btnCerrar.Click += (s, e) => frm.Close();
-            frm.Controls.AddRange(new Control[] { rtf, btnCerrar, hdr });
+            frm.Controls.AddRange(new Control[] { rtf, pnlIA, btnCerrar, hdr });
 
             VentanaPrefs.Restaurar(frm);
             frm.ShowDialog(owner);
@@ -663,60 +791,6 @@ namespace SistemaGestion
                 S.Esp(),
                 S.Bul("La alícuota de IVA se configura en Configuración del Sistema"),
                 S.Bul("Verificar que todas las facturas del mes estén registradas antes de exportar"),
-            }),
-
-            // ── FrmDashboard ─────────────────────────────────────────────────
-            ["FrmDashboard"] = ("Dashboard — Resumen del Negocio", new List<S> {
-                S.Sec("¿Qué muestra el Dashboard?"),
-                S.P("Vista ejecutiva del negocio en tiempo real. Se actualiza automáticamente " +
-                    "cada 60 segundos y muestra los indicadores más importantes del día."),
-                S.Esp(),
-                S.Sec("Indicadores (KPIs)"),
-                S.PB("Ventas del mes:  ", "Total facturado en el mes en curso en USD."),
-                S.PB("Facturado hoy:  ", "Suma de todas las facturas emitidas hoy."),
-                S.PB("Facturas pendientes:  ", "Cuentas por cobrar sin pagar a la fecha."),
-                S.PB("Productos bajo mínimo:  ", "Cantidad de productos con stock menor al mínimo definido."),
-                S.Esp(),
-                S.Sec("Botones del header"),
-                S.PB("[Punto Equilibrio]  ", "Calcular cuántas unidades se necesitan vender para cubrir los costos."),
-                S.PB("[Flujo de Caja]  ", "Proyección de ingresos y egresos a 30/60/90 días."),
-                S.PB("[Rentabilidad]  ", "Margen y rotación por producto en el período seleccionado."),
-                S.PB("[Ver Reportes]  ", "Acceso al módulo de reportes de ventas con exportación a PDF/Excel."),
-                S.PB("[↺ Actualizar]  ", "Forzar la actualización de todos los datos ahora mismo."),
-                S.PB("[PDF]  ", "Exportar el resumen actual del dashboard a un PDF imprimible."),
-                S.Esp(),
-                S.Sec("Alertas"),
-                S.Bul("Barra amarilla inferior = productos con stock bajo mínimo", Color.FromArgb(140,100,0)),
-                S.Bul("Hacer clic en [Ver detalle] de la alerta para ir al inventario"),
-                S.Bul("El dashboard recuerda su posición y tamaño al cerrarlo"),
-            }),
-
-            // ── MenuPrincipal ────────────────────────────────────────────────
-            ["MenuPrincipal"] = ("Menú Principal", new List<S> {
-                S.Sec("¿Qué es el Menú Principal?"),
-                S.P("Punto de entrada a todos los módulos del sistema. Muestra el estado " +
-                    "del negocio en la barra superior y permite acceder a cada sección."),
-                S.Esp(),
-                S.Sec("Módulos disponibles"),
-                S.PB("Dashboard:  ", "Resumen ejecutivo con KPIs, ventas del día y alertas de stock."),
-                S.PB("Transacciones:  ", "Facturas, cuentas por cobrar/pagar y registro de producción."),
-                S.PB("Archivos:  ", "Catálogos: inventario, clientes, proveedores, moldes y kardex."),
-                S.PB("Producción:  ", "Registro diario de producción y control de kardex de insumos."),
-                S.PB("Compras:  ", "Gestión de proveedores, insumos y materias primas."),
-                S.PB("Nómina:  ", "Empleados, nómina semanal, préstamos y beneficios LOTTT."),
-                S.Esp(),
-                S.Sec("Barra superior"),
-                S.PB("BCV / Par:  ", "Tasa de cambio BCV y Paralelo del día. Clic para actualizar."),
-                S.PB("Alertas:  ", "Muestra la cantidad de productos bajo stock mínimo."),
-                S.PB("[Mi Perfil]  ", "Ver y cambiar la contraseña del usuario activo."),
-                S.PB("[F3 Buscar]  ", "Búsqueda global en todo el sistema (atajo: F3)."),
-                S.PB("[Tema]  ", "Alternar entre modo claro y modo oscuro."),
-                S.PB("[Cerrar sesión]  ", "Cerrar la sesión actual y volver al login."),
-                S.Esp(),
-                S.Sec("Notas"),
-                S.Bul("Los módulos sin acceso aparecen en gris — contactar al administrador"),
-                S.Bul("La barra de alertas amarilla indica productos con stock bajo mínimo"),
-                S.Bul("El menú recuerda su posición y tamaño al cerrar la sesión"),
             }),
 
             // ── FrmRentabilidad ──────────────────────────────────────────────

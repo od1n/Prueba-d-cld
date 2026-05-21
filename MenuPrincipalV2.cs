@@ -47,7 +47,19 @@ namespace SistemaGestion
         private Button _btnToggleNE = null!;
         private Panel  _pnlBannerNE = null!;
         private Label _lblAlertas = null!;
-        private Panel _pnlGrid = null!;
+        private Panel _pnlGrid   = null!;
+
+        // ── Toast de alertas críticas (overlay flotante) ────────────────────
+        private Panel _pnlToast      = null!;
+        private bool  _toastMostrado = false;
+
+        // ── Panel de chat IA lateral ────────────────────────────────────────
+        private Panel       _pnlChat       = null!;
+        private RichTextBox _rtfChat       = null!;
+        private TextBox     _txtChatInput  = null!;
+        private Button      _btnToggleChat = null!;
+        private bool        _chatVisible   = false;
+        private readonly List<(string rol, string texto)> _historialChat = new();
 
         public MenuPrincipalV2()
         {
@@ -70,12 +82,22 @@ namespace SistemaGestion
             KeyPreview = true;
             KeyDown += (s, ev) => { if (ev.KeyCode == Keys.F3) new FrmBuscador().ShowDialog(); };
 
-            Load += (s, e) => RefrescarInfo();
+            Load += async (s, e) =>
+            {
+                RefrescarInfo();
+                // Intentar actualizar tasa BCV en silencio si no hay una para hoy.
+                // Si tiene éxito refresca los labels; si falla no hace nada.
+                bool guardada = await TasaCambioService.ActualizarSilenciosoAsync(
+                    Sesion.NombreUsuario ?? "auto");
+                if (guardada) RefrescarInfo();
+            };
         }
 
         // ── Construccion UI ─────────────────────────────────────────────────
         private void ConstruirUI()
         {
+            _toastMostrado = false;   // resetear al reconstruir (nuevo login)
+
             var root = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5,
@@ -94,6 +116,12 @@ namespace SistemaGestion
             root.Controls.Add(ConstruirContenido(), 0, 3);
             root.Controls.Add(ConstruirBottomBar(), 0, 4);
             Controls.Add(root);
+
+            // Toast flotante de alertas críticas (overlay sobre el TableLayout)
+            _pnlToast = ConstruirToastAlertas();
+            Controls.Add(_pnlToast);
+            _pnlToast.BringToFront();
+            SizeChanged += (s, e) => { if (_pnlToast?.Visible == true) PosicionarToast(); };
 
             // Sincronizar el estado inicial del banner
             ActualizarBannerNE();
@@ -411,12 +439,19 @@ namespace SistemaGestion
             return p;
         }
 
-        // ── Centro: grid de modulos ─────────────────────────────────────────
+        // ── Centro: grid de modulos + panel chat lateral ────────────────────
         private Panel ConstruirContenido()
         {
+            // Envoltorio con split horizontal: grid (Fill) + chat (Right, ancho 0 inicial)
+            var wrapper = new Panel { Dock = DockStyle.Fill, BackColor = Color.FromArgb(208, 216, 230) };
+
+            _pnlChat = ConstruirPanelChat();
+            _pnlChat.Dock  = DockStyle.Right;
+            _pnlChat.Width = 0;
+            _pnlChat.Visible = false;
+
             // Fondo MEDIO-oscuro de la zona: gris azulado claro pero
             // notablemente distinto a los washes pastel de las tarjetas.
-            // Asi las pasteles destacan en lugar de camuflarse.
             Color fondoZona = Color.FromArgb(208, 216, 230);
             var p = new Panel { Dock = DockStyle.Fill, BackColor = fondoZona,
                 Padding = new Padding(20, 16, 20, 4) };
@@ -498,7 +533,248 @@ namespace SistemaGestion
             _pnlGrid.HandleCreated += (s, e) => Reposicionar();
 
             p.Controls.Add(_pnlGrid);
-            return p;
+
+            // Fill primero, Right después (orden correcto WinForms)
+            wrapper.Controls.Add(p);
+            wrapper.Controls.Add(_pnlChat);
+            return wrapper;
+        }
+
+        // ── Panel de chat IA ─────────────────────────────────────────────────
+        private Panel ConstruirPanelChat()
+        {
+            var pnl = new Panel { BackColor = Color.FromArgb(30, 40, 60) };
+
+            // Encabezado
+            var hdr = new Panel { Dock = DockStyle.Top, Height = 40,
+                BackColor = CAzulOsc };
+            var lblTit = new Label
+            {
+                Text = "🤖  Asistente IA",
+                Font = new Font("Segoe UI", 10f, FontStyle.Bold),
+                ForeColor = Color.White, Dock = DockStyle.Fill,
+                TextAlign = ContentAlignment.MiddleLeft,
+                Padding = new Padding(12, 0, 0, 0)
+            };
+            var btnCerrar = new Label
+            {
+                Text = "✕", Font = new Font("Segoe UI", 10f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(168, 177, 187),
+                Dock = DockStyle.Right, Width = 36,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Cursor = Cursors.Hand
+            };
+            btnCerrar.Click += (s, e) => ToggleChat();
+            hdr.Controls.Add(lblTit);
+            hdr.Controls.Add(btnCerrar);
+
+            // Área de chat (historial)
+            _rtfChat = new RichTextBox
+            {
+                Dock = DockStyle.Fill, ReadOnly = true,
+                BackColor = Color.FromArgb(30, 40, 60),
+                ForeColor = Color.FromArgb(220, 225, 235),
+                BorderStyle = BorderStyle.None,
+                Font = new Font("Segoe UI", 9.5f),
+                ScrollBars = RichTextBoxScrollBars.Vertical,
+                Padding = new Padding(10, 8, 10, 4)
+            };
+
+            // Panel inferior: input + botón
+            var pnlInput = new Panel
+            {
+                Dock = DockStyle.Bottom, Height = 80,
+                BackColor = Color.FromArgb(22, 30, 46),
+                Padding = new Padding(8, 6, 8, 8)
+            };
+            pnlInput.Paint += (s, e) =>
+            {
+                using var pen = new Pen(Color.FromArgb(60, 80, 120), 1f);
+                e.Graphics.DrawLine(pen, 0, 0, pnlInput.Width, 0);
+            };
+
+            _txtChatInput = new TextBox
+            {
+                Multiline = false,
+                Font = new Font("Segoe UI", 9.5f),
+                BackColor = Color.FromArgb(44, 56, 80),
+                ForeColor = Color.FromArgb(220, 225, 235),
+                BorderStyle = BorderStyle.FixedSingle,
+                Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top,
+                PlaceholderText = "Escribe tu pregunta…"
+            };
+            var btnEnviar = new Button
+            {
+                Text = "Enviar",
+                FlatStyle = FlatStyle.Flat,
+                BackColor = CAzul, ForeColor = Color.White,
+                Font = new Font("Segoe UI", 9f, FontStyle.Bold),
+                Cursor = Cursors.Hand,
+                Anchor = AnchorStyles.Right | AnchorStyles.Top
+            };
+            btnEnviar.FlatAppearance.BorderSize = 0;
+            btnEnviar.FlatAppearance.MouseOverBackColor = CAzulSec;
+
+            pnlInput.Layout += (s, e) =>
+            {
+                int pad = 8, btnW = 70, gap = 6, h = 30;
+                int inputW = pnlInput.Width - pad * 2 - btnW - gap;
+                _txtChatInput.SetBounds(pad, 12, Math.Max(60, inputW), h);
+                btnEnviar.SetBounds(pad + inputW + gap, 11, btnW, h + 2);
+            };
+
+            async void Enviar(object? s, EventArgs e) => await EnviarMensajeIAAsync();
+            btnEnviar.Click += Enviar;
+            _txtChatInput.KeyDown += (s, e) =>
+            {
+                if (e.KeyCode == Keys.Enter && !e.Shift)
+                {
+                    e.SuppressKeyPress = true;
+                    _ = EnviarMensajeIAAsync();
+                }
+            };
+
+            pnlInput.Controls.Add(_txtChatInput);
+            pnlInput.Controls.Add(btnEnviar);
+
+            // Fill primero, luego Top y Bottom
+            pnl.Controls.Add(_rtfChat);
+            pnl.Controls.Add(pnlInput);
+            pnl.Controls.Add(hdr);
+
+            // Mensaje de bienvenida
+            ChatAppend("sistema",
+                "Hola. Soy tu asistente IA. Puedes preguntarme sobre los módulos " +
+                "del sistema, interpretar alertas, consultar tasas o pedir " +
+                "recomendaciones sobre los datos del negocio.");
+            return pnl;
+        }
+
+        private void ToggleChat()
+        {
+            _chatVisible = !_chatVisible;
+            _pnlChat.Visible = _chatVisible;
+            _pnlChat.Width   = _chatVisible ? 320 : 0;
+            if (_btnToggleChat != null)
+            {
+                _btnToggleChat.Text      = _chatVisible ? "✕  Cerrar chat" : "🤖  Chat IA";
+                _btnToggleChat.BackColor = _chatVisible
+                    ? Color.FromArgb(60, 52, 145)
+                    : UITheme.Azul;
+            }
+            if (_chatVisible) _txtChatInput?.Focus();
+        }
+
+        private void ChatAppend(string rol, string texto)
+        {
+            // Colores según quien habla
+            bool esSistema = rol == "sistema";
+            Color cRol  = esSistema ? Color.FromArgb(100, 160, 230) : Color.FromArgb(130, 210, 160);
+            Color cText = esSistema ? Color.FromArgb(200, 210, 230) : Color.FromArgb(230, 240, 230);
+            string prefijo = esSistema ? "🤖  Asistente" : "👤  Tú";
+
+            _rtfChat.SelectionStart = _rtfChat.TextLength;
+            _rtfChat.SelectionColor = cRol;
+            _rtfChat.SelectionFont  = new Font("Segoe UI", 8.5f, FontStyle.Bold);
+            _rtfChat.AppendText("\r\n" + prefijo + "\r\n");
+
+            _rtfChat.SelectionColor = cText;
+            _rtfChat.SelectionFont  = new Font("Segoe UI", 9.5f);
+            _rtfChat.AppendText(texto + "\r\n");
+
+            _rtfChat.SelectionStart = _rtfChat.TextLength;
+            _rtfChat.ScrollToCaret();
+        }
+
+        private async System.Threading.Tasks.Task EnviarMensajeIAAsync()
+        {
+            string pregunta = _txtChatInput.Text.Trim();
+            if (string.IsNullOrEmpty(pregunta)) return;
+
+            _txtChatInput.Clear();
+            _historialChat.Add(("usuario", pregunta));
+            ChatAppend("usuario", pregunta);
+            ChatAppend("sistema", "⏳  Pensando…");
+
+            // Índice del último mensaje para poder actualizarlo
+            int posMarcador = _rtfChat.TextLength;
+
+            try
+            {
+                bool disponible = await OllamaService.IsAvailableAsync();
+                if (!disponible)
+                {
+                    RemplazarUltimoMensaje(
+                        "⚠  Ollama no está disponible en http://localhost:11434.\n" +
+                        "Asegúrate de que el servidor esté corriendo.");
+                    return;
+                }
+
+                string modelo  = DatabaseService.ObtenerConfig("OllamaModelo", "llama3");
+                string empresa = DatabaseService.ObtenerConfig("NombreEmpresa", "la empresa");
+
+                // Contexto del sistema (tasa + alertas)
+                string ctxTasa = "";
+                try
+                {
+                    var t = DatabaseService.ObtenerTasaHoy();
+                    if (t != null)
+                        ctxTasa = $"Tasa BCV hoy: {t.TasaBCV:N2} Bs/USD. " +
+                                  $"Tasa paralelo: {(t.TasaParalelo > 0 ? t.TasaParalelo.ToString("N2") : "no registrada")} Bs/USD. ";
+                }
+                catch { }
+
+                string ctxAlertas = "";
+                try
+                {
+                    var al = AlertasService.ObtenerAlertas();
+                    if (al.TieneAlertas)
+                        ctxAlertas = $"Alertas activas: {al.StockBajo.Count} stock bajo, " +
+                                     $"{al.CxCVencidas.Count} CxC vencidas. ";
+                }
+                catch { }
+
+                // Historial reciente (max 6 turnos = 3 intercambios)
+                var histReciente = _historialChat.TakeLast(6).ToList();
+                var sb = new System.Text.StringBuilder();
+                foreach (var (rol, txt) in histReciente)
+                    sb.AppendLine(rol == "usuario" ? $"Usuario: {txt}" : $"Asistente: {txt}");
+
+                string prompt =
+                    $"Eres un asistente de negocios para la empresa venezolana \"{empresa}\", " +
+                    $"integrado en su sistema de gestión (SistemaGestion). " +
+                    $"Contexto actual: {ctxTasa}{ctxAlertas}" +
+                    $"El sistema tiene módulos de: Facturas, Inventario, CxC, Compras, " +
+                    $"Nómina, Producción, ISLR, Reportes y más.\n\n" +
+                    $"Conversación:\n{sb}\n" +
+                    $"Responde en español, de forma concisa y práctica. Máximo 150 palabras.";
+
+                string respuesta = await OllamaService.GenerateAsync(modelo, prompt, 350);
+                _historialChat.Add(("sistema", respuesta));
+                RemplazarUltimoMensaje(respuesta);
+            }
+            catch (Exception ex)
+            {
+                RemplazarUltimoMensaje($"⚠  Error: {ex.Message}");
+            }
+        }
+
+        private void RemplazarUltimoMensaje(string nuevoTexto)
+        {
+            // Buscar el "⏳  Pensando…" y reemplazarlo
+            string actual = _rtfChat.Text;
+            int idx = actual.LastIndexOf("⏳  Pensando…", StringComparison.Ordinal);
+            if (idx >= 0)
+            {
+                _rtfChat.Select(idx, "⏳  Pensando…".Length);
+                _rtfChat.SelectedText = nuevoTexto;
+            }
+            else
+            {
+                ChatAppend("sistema", nuevoTexto);
+            }
+            _rtfChat.SelectionStart = _rtfChat.TextLength;
+            _rtfChat.ScrollToCaret();
         }
 
         private Panel TarjetaModulo(string icono, string titulo, string subtitulo,
@@ -729,6 +1005,22 @@ namespace SistemaGestion
             fila.Controls.Add(BotonInferior("$  Tasa de cambio", () => new FrmTasaCambio().ShowDialog()));
             fila.Controls.Add(BotonInferior("⚙  Sistema",        () => new FrmSistema().ShowDialog()));
 
+            // Botón Chat IA
+            _btnToggleChat = new Button
+            {
+                Text = "🤖  Chat IA",
+                Width = 130, Height = 36,
+                FlatStyle = FlatStyle.Flat,
+                BackColor = CMorado, ForeColor = Color.White,
+                Font = new Font("Segoe UI", 10f, FontStyle.Bold),
+                Cursor = Cursors.Hand,
+                Margin = new Padding(0, 0, 8, 0)
+            };
+            _btnToggleChat.FlatAppearance.BorderSize = 0;
+            _btnToggleChat.FlatAppearance.MouseOverBackColor = Color.FromArgb(60, 52, 145);
+            _btnToggleChat.Click += (s, e) => ToggleChat();
+            fila.Controls.Add(_btnToggleChat);
+
             // Spacer
             fila.Controls.Add(new Panel { Width = 30, Height = 1, BackColor = UITheme.FondoCard });
 
@@ -773,6 +1065,106 @@ namespace SistemaGestion
             return b;
         }
 
+        // ── Toast flotante de alertas críticas ─────────────────────────────
+        private Panel ConstruirToastAlertas()
+        {
+            var p = new Panel
+            {
+                Size      = new Size(340, 84),
+                BackColor = Color.FromArgb(170, 28, 28),
+                Visible   = false,
+                Padding   = new Padding(0)
+            };
+            p.Paint += (s, e) =>
+            {
+                var g = e.Graphics;
+                // Banda izquierda roja viva
+                using var br  = new SolidBrush(Color.FromArgb(220, 60, 60));
+                g.FillRectangle(br, 0, 0, 4, p.Height);
+                // Borde sutil
+                using var pen = new Pen(Color.FromArgb(210, 55, 55), 1f);
+                g.DrawRectangle(pen, 0, 0, p.Width - 1, p.Height - 1);
+            };
+
+            var lblIco = new Label
+            {
+                Text = "⚠",
+                Font = new Font("Segoe UI", 20f),
+                ForeColor = Color.FromArgb(255, 220, 100),
+                AutoSize = false, Dock = DockStyle.Left, Width = 52,
+                TextAlign = ContentAlignment.MiddleCenter,
+                BackColor = Color.Transparent
+            };
+
+            var btnX = new Label
+            {
+                Text = "✕",
+                Font = new Font("Segoe UI", 9f),
+                ForeColor = Color.FromArgb(210, 160, 160),
+                Dock = DockStyle.Right, Width = 28,
+                TextAlign = ContentAlignment.TopCenter,
+                Padding = new Padding(0, 6, 4, 0),
+                Cursor = Cursors.Hand
+            };
+            btnX.Click += (s, e) => OcultarToast();
+
+            var lblTexto = new Label
+            {
+                Text = "",
+                Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
+                ForeColor = Color.White,
+                Dock = DockStyle.Fill,
+                TextAlign = ContentAlignment.MiddleLeft,
+                Padding = new Padding(8, 6, 4, 6),
+                BackColor = Color.Transparent
+            };
+
+            // Fill primero, luego Left y Right
+            p.Controls.Add(lblTexto);
+            p.Controls.Add(lblIco);
+            p.Controls.Add(btnX);
+            p.Tag = lblTexto;   // para actualizarlo en MostrarToast
+            return p;
+        }
+
+        private void PosicionarToast()
+        {
+            if (_pnlToast == null) return;
+            _pnlToast.Location = new Point(
+                ClientSize.Width  - _pnlToast.Width - 16,
+                155   // debajo del navbar (42) + bannerNE (28) + stripInfo (80) + 5px margen
+            );
+        }
+
+        private void MostrarToast(AlertasData alertas)
+        {
+            if (_toastMostrado || _pnlToast == null) return;
+            _toastMostrado = true;
+
+            if (_pnlToast.Tag is Label lbl)
+            {
+                var partes = new List<string>();
+                if (alertas.StockBajo.Count   > 0) partes.Add($"{alertas.StockBajo.Count} stock bajo");
+                if (alertas.CxCVencidas.Count > 0) partes.Add($"{alertas.CxCVencidas.Count} CxC vencida(s)");
+                if (alertas.MantVencido.Count > 0) partes.Add($"{alertas.MantVencido.Count} mant. vencido(s)");
+                lbl.Text = "Alertas críticas:\n" + string.Join("  ·  ", partes);
+            }
+
+            PosicionarToast();
+            _pnlToast.Visible = true;
+            _pnlToast.BringToFront();
+
+            // Auto-dismiss después de 8 segundos
+            var timer = new System.Windows.Forms.Timer { Interval = 8000 };
+            timer.Tick += (s, e) => { timer.Stop(); timer.Dispose(); OcultarToast(); };
+            timer.Start();
+        }
+
+        private void OcultarToast()
+        {
+            if (_pnlToast != null) _pnlToast.Visible = false;
+        }
+
         // ── Refresco de info dinamica ───────────────────────────────────────
         private void RefrescarInfo()
         {
@@ -800,6 +1192,11 @@ namespace SistemaGestion
             try
             {
                 var alertas = AlertasService.ObtenerAlertas();
+
+                // Toast la primera vez que hay alertas no silenciadas en la sesión
+                if (!_toastMostrado && alertas.TieneAlertasNoSilenciadas)
+                    MostrarToast(alertas);
+
                 if (alertas.TieneAlertas)
                 {
                     var partes = new List<string>();

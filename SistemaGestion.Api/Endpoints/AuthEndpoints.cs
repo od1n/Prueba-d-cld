@@ -174,7 +174,10 @@ namespace SistemaGestion.Api.Endpoints
                 using var sha = SHA256.Create();
                 var bytes = Encoding.UTF8.GetBytes(password + "SG_SALT_2024");
                 var hash  = Convert.ToHexString(sha.ComputeHash(bytes)).ToLower();
-                return hash == hashAlmacenado;
+                // Comparación constant-time para evitar timing attacks
+                return CryptographicOperations.FixedTimeEquals(
+                    Encoding.UTF8.GetBytes(hash),
+                    Encoding.UTF8.GetBytes(hashAlmacenado));
             }
         }
 

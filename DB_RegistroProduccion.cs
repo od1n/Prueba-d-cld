@@ -54,7 +54,10 @@ namespace SistemaGestion
         public decimal CantPrimera     { get; set; }
         public decimal CantSegunda     { get; set; }
         public decimal CantReciclado   { get; set; }
+        /// <summary>Piezas defectuosas: se registran pero NO se suman al inventario bueno.</summary>
+        public decimal CantDefectuosas { get; set; }
 
+        /// <summary>Total de piezas buenas (excluye defectuosas).</summary>
         public decimal CantTotal => CantPrimera + CantSegunda + CantReciclado;
     }
 
@@ -269,8 +272,8 @@ namespace SistemaGestion
                     ins.CommandText = @"
                         INSERT INTO DetalleProduccionMolde
                             (IdRegistro,CodigoMolde,CodigoProducto,Cantidad,
-                             CantPrimera,CantSegunda,CantReciclado)
-                        VALUES ($ir,$cm,$cp,$ca,$cp1,$cs,$cr)";
+                             CantPrimera,CantSegunda,CantReciclado,CantDefectuosas)
+                        VALUES ($ir,$cm,$cp,$ca,$cp1,$cs,$cr,$cd)";
                     ins.Parameters.AddWithValue("$ir",  reg.Id);
                     ins.Parameters.AddWithValue("$cm",  m.CodigoMolde);
                     ins.Parameters.AddWithValue("$cp",  m.CodigoProducto ?? "");
@@ -278,6 +281,7 @@ namespace SistemaGestion
                     ins.Parameters.AddWithValue("$cp1", (double)m.CantPrimera);
                     ins.Parameters.AddWithValue("$cs",  (double)m.CantSegunda);
                     ins.Parameters.AddWithValue("$cr",  (double)m.CantReciclado);
+                    ins.Parameters.AddWithValue("$cd",  (double)m.CantDefectuosas);
                     ins.ExecuteNonQuery();
                 }
 
@@ -442,7 +446,8 @@ namespace SistemaGestion
                        d.Cantidad,
                        COALESCE(d.CantPrimera,0),
                        COALESCE(d.CantSegunda,0),
-                       COALESCE(d.CantReciclado,0)
+                       COALESCE(d.CantReciclado,0),
+                       COALESCE(d.CantDefectuosas,0)
                 FROM DetalleProduccionMolde d
                 LEFT JOIN TbMoldes  m ON m.CodigoMold = d.CodigoMolde
                 LEFT JOIN Inventario i ON i.Codigo    = d.CodigoProducto
@@ -451,16 +456,17 @@ namespace SistemaGestion
             using var r = cmd.ExecuteReader();
             while (r.Read())
                 list.Add(new DetalleProduccionMolde {
-                    Id             = r.GetInt32(0),
-                    IdRegistro     = r.GetInt32(1),
-                    CodigoMolde    = S(r,2),
-                    DescMolde      = S(r,3),
-                    CodigoProducto = S(r,4),
-                    DescProducto   = S(r,5),
-                    Cantidad       = D(r,6),
-                    CantPrimera    = D(r,7),
-                    CantSegunda    = D(r,8),
-                    CantReciclado  = D(r,9)
+                    Id              = r.GetInt32(0),
+                    IdRegistro      = r.GetInt32(1),
+                    CodigoMolde     = S(r,2),
+                    DescMolde       = S(r,3),
+                    CodigoProducto  = S(r,4),
+                    DescProducto    = S(r,5),
+                    Cantidad        = D(r,6),
+                    CantPrimera     = D(r,7),
+                    CantSegunda     = D(r,8),
+                    CantReciclado   = D(r,9),
+                    CantDefectuosas = D(r,10)
                 });
             return list;
         }
@@ -587,6 +593,31 @@ namespace SistemaGestion
             cmd.Parameters.AddWithValue("$d",  desde.ToString("yyyy-MM-dd"));
             cmd.Parameters.AddWithValue("$h",  hasta.ToString("yyyy-MM-dd"));
             return D(cmd.ExecuteScalar());
+        }
+
+        // ── Migración v25: campo CantDefectuosas ──────────────────────────
+        /// <summary>
+        /// Agrega la columna CantDefectuosas a DetalleProduccionMolde.
+        /// Las piezas defectuosas se registran pero NO se suman al inventario.
+        /// Llamado desde MigrarEsquema() en DB.cs cuando versionActual &lt; 25.
+        /// </summary>
+        public static void MigrarV25(SqliteConnection conn, SqliteTransaction tx)
+        {
+            // AlterTableSafe ignora el error si la columna ya existe
+            var cmd = conn.CreateCommand();
+            cmd.Transaction = tx;
+            try
+            {
+                cmd.CommandText =
+                    "ALTER TABLE DetalleProduccionMolde ADD COLUMN CantDefectuosas REAL DEFAULT 0";
+                cmd.ExecuteNonQuery();
+            }
+            catch (Exception ex)
+            {
+                if (!ex.Message.Contains("duplicate column") &&
+                    !ex.Message.Contains("already has a column"))
+                    throw;
+            }
         }
     }
 }

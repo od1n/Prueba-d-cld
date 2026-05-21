@@ -1595,5 +1595,36 @@ namespace SistemaGestion
 
             DatabaseService.RegistrarAuditoria("PDF_IMPRESO", "Facturas", nombreTmp);
         }
+
+        /// <summary>
+        /// Muestra un diálogo Guardar y devuelve la ruta elegida, o string vacío si se canceló.
+        /// Usado por servicios PDF que escriben directamente al disco (ej. PdfService_ISLR).
+        /// </summary>
+        public static string GuardarRuta(string nombreSugerido)
+        {
+            var dlg = new System.Windows.Forms.SaveFileDialog
+            {
+                Title      = "Guardar PDF",
+                Filter     = "PDF (*.pdf)|*.pdf",
+                FileName   = nombreSugerido,
+                DefaultExt = "pdf"
+            };
+            return dlg.ShowDialog() == System.Windows.Forms.DialogResult.OK
+                ? dlg.FileName
+                : string.Empty;
+        }
+
+        /// <summary>
+        /// Abre un archivo PDF (u otro) con el visor predeterminado del sistema.
+        /// </summary>
+        public static void Abrir(string ruta)
+        {
+            if (string.IsNullOrEmpty(ruta) || !File.Exists(ruta)) return;
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName        = ruta,
+                UseShellExecute = true
+            });
+        }
     }
 }

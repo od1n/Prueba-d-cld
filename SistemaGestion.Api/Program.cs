@@ -111,12 +111,42 @@ builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
 
 // Rate limiting para evitar fuerza bruta sobre /api/login (defensa adicional
 // al bloqueo por usuario que ya hace AuthEndpoints).
+// HttpClient para proxy hacia el digitalizador Python (:8080)
+builder.Services.AddHttpClient("digitalizador", c =>
+{
+    c.Timeout = TimeSpan.FromSeconds(120); // extracción IA puede tardar
+});
+
+// HttpClient para proxy hacia Anthropic (asistente de ayuda)
+builder.Services.AddHttpClient("anthropic", c =>
+{
+    c.Timeout = TimeSpan.FromSeconds(60);
+    c.BaseAddress = new Uri("https://api.anthropic.com");
+});
+
+// Necesario para IFormFile en Minimal APIs (.DisableAntiforgery() en cada endpoint)
+builder.Services.AddAntiforgery();
+
 builder.Services.AddRateLimiter(options =>
 {
     options.AddFixedWindowLimiter("login", o =>
     {
         o.PermitLimit = 10;                      // 10 intentos
         o.Window      = TimeSpan.FromMinutes(1); //   por minuto
+        o.QueueLimit  = 0;
+    });
+    // Endpoint de extracción IA — costoso en créditos/GPU
+    options.AddFixedWindowLimiter("ia-extraccion", o =>
+    {
+        o.PermitLimit = 10;                      // 10 llamadas
+        o.Window      = TimeSpan.FromMinutes(1); //   por minuto
+        o.QueueLimit  = 0;
+    });
+    // Asistente de ayuda Claude Opus — costoso en tokens
+    options.AddFixedWindowLimiter("ayuda-opus", o =>
+    {
+        o.PermitLimit = 20;                       // 20 mensajes
+        o.Window      = TimeSpan.FromMinutes(5);  //   cada 5 minutos
         o.QueueLimit  = 0;
     });
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -131,16 +161,17 @@ app.Use(async (ctx, next) =>
     h["X-Content-Type-Options"]   = "nosniff";
     h["X-Frame-Options"]          = "DENY";
     h["Referrer-Policy"]          = "strict-origin-when-cross-origin";
-    h["Permissions-Policy"]       = "geolocation=(), microphone=(), camera=()";
+    h["Permissions-Policy"]       = "geolocation=(), microphone=(), camera=(self)";
     // CSP: el portal no carga scripts externos salvo Google Fonts (CSS).
     // Se permite 'unsafe-inline' temporalmente porque las páginas aún tienen
-    // <script> embebido — eliminar cuando se migre a archivos .js externos.
+    // Todo el JS está en archivos externos — 'unsafe-inline' eliminado de script-src.
     h["Content-Security-Policy"]  =
         "default-src 'self'; " +
-        "script-src 'self' 'unsafe-inline'; " +
+        "script-src 'self'; " +
         "style-src  'self' 'unsafe-inline' https://fonts.googleapis.com; " +
         "font-src   'self' https://fonts.gstatic.com; " +
-        "img-src    'self' data:; " +
+        "img-src    'self' data: blob:; " +
+        "media-src  'self' blob:; " +
         "connect-src 'self'; " +
         "frame-ancestors 'none'; " +
         "base-uri 'self';";
@@ -160,12 +191,25 @@ app.Use(async (ctx, next) =>
     await next();
 });
 
-// HSTS + redirect HTTPS — orden importa: antes de StaticFiles y endpoints.
-// HSTS sólo se emite en respuestas HTTPS, así que es seguro activarlo siempre
-// (no afecta a peticiones HTTP). En LAN privada no hay riesgo de "lock-out".
-app.UseHsts();
-try { app.UseHttpsRedirection(); }
-catch (Exception ex) { Console.WriteLine($"[API] HTTPS redirect deshabilitado: {ex.Message}"); }
+// HSTS + redirect HTTPS:
+//   En entorno Test se omiten completamente.
+//   En LAN el redirect se puede deshabilitar via variable de entorno
+//   SG_HTTPS_REDIRECT=false para que los celulares Android puedan
+//   conectarse por HTTP sin que el cert auto-firmado bloquee el handshake.
+var httpsRedirect = !string.Equals(
+    Environment.GetEnvironmentVariable("SG_HTTPS_REDIRECT"), "false",
+    StringComparison.OrdinalIgnoreCase);
+
+if (!app.Environment.IsEnvironment("Test") && httpsRedirect)
+{
+    app.UseHsts();
+    try { app.UseHttpsRedirection(); }
+    catch (Exception ex) { Console.WriteLine($"[API] HTTPS redirect deshabilitado: {ex.Message}"); }
+}
+else if (!httpsRedirect)
+{
+    Console.WriteLine("[API] HTTPS redirect desactivado (SG_HTTPS_REDIRECT=false).");
+}
 
 app.UseStaticFiles(new Microsoft.AspNetCore.Builder.StaticFileOptions
 {
@@ -180,7 +224,9 @@ app.UseStaticFiles(new Microsoft.AspNetCore.Builder.StaticFileOptions
     }
 });
 app.UseCors();
-app.UseRateLimiter();
+// En entorno Test se omite el rate limiter para que los tests no se bloqueen entre sí.
+if (!app.Environment.IsEnvironment("Test"))
+    app.UseRateLimiter();
 app.UseAuthentication();
 
 // ── Validación de revocación (jti) ─────────────────────────────────────────
@@ -210,9 +256,12 @@ app.Use(async (ctx, next) =>
 
 app.UseAuthorization();
 
-// Inicializar BD — misma ruta que el sistema de escritorio
+// Inicializar BD — misma ruta que el sistema de escritorio.
+// En entorno Test se puede sobreescribir via variable de entorno SG_TEST_BD
+// para apuntar a una BD SQLite temporal creada por los tests.
 var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-var rutaBD  = Path.Combine(appData, "SistemaGestion", "sistema_gestion.db");
+var rutaBD  = Environment.GetEnvironmentVariable("SG_TEST_BD")
+           ?? Path.Combine(appData, "SistemaGestion", "sistema_gestion.db");
 try
 {
     Db.Inicializar(rutaBD);
@@ -220,6 +269,12 @@ try
 
     // Asegurar tabla de sesiones activas (para revocación de tokens).
     Db.EnsureSesionesActivas();
+
+    // Asegurar tabla de detalle de egresos (líneas de factura de compra).
+    Db.EnsureDetallesGasto();
+
+    // Asegurar tabla de configuración del portal (backend OCR, etc.).
+    Db.EnsureConfiguracionPortal();
 
     // Limpieza inicial de sesiones expiradas hace > 24h.
     var limpiadas = SistemaGestion.Api.Auth.SesionesActivas.LimpiarExpiradas();
@@ -244,6 +299,9 @@ app.MapInventarioEndpoints();
 app.MapKardexEndpoints();
 app.MapClientesEndpoints();
 app.MapFacturasEndpoints();
+app.MapProduccionEndpoints();
+app.MapAyudaEndpoints();
+app.MapEgresosEndpoints();
 app.MapGet("/", ctx => { ctx.Response.Redirect("/index.html"); return Task.CompletedTask; });
 
 Console.WriteLine("[API] Portal móvil corriendo:");
@@ -256,6 +314,11 @@ static bool EsLan(System.Net.IPAddress? ip)
 {
     if (ip is null) return true;
     if (System.Net.IPAddress.IsLoopback(ip)) return true;
+
+    // Kestrel en modo dual-stack recibe IPv4 del celular como ::ffff:192.168.x.x
+    // (IPv4-mapped IPv6). Hay que desempaquetarla antes de validar.
+    if (ip.IsIPv4MappedToIPv6)
+        return EsLan(ip.MapToIPv4());
 
     if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
     {
@@ -274,3 +337,7 @@ static bool EsLan(System.Net.IPAddress? ip)
     }
     return false;
 }
+
+// Expone la clase Program implícita para WebApplicationFactory<Program> en los tests.
+// Debe ir DESPUÉS de todas las instrucciones y funciones de nivel superior.
+public partial class Program { }

@@ -43,3 +43,8 @@ winforms-patterns/
 # Documentos Word (revisiones de seguridad, notas internas).
 # Si querés versionar uno específico, agregalo bajo docs/ y excluilo aquí.
 *.docx
+
+# Variables de entorno — NUNCA deben commitearse (contienen API keys)
+.env
+*.env
+digitalizador/.env

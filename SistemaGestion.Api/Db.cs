@@ -93,6 +93,104 @@ namespace SistemaGestion.Api
             }
         }
 
+        /// <summary>
+        /// Crea la tabla DetallesGasto si no existe.
+        /// Almacena las líneas de detalle de cada egreso (factura de compra).
+        /// IdArticulo es FK nullable a ProductosProveedor — nulo cuando el ítem
+        /// no está en catálogo y se guarda como texto libre en Descripcion.
+        /// EsInventariable = 1 cuando TipoInsumo == 'Materia prima':
+        /// al confirmar el egreso el API actualiza stock + CPP en MovimientosInventario.
+        /// Idempotente.
+        /// </summary>
+        public static void EnsureDetallesGasto()
+        {
+            try
+            {
+                using var c = Conn();
+                using var cmd = c.CreateCommand();
+                cmd.CommandText = @"
+                    CREATE TABLE IF NOT EXISTS DetallesGasto (
+                        Id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                        IdGasto         INTEGER NOT NULL,
+                        Descripcion     TEXT    NOT NULL,
+                        IdArticulo      INTEGER,
+                        CodigoInterno   TEXT,
+                        TipoInsumo      TEXT,
+                        EsInventariable INTEGER NOT NULL DEFAULT 0,
+                        Cantidad        REAL    NOT NULL DEFAULT 0,
+                        PrecioUnitario  REAL    NOT NULL DEFAULT 0,
+                        Subtotal        REAL    NOT NULL DEFAULT 0,
+                        FOREIGN KEY (IdGasto) REFERENCES Gastos(Id) ON DELETE CASCADE
+                    );
+                    CREATE INDEX IF NOT EXISTS IX_DetallesGasto_Gasto
+                        ON DetallesGasto(IdGasto);
+                    CREATE INDEX IF NOT EXISTS IX_DetallesGasto_Articulo
+                        ON DetallesGasto(IdArticulo);";
+                cmd.ExecuteNonQuery();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[API] WARN EnsureDetallesGasto: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Crea la tabla ConfiguracionPortal (clave/valor) y garantiza el valor
+        /// por defecto de vision_backend = ollama. Idempotente.
+        /// </summary>
+        public static void EnsureConfiguracionPortal()
+        {
+            try
+            {
+                using var c = Conn();
+                using var cmd = c.CreateCommand();
+                cmd.CommandText = @"
+                    CREATE TABLE IF NOT EXISTS ConfiguracionPortal (
+                        Clave              TEXT PRIMARY KEY,
+                        Valor              TEXT NOT NULL,
+                        FechaActualizacion TEXT
+                    );
+                    INSERT OR IGNORE INTO ConfiguracionPortal (Clave, Valor, FechaActualizacion)
+                    VALUES ('vision_backend', 'ollama', datetime('now','localtime'));";
+                cmd.ExecuteNonQuery();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[API] WARN EnsureConfiguracionPortal: {ex.Message}");
+            }
+        }
+
+        /// <summary>Lee un valor de ConfiguracionPortal. Devuelve defaultVal si no existe.</summary>
+        public static string GetConfig(string clave, string defaultVal = "")
+        {
+            try
+            {
+                using var c = Conn();
+                using var cmd = c.CreateCommand();
+                cmd.CommandText = "SELECT Valor FROM ConfiguracionPortal WHERE Clave = @k;";
+                cmd.Parameters.AddWithValue("@k", clave);
+                var val = cmd.ExecuteScalar();
+                return val is null || val is DBNull ? defaultVal : val.ToString()!;
+            }
+            catch { return defaultVal; }
+        }
+
+        /// <summary>Actualiza o inserta un valor en ConfiguracionPortal.</summary>
+        public static void SetConfig(string clave, string valor)
+        {
+            using var c = Conn();
+            using var cmd = c.CreateCommand();
+            cmd.CommandText = @"
+                INSERT INTO ConfiguracionPortal (Clave, Valor, FechaActualizacion)
+                VALUES (@k, @v, datetime('now','localtime'))
+                ON CONFLICT(Clave) DO UPDATE SET
+                    Valor = excluded.Valor,
+                    FechaActualizacion = excluded.FechaActualizacion;";
+            cmd.Parameters.AddWithValue("@k", clave);
+            cmd.Parameters.AddWithValue("@v", valor);
+            cmd.ExecuteNonQuery();
+        }
+
         // ── Helpers ───────────────────────────────────────────────────────
         public static string S(SqliteDataReader r, int i) =>
             r.IsDBNull(i) ? "" : r.GetString(i);

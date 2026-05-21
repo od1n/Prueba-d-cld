@@ -8,11 +8,13 @@ namespace SistemaGestion
 {
     public static class OllamaService
     {
-        private static readonly HttpClient _http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        // Timeout generoso: los modelos locales pueden tardar varios segundos en responder.
+        private static readonly HttpClient _http = new HttpClient { Timeout = TimeSpan.FromSeconds(120) };
 
         /// <summary>
-        /// Envía un prompt a un servidor Ollama local y devuelve la respuesta en bruto.
-        /// Endpoint asumido: http://localhost:11434/api/generate
+        /// Envía un prompt a un servidor Ollama local y devuelve el texto generado.
+        /// Usa stream:false para recibir una única respuesta JSON completa.
+        /// Endpoint: http://localhost:11434/api/generate
         /// </summary>
         public static async Task<string> GenerateAsync(string model, string prompt, int maxTokens = 512)
         {
@@ -24,7 +26,8 @@ namespace SistemaGestion
             {
                 model,
                 prompt,
-                max_tokens = maxTokens
+                stream = false,          // respuesta JSON única (no NDJSON streaming)
+                options = new { num_predict = maxTokens }
             };
 
             var json = JsonSerializer.Serialize(payload);
@@ -34,23 +37,28 @@ namespace SistemaGestion
             var text = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
 
             if (!resp.IsSuccessStatusCode)
-                throw new Exception($"Ollama returned {(int)resp.StatusCode}: {text}");
+                throw new Exception($"Ollama devolvió {(int)resp.StatusCode}: {text}");
 
-            // Intentar extraer un campo 'text' si la respuesta es JSON; si no, devolver la respuesta cruda.
+            // La API de Ollama devuelve: {"model":"...","response":"texto generado","done":true,...}
             try
             {
                 using var doc = JsonDocument.Parse(text);
-                if (doc.RootElement.ValueKind == JsonValueKind.Object && doc.RootElement.TryGetProperty("text", out var t))
+                if (doc.RootElement.ValueKind == JsonValueKind.Object)
                 {
-                    return t.GetString() ?? text;
+                    // stream:false → campo "response" con el texto completo
+                    if (doc.RootElement.TryGetProperty("response", out var r))
+                        return r.GetString()?.Trim() ?? text;
+                    // fallback por si cambia la API
+                    if (doc.RootElement.TryGetProperty("text", out var t))
+                        return t.GetString()?.Trim() ?? text;
                 }
             }
             catch
             {
-                // ignorar parse errors y devolver el texto tal cual
+                // Si no es JSON válido devolvemos el texto crudo (poco probable con stream:false)
             }
 
-            return text;
+            return text.Trim();
         }
 
         /// <summary>
