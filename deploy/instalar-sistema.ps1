@@ -1,4 +1,4 @@
-# ============================================================
+﻿# ============================================================
 #  instalar-sistema.ps1
 #  Script de instalación y configuración — SistemaGestion
 #  Ejecutar como Administrador en Windows 10/11 x64
