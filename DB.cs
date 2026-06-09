@@ -1476,11 +1476,28 @@ namespace SistemaGestion
                             FOREIGN KEY(IdProducto)  REFERENCES ProductosProveedor(Id),
                             FOREIGN KEY(IdProveedor) REFERENCES Proveedores(Codigo)
                         );");
-                    // Paso 2: agregar TipoInsumo si la tabla ya existía sin ella
-                    // (DBs creadas antes de que se introdujera esta columna)
+                    // Paso 2: columnas que pueden faltar en DBs con tabla pre-existente
+                    AlterTableSafe(conn, tx,
+                        "ALTER TABLE ProductosProveedor ADD COLUMN CodigoProveedor TEXT");
+                    AlterTableSafe(conn, tx,
+                        "ALTER TABLE ProductosProveedor ADD COLUMN IdProveedorPrinc INTEGER");
                     AlterTableSafe(conn, tx,
                         "ALTER TABLE ProductosProveedor ADD COLUMN TipoInsumo TEXT NOT NULL DEFAULT 'Materia prima'");
-                    // Paso 3: índices (idempotente)
+                    AlterTableSafe(conn, tx,
+                        "ALTER TABLE ProductosProveedor ADD COLUMN Unidad TEXT NOT NULL DEFAULT 'kg'");
+                    AlterTableSafe(conn, tx,
+                        "ALTER TABLE ProductosProveedor ADD COLUMN PrecioUltCompra REAL DEFAULT 0");
+                    AlterTableSafe(conn, tx,
+                        "ALTER TABLE ProductosProveedor ADD COLUMN PrecioPromedio REAL DEFAULT 0");
+                    AlterTableSafe(conn, tx,
+                        "ALTER TABLE ProductosProveedor ADD COLUMN StockActual REAL DEFAULT 0");
+                    AlterTableSafe(conn, tx,
+                        "ALTER TABLE ProductosProveedor ADD COLUMN StockMinimo REAL DEFAULT 0");
+                    AlterTableSafe(conn, tx,
+                        "ALTER TABLE ProductosProveedor ADD COLUMN Activo INTEGER DEFAULT 1");
+                    AlterTableSafe(conn, tx,
+                        "ALTER TABLE ProductosProveedor ADD COLUMN Observaciones TEXT");
+                    // Paso 3: índices (idempotente — columnas garantizadas arriba)
                     EjecutarSql(conn, tx,
                         "CREATE INDEX IF NOT EXISTS idx_pp_tipo ON ProductosProveedor(TipoInsumo);");
                     EjecutarSql(conn, tx,
@@ -5563,33 +5580,4 @@ namespace SistemaGestion
         public DateTime? UltimoAcceso        { get; set; }
         /// <summary>True si el usuario debe cambiar la contraseña en el próximo login.</summary>
         public bool   RequiereCambioPassword { get; set; }
-        /// <summary>Intentos de login fallidos hoy (reset al login exitoso).</summary>
-        public int    IntentosHoy            { get; set; }
-        /// <summary>Si no null, el usuario está bloqueado hasta esta fecha/hora.</summary>
-        public DateTime? BloqueadoHasta      { get; set; }
-
-        // ── Helpers de rol ───────────────────────────────────────────────
-        /// <summary>True si el usuario tiene rol Admin.</summary>
-        public bool EsAdmin => Rol == "Admin";
-
-        /// <summary>True si el usuario tiene el rol especificado.</summary>
-        public bool TieneRol(string rol) =>
-            string.Equals(Rol, rol, StringComparison.OrdinalIgnoreCase);
-
-        /// <summary>Descripción legible del rol para mostrar en la UI.</summary>
-        public string RolesDescripcion => Rol ?? "(sin rol)";
-
-        /// <summary>
-        /// CSV de roles. Asignar este campo actualiza Rol automáticamente.
-        /// Mantiene compatibilidad con código que usaba multi-rol.
-        /// </summary>
-        public string RolesCSV
-        {
-            get => Rol ?? "";
-            set => Rol = string.IsNullOrWhiteSpace(value) ? "" : value.Split(',')[0].Trim();
-        }
-    }
-
-
-
-}
+        /// <summary>Intentos de login fallidos hoy (reset al login exitoso).</summar
