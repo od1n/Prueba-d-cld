@@ -54,7 +54,7 @@ try {
     $dotnetUrl = "https://dot.net/v1/dotnet-install.ps1"
     $dotnetScript = "$env:TEMP\dotnet-install.ps1"
     Invoke-WebRequest -Uri $dotnetUrl -OutFile $dotnetScript -UseBasicParsing
-    & $dotnetScript -Channel 8.0 -Runtime dotnet
+    & $dotnetScript -Channel 8.0  # SDK completo (incluye runtime + dotnet publish)
     $env:PATH = "$env:LOCALAPPDATA\Microsoft\dotnet;$env:PATH"
     Ok ".NET 8 instalado."
 }
