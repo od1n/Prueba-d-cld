@@ -340,3 +340,10 @@ static bool EsLan(System.Net.IPAddress? ip)
             || ip.IsIPv6SiteLocal
             || ip.GetAddressBytes()[0] == 0xfc      // ULA fc00::/7
             || ip.GetAddressBytes()[0] == 0xfd;
+    }
+    return false;
+}
+
+// Expone la clase Program implícita para WebApplicationFactory<Program> en los tests.
+// Debe ir DESPUÉS de todas las instrucciones y funciones de nivel superior.
+public partial class Program { }
