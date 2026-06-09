@@ -1450,7 +1450,8 @@ namespace SistemaGestion
 
                 if (versionActual < 13)
                 {
-                    EjecutarMigracion(conn, tx, 13, @"
+                    // Paso 1: crear tablas (idempotente)
+                    EjecutarSql(conn, tx, @"
                         CREATE TABLE IF NOT EXISTS ProductosProveedor (
                             Id               INTEGER PRIMARY KEY AUTOINCREMENT,
                             CodigoInterno    TEXT    NOT NULL UNIQUE,
@@ -1474,12 +1475,17 @@ namespace SistemaGestion
                             PRIMARY KEY(IdProducto, IdProveedor),
                             FOREIGN KEY(IdProducto)  REFERENCES ProductosProveedor(Id),
                             FOREIGN KEY(IdProveedor) REFERENCES Proveedores(Codigo)
-                        );
-                        CREATE INDEX IF NOT EXISTS idx_pp_tipo
-                            ON ProductosProveedor(TipoInsumo);
-                        CREATE INDEX IF NOT EXISTS idx_pp_prov
-                            ON ProductosProveedor(IdProveedorPrinc);
-                    ");
+                        );");
+                    // Paso 2: agregar TipoInsumo si la tabla ya existía sin ella
+                    // (DBs creadas antes de que se introdujera esta columna)
+                    AlterTableSafe(conn, tx,
+                        "ALTER TABLE ProductosProveedor ADD COLUMN TipoInsumo TEXT NOT NULL DEFAULT 'Materia prima'");
+                    // Paso 3: índices (idempotente)
+                    EjecutarSql(conn, tx,
+                        "CREATE INDEX IF NOT EXISTS idx_pp_tipo ON ProductosProveedor(TipoInsumo);");
+                    EjecutarSql(conn, tx,
+                        "CREATE INDEX IF NOT EXISTS idx_pp_prov ON ProductosProveedor(IdProveedorPrinc);");
+                    SetSchemaVersion(conn, tx, 13);
                 }
 
                                 if (versionActual < 12)
@@ -5538,20 +5544,4 @@ namespace SistemaGestion
         public bool TieneRol(string rol) =>
             string.Equals(Rol, rol, StringComparison.OrdinalIgnoreCase);
 
-        /// <summary>Descripción legible del rol para mostrar en la UI.</summary>
-        public string RolesDescripcion => Rol ?? "(sin rol)";
-
-        /// <summary>
-        /// CSV de roles. Asignar este campo actualiza Rol automáticamente.
-        /// Mantiene compatibilidad con código que usaba multi-rol.
-        /// </summary>
-        public string RolesCSV
-        {
-            get => Rol ?? "";
-            set => Rol = string.IsNullOrWhiteSpace(value) ? "" : value.Split(',')[0].Trim();
-        }
-    }
-
-
-
-}
+        /// <summary>Descripción leg
