@@ -262,4 +262,9 @@ namespace SistemaGestion
             string rutaHash = rutaArchivo + ".sha256";
             if (!File.Exists(rutaHash)) return false;
 
-            s
+            string hashGuardado = File.ReadAllText(rutaHash).Trim();
+            string hashActual   = CalcularHash(rutaArchivo);
+            return string.Equals(hashGuardado, hashActual, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+}
