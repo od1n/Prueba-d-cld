@@ -5544,4 +5544,52 @@ namespace SistemaGestion
                 //  TasaConsulta : ver tasa actual y consultar histórico
                 //  TasaIngreso  : ingresar tasa nueva del día (no existe aún)
                 //  TasaModificar: sobrescribir tasa ya registrada (sensible)
-                //  Solo Admin ti
+                //  Solo Admin tiene los 3 implícitamente. El resto se asigna
+                //  por rol arriba según la responsabilidad operativa.
+                _ => false
+            };
+        }
+    }
+
+    public class Usuario
+    {
+        public int    Id                     { get; set; }
+        public string NombreUsuario          { get; set; }
+        public string NombreCompleto         { get; set; }
+        public string PasswordHash           { get; set; }
+        public string Rol                    { get; set; }
+        public bool   Activo                 { get; set; }
+        public DateTime  FechaCreacion       { get; set; }
+        public DateTime? UltimoAcceso        { get; set; }
+        /// <summary>True si el usuario debe cambiar la contraseña en el próximo login.</summary>
+        public bool   RequiereCambioPassword { get; set; }
+        /// <summary>Intentos de login fallidos hoy (reset al login exitoso).</summary>
+        public int    IntentosHoy            { get; set; }
+        /// <summary>Si no null, el usuario está bloqueado hasta esta fecha/hora.</summary>
+        public DateTime? BloqueadoHasta      { get; set; }
+
+        // ── Helpers de rol ───────────────────────────────────────────────
+        /// <summary>True si el usuario tiene rol Admin.</summary>
+        public bool EsAdmin => Rol == "Admin";
+
+        /// <summary>True si el usuario tiene el rol especificado.</summary>
+        public bool TieneRol(string rol) =>
+            string.Equals(Rol, rol, StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>Descripción legible del rol para mostrar en la UI.</summary>
+        public string RolesDescripcion => Rol ?? "(sin rol)";
+
+        /// <summary>
+        /// CSV de roles. Asignar este campo actualiza Rol automáticamente.
+        /// Mantiene compatibilidad con código que usaba multi-rol.
+        /// </summary>
+        public string RolesCSV
+        {
+            get => Rol ?? "";
+            set => Rol = string.IsNullOrWhiteSpace(value) ? "" : value.Split(',')[0].Trim();
+        }
+    }
+
+
+
+}
