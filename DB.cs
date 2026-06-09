@@ -5544,4 +5544,20 @@ namespace SistemaGestion
         public bool TieneRol(string rol) =>
             string.Equals(Rol, rol, StringComparison.OrdinalIgnoreCase);
 
-        /// <summary>Descripción leg
+        ible del rol para mostrar en la UI.</summary>
+        public string RolesDescripcion => Rol ?? "(sin rol)";
+
+        /// <summary>
+        /// CSV de roles. Asignar este campo actualiza Rol automáticamente.
+        /// Mantiene compatibilidad con código que usaba multi-rol.
+        /// </summary>
+        public string RolesCSV
+        {
+            get => Rol ?? "";
+            set => Rol = string.IsNullOrWhiteSpace(value) ? "" : value.Split(',')[0].Trim();
+        }
+    }
+
+
+
+}
