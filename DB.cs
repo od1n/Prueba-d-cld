@@ -5544,7 +5544,7 @@ namespace SistemaGestion
         public bool TieneRol(string rol) =>
             string.Equals(Rol, rol, StringComparison.OrdinalIgnoreCase);
 
-        ible del rol para mostrar en la UI.</summary>
+        /// <summary>Descripción legible del rol para mostrar en la UI.</summary>
         public string RolesDescripcion => Rol ?? "(sin rol)";
 
         /// <summary>
