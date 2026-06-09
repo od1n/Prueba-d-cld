@@ -203,4 +203,6 @@ namespace SistemaGestion.Api
 
         /// <summary>Lee un INTEGER que puede ser Int64 (COUNT, SUM, MAX, etc.).</summary>
         public static int I2(SqliteDataReader r, int i) =>
-       
+            r.IsDBNull(i) ? 0 : (int)r.GetInt64(i);
+    }
+}

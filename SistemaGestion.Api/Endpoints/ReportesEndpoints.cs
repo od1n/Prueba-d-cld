@@ -220,29 +220,29 @@ namespace SistemaGestion.Api.Endpoints
                     ? $"Al {DateTime.Today:dd/MM/yyyy}"
                     : $"Del {d} al {h}";
 
-                string html = $"""
+                string html = $$"""
 <!DOCTYPE html><html lang="es"><head>
-<meta charset="UTF-8"><title>{titulo}</title>
+<meta charset="UTF-8"><title>{{titulo}}</title>
 <style>
-*{{box-sizing:border-box;margin:0;padding:0;font-family:'Segoe UI',Arial,sans-serif;font-size:10pt}}
-body{{padding:15mm 12mm;color:#111}}
-h1{{font-size:18pt;font-weight:700;margin-bottom:1mm}}
-.periodo{{color:#555;margin-bottom:6mm;font-size:10pt}}
-table{{width:100%;border-collapse:collapse;margin-bottom:6mm;font-size:9pt}}
-thead tr{{background:#1A4A8A;color:#fff}}
-th,td{{padding:2mm 3mm;text-align:left;border-bottom:1px solid #ddd}}
-.r{{text-align:right}}.bold{{font-weight:700}}
-tr:nth-child(even){{background:#f8f9fa}}
-.chip-rojo{{background:#f8d7da;color:#721c24;padding:0 3mm;border-radius:2mm;font-size:8pt}}
-.chip-verde{{background:#d4edda;color:#155724;padding:0 3mm;border-radius:2mm;font-size:8pt}}
-@media print{{body{{padding:8mm}}.no-print{{display:none!important}}}}
+*{box-sizing:border-box;margin:0;padding:0;font-family:'Segoe UI',Arial,sans-serif;font-size:10pt}
+body{padding:15mm 12mm;color:#111}
+h1{font-size:18pt;font-weight:700;margin-bottom:1mm}
+.periodo{color:#555;margin-bottom:6mm;font-size:10pt}
+table{width:100%;border-collapse:collapse;margin-bottom:6mm;font-size:9pt}
+thead tr{background:#1A4A8A;color:#fff}
+th,td{padding:2mm 3mm;text-align:left;border-bottom:1px solid #ddd}
+.r{text-align:right}.bold{font-weight:700}
+tr:nth-child(even){background:#f8f9fa}
+.chip-rojo{background:#f8d7da;color:#721c24;padding:0 3mm;border-radius:2mm;font-size:8pt}
+.chip-verde{background:#d4edda;color:#155724;padding:0 3mm;border-radius:2mm;font-size:8pt}
+@media print{body{padding:8mm}.no-print{display:none!important}}
 </style></head><body>
 <button class="no-print" onclick="window.print()"
   style="margin-bottom:8mm;padding:2mm 8mm;background:#1A4A8A;color:#fff;border:none;
          border-radius:4px;cursor:pointer;font-size:11pt">🖨 Imprimir</button>
-<h1>{titulo}</h1>
-<div class="periodo">{periodo} — Generado {DateTime.Now:dd/MM/yyyy HH:mm}</div>
-{tabla}
+<h1>{{titulo}}</h1>
+<div class="periodo">{{periodo}} — Generado {{DateTime.Now:dd/MM/yyyy HH:mm}}</div>
+{{tabla}}
 </body></html>
 """;
                 ctx.Response.ContentType = "text/html; charset=utf-8";
@@ -380,4 +380,3 @@ tr:nth-child(even){{background:#f8f9fa}}
         private static string H(string? s) => System.Web.HttpUtility.HtmlEncode(s ?? "");
     }
 }
-                        

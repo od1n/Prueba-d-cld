@@ -246,24 +246,24 @@ namespace SistemaGestion.Api.Endpoints
                     <td class="r">{l.cant*l.precio:N2}</td></tr>
                 """));
 
-                string html=$"""
+                string html=$$"""
 <!DOCTYPE html><html lang="es"><head>
-<meta charset="UTF-8"><title>Compra {H(numC)}</title>
+<meta charset="UTF-8"><title>Compra {{H(numC)}}</title>
 <style>
-*{{box-sizing:border-box;margin:0;padding:0;font-family:'Segoe UI',Arial,sans-serif;font-size:11pt}}
-body{{padding:20mm 15mm;color:#111}}
-.titulo{{font-size:20pt;font-weight:700;margin-bottom:2mm}}
-.sub{{color:#555;margin-bottom:6mm;font-size:10pt}}
-.grid2{{display:grid;grid-template-columns:1fr 1fr;gap:4mm;margin-bottom:6mm}}
-.campo{{margin-bottom:2mm}}.campo label{{font-weight:600;font-size:9pt;text-transform:uppercase;color:#555}}
-.campo p{{font-size:11pt}}
-table{{width:100%;border-collapse:collapse;margin-bottom:6mm}}
-thead tr{{background:#1A4A8A;color:#fff}}
-th,td{{padding:2mm 3mm;text-align:left;border-bottom:1px solid #ddd}}
-.r{{text-align:right}}.total-row td{{font-weight:700;font-size:12pt;border-top:2px solid #111}}
-.estado{{display:inline-block;padding:1mm 4mm;border-radius:3mm;font-weight:700;font-size:10pt;
-    background:{(abono>=total?"#d4edda":"#fff3cd")};color:{(abono>=total?"#155724":"#856404")}}}
-@media print{{body{{padding:10mm}}.no-print{{display:none!important}}}}
+*{box-sizing:border-box;margin:0;padding:0;font-family:'Segoe UI',Arial,sans-serif;font-size:11pt}
+body{padding:20mm 15mm;color:#111}
+.titulo{font-size:20pt;font-weight:700;margin-bottom:2mm}
+.sub{color:#555;margin-bottom:6mm;font-size:10pt}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:4mm;margin-bottom:6mm}
+.campo{margin-bottom:2mm}.campo label{font-weight:600;font-size:9pt;text-transform:uppercase;color:#555}
+.campo p{font-size:11pt}
+table{width:100%;border-collapse:collapse;margin-bottom:6mm}
+thead tr{background:#1A4A8A;color:#fff}
+th,td{padding:2mm 3mm;text-align:left;border-bottom:1px solid #ddd}
+.r{text-align:right}.total-row td{font-weight:700;font-size:12pt;border-top:2px solid #111}
+.estado{display:inline-block;padding:1mm 4mm;border-radius:3mm;font-weight:700;font-size:10pt;
+    background:{{(abono>=total?"#d4edda":"#fff3cd")}};color:{{(abono>=total?"#155724":"#856404")}}}
+@media print{body{padding:10mm}.no-print{display:none!important}}
 </style></head><body>
 <button class="no-print" onclick="window.print()"
   style="margin-bottom:8mm;padding:2mm 8mm;background:#1A4A8A;color:#fff;border:none;
@@ -272,25 +272,25 @@ th,td{{padding:2mm 3mm;text-align:left;border-bottom:1px solid #ddd}}
 <div class="sub">Sistema de Gestión — Portal Interno</div>
 <div class="grid2">
   <div>
-    <div class="campo"><label>N° Documento</label><p style="font-size:14pt;font-weight:700">{H(numC)}</p></div>
-    <div class="campo"><label>Fecha</label><p>{H(fecha)}</p></div>
-    <div class="campo"><label>Forma de pago</label><p>{H(fp)}</p></div>
+    <div class="campo"><label>N° Documento</label><p style="font-size:14pt;font-weight:700">{{H(numC)}}</p></div>
+    <div class="campo"><label>Fecha</label><p>{{H(fecha)}}</p></div>
+    <div class="campo"><label>Forma de pago</label><p>{{H(fp)}}</p></div>
   </div>
   <div>
-    <div class="campo"><label>Proveedor</label><p>{H(nomP)}</p></div>
-    <div class="campo"><label>Estado</label><p><span class="estado">{(abono>=total?"Pagada":"Pendiente")}</span></p></div>
+    <div class="campo"><label>Proveedor</label><p>{{H(nomP)}}</p></div>
+    <div class="campo"><label>Estado</label><p><span class="estado">{{(abono>=total?"Pagada":"Pendiente")}}</span></p></div>
   </div>
 </div>
 <table>
   <thead><tr><th>Código</th><th>Descripción</th><th class="r">Cant.</th><th class="r">P.Unit (USD)</th><th class="r">Subtotal (USD)</th></tr></thead>
-  <tbody>{filas}</tbody>
+  <tbody>{{filas}}</tbody>
   <tfoot>
-    <tr><td colspan='4' class='r'>IVA</td><td class='r'>{iva:N2}</td></tr>
-    <tr class='total-row'><td colspan='4' class='r'>TOTAL USD</td><td class='r'>{total:N2}</td></tr>
+    <tr><td colspan='4' class='r'>IVA</td><td class='r'>{{iva:N2}}</td></tr>
+    <tr class='total-row'><td colspan='4' class='r'>TOTAL USD</td><td class='r'>{{total:N2}}</td></tr>
   </tfoot>
 </table>
-{(string.IsNullOrWhiteSpace(obs)?""
-    :$"<div style='border:1px solid #ddd;padding:3mm;border-radius:2mm;font-size:10pt;color:#555'><strong>Observaciones:</strong> {H(obs)}</div>")}
+{{(string.IsNullOrWhiteSpace(obs)?""
+    :$"<div style='border:1px solid #ddd;padding:3mm;border-radius:2mm;font-size:10pt;color:#555'><strong>Observaciones:</strong> {H(obs)}</div>")}}
 </body></html>
 """;
                 ctx.Response.ContentType = "text/html; charset=utf-8";

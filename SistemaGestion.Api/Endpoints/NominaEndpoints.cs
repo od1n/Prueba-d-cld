@@ -416,38 +416,38 @@ namespace SistemaGestion.Api.Endpoints
                     """);
                 }
 
-                string html = $"""
+                string html = $$"""
 <!DOCTYPE html><html lang="es"><head>
-<meta charset="UTF-8"><title>Recibos de Pago — {H(desde)} al {H(hasta)}</title>
+<meta charset="UTF-8"><title>Recibos de Pago — {{H(desde)}} al {{H(hasta)}}</title>
 <style>
-*{{box-sizing:border-box;margin:0;padding:0;font-family:'Segoe UI',Arial,sans-serif;font-size:10pt}}
-body{{padding:10mm;color:#111}}
-.recibo{{border:1px solid #ccc;border-radius:4px;padding:6mm;margin-bottom:8mm;page-break-inside:avoid}}
-.rec-header{{display:flex;justify-content:space-between;align-items:flex-start;
-    border-bottom:2px solid #1A4A8A;padding-bottom:3mm;margin-bottom:4mm}}
-.dim{{color:#555;font-size:9pt}}
-table{{width:100%;border-collapse:collapse;font-size:9.5pt}}
-tr td{{padding:1.5mm 2mm}}
-.sec td{{background:#1A4A8A;color:#fff;padding:2mm}}
-.subtotal td{{border-top:1px solid #ccc;font-weight:600}}
-.neto td{{background:#e8f4e8;font-weight:700;font-size:11pt;padding:2mm}}
-.neto-bs td{{background:#f0f0f0;font-weight:600;font-size:10pt;padding:2mm}}
-.r{{text-align:right}}
-.firma{{display:flex;gap:10mm;margin-top:6mm}}
-.firma-box{{flex:1;border-top:1px solid #999;padding-top:2mm;font-size:9pt;color:#555;text-align:center}}
-@media print{{
-  body{{padding:5mm}}
-  .no-print{{display:none!important}}
-  .recibo{{margin-bottom:4mm}}
-}}
+*{box-sizing:border-box;margin:0;padding:0;font-family:'Segoe UI',Arial,sans-serif;font-size:10pt}
+body{padding:10mm;color:#111}
+.recibo{border:1px solid #ccc;border-radius:4px;padding:6mm;margin-bottom:8mm;page-break-inside:avoid}
+.rec-header{display:flex;justify-content:space-between;align-items:flex-start;
+    border-bottom:2px solid #1A4A8A;padding-bottom:3mm;margin-bottom:4mm}
+.dim{color:#555;font-size:9pt}
+table{width:100%;border-collapse:collapse;font-size:9.5pt}
+tr td{padding:1.5mm 2mm}
+.sec td{background:#1A4A8A;color:#fff;padding:2mm}
+.subtotal td{border-top:1px solid #ccc;font-weight:600}
+.neto td{background:#e8f4e8;font-weight:700;font-size:11pt;padding:2mm}
+.neto-bs td{background:#f0f0f0;font-weight:600;font-size:10pt;padding:2mm}
+.r{text-align:right}
+.firma{display:flex;gap:10mm;margin-top:6mm}
+.firma-box{flex:1;border-top:1px solid #999;padding-top:2mm;font-size:9pt;color:#555;text-align:center}
+@media print{
+  body{padding:5mm}
+  .no-print{display:none!important}
+  .recibo{margin-bottom:4mm}
+}
 </style></head><body>
 <button class="no-print" onclick="window.print()"
   style="margin-bottom:8mm;padding:2mm 8mm;background:#1A4A8A;color:#fff;border:none;
          border-radius:4px;cursor:pointer;font-size:11pt">🖨 Imprimir todos los recibos</button>
 <div class="no-print" style="margin-bottom:6mm;color:#555">
-  Período: {H(desde)} al {H(hasta)} — Tasa BCV: {tasa:N2} Bs/USD
+  Período: {{H(desde)}} al {{H(hasta)}} — Tasa BCV: {{tasa:N2}} Bs/USD
 </div>
-{recibos}
+{{recibos}}
 </body></html>
 """;
                 ctx.Response.ContentType = "text/html; charset=utf-8";
