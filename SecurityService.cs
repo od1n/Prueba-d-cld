@@ -27,9 +27,14 @@ namespace SistemaGestion
                 Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
                 APP_FOLDER);
 
-        /// <summary>Ruta completa de la base de datos.</summary>
+        /// <summary>
+        /// Ruta completa de la base de datos.
+        /// Si la variable de entorno SG_DB_PATH está definida se usa esa ruta
+        /// (permite compartir la BD en una carpeta de red).
+        /// </summary>
         public static string RutaBD =>
-            Path.Combine(CarpetaDatos, DB_FILENAME);
+            Environment.GetEnvironmentVariable("SG_DB_PATH")
+            ?? Path.Combine(CarpetaDatos, DB_FILENAME);
 
         /// <summary>Cadena de conexión SQLite lista para usar.</summary>
         public static string CadenaConexion =>
@@ -257,9 +262,4 @@ namespace SistemaGestion
             string rutaHash = rutaArchivo + ".sha256";
             if (!File.Exists(rutaHash)) return false;
 
-            string hashGuardado = File.ReadAllText(rutaHash).Trim();
-            string hashActual   = CalcularHash(rutaArchivo);
-            return string.Equals(hashGuardado, hashActual, StringComparison.OrdinalIgnoreCase);
-        }
-    }
-}
+            s

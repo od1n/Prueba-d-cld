@@ -120,17 +120,17 @@ async function apiGet(url) {
     return res.json();
 }
 
-async function apiPost(url, body) {
+async function apiPost(url, body, method = 'POST') {
     const res = await apiFetch(url, {
-        method: 'POST',
-        body: JSON.stringify(body)
+        method,
+        body: method === 'DELETE' ? undefined : JSON.stringify(body)
     });
     if (!res) return null;
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || `Error ${res.status}`);
     }
-    return res.json();
+    try { return await res.json(); } catch { return {}; }
 }
 
 // ── UI helpers ────────────────────────────────────────────────────────────
@@ -197,13 +197,16 @@ function renderTopbar(titulo) {
 
 function renderNav(activa) {
     const items = [
-        { id: 'dashboard', icon: '◉', label: 'Inicio',    href: '/pages/dashboard.html' },
-        { id: 'inventario',icon: '▦', label: 'Stock',     href: '/pages/inventario.html' },
-        { id: 'kardex',    icon: '⇅', label: 'Kardex',    href: '/pages/kardex.html' },
-        { id: 'clientes',  icon: '◎', label: 'Clientes',  href: '/pages/clientes.html' },
-        { id: 'facturas',  icon: '▤', label: 'Facturas',  href: '/pages/facturas.html' },
-        { id: 'egresos',   icon: '⊟', label: 'Compras',   href: '/pages/egresos.html' },
-        { id: 'produccion',icon: '⊡', label: 'Scan',      href: '/pages/digitalizador.html' },
+        { id: 'dashboard',  icon: '◉',  label: 'Inicio',   href: '/pages/dashboard.html' },
+        { id: 'inventario', icon: '▦',  label: 'Stock',    href: '/pages/inventario.html' },
+        { id: 'kardex',     icon: '⇅',  label: 'Kardex',   href: '/pages/kardex.html' },
+        { id: 'clientes',   icon: '◎',  label: 'Clientes', href: '/pages/clientes.html' },
+        { id: 'facturas',   icon: '▤',  label: 'Facturas', href: '/pages/facturas.html' },
+        { id: 'egresos',    icon: '⊟',  label: 'Egresos',  href: '/pages/egresos.html' },
+        { id: 'compras',    icon: '🛒', label: 'Compras',  href: '/pages/compras.html' },
+        { id: 'reportes',   icon: '📊', label: 'Reportes', href: '/pages/reportes.html' },
+        { id: 'nomina',     icon: '💰', label: 'Nómina',   href: '/pages/nomina.html' },
+        { id: 'produccion', icon: '⊡',  label: 'Scan',     href: '/pages/digitalizador.html' },
     ];
     return `
     <nav class="bottom-nav" role="navigation" aria-label="Navegación principal">
@@ -246,12 +249,4 @@ document.addEventListener('keydown', e => {
     }
 });
 
-// ── Kardex helpers ────────────────────────────────────────────────────────
-function tagTipo(tipo) {
-    const map = {
-        'ENTRADA': '<span class="tag tag-verde">ENTRADA</span>',
-        'SALIDA':  '<span class="tag tag-rojo">SALIDA</span>',
-        'AJUSTE':  '<span class="tag tag-naranja">AJUSTE</span>',
-    };
-    return map[tipo] || `<span class="tag">${esh(tipo)}</span>`;
-}
+// ── Kardex helpers ────────────────────────────────────────

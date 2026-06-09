@@ -257,10 +257,13 @@ app.Use(async (ctx, next) =>
 app.UseAuthorization();
 
 // Inicializar BD — misma ruta que el sistema de escritorio.
-// En entorno Test se puede sobreescribir via variable de entorno SG_TEST_BD
-// para apuntar a una BD SQLite temporal creada por los tests.
+// Prioridad:
+//   1) SG_DB_PATH  — ruta absoluta explícita (producción / red compartida)
+//   2) SG_TEST_BD  — ruta temporal en tests automatizados
+//   3) Default     — %AppData%\SistemaGestion\sistema_gestion.db
 var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-var rutaBD  = Environment.GetEnvironmentVariable("SG_TEST_BD")
+var rutaBD  = Environment.GetEnvironmentVariable("SG_DB_PATH")
+           ?? Environment.GetEnvironmentVariable("SG_TEST_BD")
            ?? Path.Combine(appData, "SistemaGestion", "sistema_gestion.db");
 try
 {
@@ -302,6 +305,9 @@ app.MapFacturasEndpoints();
 app.MapProduccionEndpoints();
 app.MapAyudaEndpoints();
 app.MapEgresosEndpoints();
+app.MapComprasEndpoints();
+app.MapReportesEndpoints();
+app.MapNominaEndpoints();
 app.MapGet("/", ctx => { ctx.Response.Redirect("/index.html"); return Task.CompletedTask; });
 
 Console.WriteLine("[API] Portal móvil corriendo:");
@@ -334,10 +340,3 @@ static bool EsLan(System.Net.IPAddress? ip)
             || ip.IsIPv6SiteLocal
             || ip.GetAddressBytes()[0] == 0xfc      // ULA fc00::/7
             || ip.GetAddressBytes()[0] == 0xfd;
-    }
-    return false;
-}
-
-// Expone la clase Program implícita para WebApplicationFactory<Program> en los tests.
-// Debe ir DESPUÉS de todas las instrucciones y funciones de nivel superior.
-public partial class Program { }

@@ -79,60 +79,53 @@ namespace SistemaGestion.Api.Endpoints
 
     public static class FacturasEndpoints
     {
+        // ── Número siguiente (formato NE-XXXX) ────────────────────────────
+        private static string ProximoNumero()
+        {
+            string prefix = "NE-";
+            using var c = Db.Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = @"SELECT NumeroF FROM Facturas
+                WHERE NumeroF LIKE $p ORDER BY NumeroF DESC LIMIT 1";
+            cmd.Parameters.AddWithValue("$p", prefix + "%");
+            var last = cmd.ExecuteScalar()?.ToString();
+            int next = 1;
+            if (!string.IsNullOrEmpty(last) && last.Length > prefix.Length)
+                if (int.TryParse(last.Substring(prefix.Length), out int n)) next = n + 1;
+            return $"{prefix}{next:D4}";
+        }
+
         public static void MapFacturasEndpoints(this WebApplication app)
         {
-            app.MapGet("/api/facturas", (string? cliente) =>
+            // ── GET lista ────────────────────────────────────────────────
+            app.MapGet("/api/facturas", (string? q, string? desde, string? hasta) =>
             {
                 using var c = Db.Conn();
                 var cmd = c.CreateCommand();
                 cmd.CommandText = @"SELECT NumeroF,Fecha,Codigo,TotalF,Abono,FormaDePago
-                    FROM Facturas ORDER BY Fecha DESC, NumeroF DESC LIMIT 50";
+                    FROM Facturas
+                    WHERE (Observaciones IS NULL OR Observaciones NOT LIKE 'ANULADA%')
+                    ORDER BY Fecha DESC, NumeroF DESC LIMIT 100";
                 var lista = new List<object>();
                 using var r = cmd.ExecuteReader();
                 while (r.Read())
                 {
-                    var cl = Db.S(r,2);
-                    if (!string.IsNullOrWhiteSpace(cliente) &&
-                        !cl.Contains(cliente, StringComparison.OrdinalIgnoreCase)) continue;
-                    decimal total=Db.D(r,3); decimal abono=Db.D(r,4);
-                    lista.Add(new { numeroF=Db.S(r,0), fecha=Db.S(r,1), cliente=cl,
+                    string numF = Db.S(r,0), fecha = Db.S(r,1), cl = Db.S(r,2);
+                    if (!string.IsNullOrWhiteSpace(q) &&
+                        !cl.Contains(q, StringComparison.OrdinalIgnoreCase) &&
+                        !numF.Contains(q, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (!string.IsNullOrWhiteSpace(desde) && string.Compare(fecha, desde) < 0) continue;
+                    if (!string.IsNullOrWhiteSpace(hasta) && string.Compare(fecha, hasta) > 0) continue;
+                    decimal total=Db.D(r,3), abono=Db.D(r,4);
+                    lista.Add(new { numeroF=numF, fecha, cliente=cl,
                         total, abono, saldo=total-abono, formaDePago=Db.S(r,5), pagada=abono>=total });
                 }
-                return Results.Ok(lista.Take(30).ToList());
+                return Results.Ok(lista);
             }).RequireAuthorization();
 
+            // ── GET detalle ───────────────────────────────────────────────
             app.MapGet("/api/facturas/{numero}", (string numero) =>
             {
                 using var c = Db.Conn();
                 var cmd = c.CreateCommand();
-                cmd.CommandText = @"SELECT NumeroF,Fecha,Codigo,TotalF,Abono,IvaF,FormaDePago,Observaciones,rowid
-                    FROM Facturas WHERE NumeroF=$n";
-                cmd.Parameters.AddWithValue("$n", numero);
-                using var r = cmd.ExecuteReader();
-                if (!r.Read()) return Results.NotFound(new { error = "Factura no encontrada." });
-                decimal total=Db.D(r,3); decimal abono=Db.D(r,4);
-                int rowid = Db.I(r,8);
-                var fact = new { numeroF=Db.S(r,0), fecha=Db.S(r,1), cliente=Db.S(r,2),
-                    total, abono, saldo=total-abono, iva=Db.D(r,5),
-                    formaDePago=Db.S(r,6), observaciones=Db.S(r,7), pagada=abono>=total };
-                r.Close();
-
-                var lineas = new List<object>();
-                var cmd2 = c.CreateCommand();
-                cmd2.CommandText = @"SELECT df.Codigo,i.Descripcion,df.Cantidad,i.Precio
-                    FROM DetallesFactura df
-                    LEFT JOIN Inventario i ON i.Codigo=df.Codigo
-                    WHERE df.IdFactura=$id";
-                cmd2.Parameters.AddWithValue("$id", rowid);
-                using var r2 = cmd2.ExecuteReader();
-                while (r2.Read())
-                {
-                    decimal cant=Db.D(r2,2); decimal precio=Db.D(r2,3);
-                    lineas.Add(new { codigoItem=Db.S(r2,0), descripcion=Db.S(r2,1),
-                        cantidad=cant, precioUnit=precio, subtotal=cant*precio });
-                }
-                return Results.Ok(new { factura=fact, lineas });
-            }).RequireAuthorization();
-        }
-    }
-}
+                cmd.CommandText = @"SELECT NumeroF,Fecha,Codigo,TotalF,Abono,IvaF,

@@ -201,7 +201,6 @@ namespace SistemaGestion.Api
         public static int I(SqliteDataReader r, int i) =>
             r.IsDBNull(i) ? 0 : r.GetInt32(i);
 
-        /// <summary>Ruta de la BD — %AppData%\SistemaGestion\sistema_gestion.db</summary>
-        public static string RutaBD => _rutaBD ?? "";
-    }
-}
+        /// <summary>Lee un INTEGER que puede ser Int64 (COUNT, SUM, MAX, etc.).</summary>
+        public static int I2(SqliteDataReader r, int i) =>
+       
