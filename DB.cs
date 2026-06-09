@@ -5580,4 +5580,33 @@ namespace SistemaGestion
         public DateTime? UltimoAcceso        { get; set; }
         /// <summary>True si el usuario debe cambiar la contraseña en el próximo login.</summary>
         public bool   RequiereCambioPassword { get; set; }
-        /// <summary>Intentos de login fallidos hoy (reset al login exitoso).</summar
+        /// <summary>Intentos de login fallidos hoy (reset al login exitoso).</summary>
+        public int    IntentosHoy            { get; set; }
+        /// <summary>Si no null, el usuario está bloqueado hasta esta fecha/hora.</summary>
+        public DateTime? BloqueadoHasta      { get; set; }
+
+        // ── Helpers de rol ───────────────────────────────────────────────
+        /// <summary>True si el usuario tiene rol Admin.</summary>
+        public bool EsAdmin => Rol == "Admin";
+
+        /// <summary>True si el usuario tiene el rol especificado.</summary>
+        public bool TieneRol(string rol) =>
+            string.Equals(Rol, rol, StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>Descripción legible del rol para mostrar en la UI.</summary>
+        public string RolesDescripcion => Rol ?? "(sin rol)";
+
+        /// <summary>
+        /// CSV de roles. Asignar este campo actualiza Rol automáticamente.
+        /// Mantiene compatibilidad con código que usaba multi-rol.
+        /// </summary>
+        public string RolesCSV
+        {
+            get => Rol ?? "";
+            set => Rol = string.IsNullOrWhiteSpace(value) ? "" : value.Split(',')[0].Trim();
+        }
+    }
+
+
+
+}
