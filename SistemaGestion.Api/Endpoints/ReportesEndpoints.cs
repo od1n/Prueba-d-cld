@@ -235,7 +235,10 @@ th,td{padding:2mm 3mm;text-align:left;border-bottom:1px solid #ddd}
 tr:nth-child(even){background:#f8f9fa}
 .chip-rojo{background:#f8d7da;color:#721c24;padding:0 3mm;border-radius:2mm;font-size:8pt}
 .chip-verde{background:#d4edda;color:#155724;padding:0 3mm;border-radius:2mm;font-size:8pt}
-@media print{body{padding:8mm}.no-print{display:none!important}}
+@media print{
+body{padding:8mm}
+.no-print{display:none!important}
+}
 </style></head><body>
 <button class="no-print" onclick="window.print()"
   style="margin-bottom:8mm;padding:2mm 8mm;background:#1A4A8A;color:#fff;border:none;

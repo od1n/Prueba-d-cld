@@ -263,7 +263,10 @@ th,td{padding:2mm 3mm;text-align:left;border-bottom:1px solid #ddd}
 .r{text-align:right}.total-row td{font-weight:700;font-size:12pt;border-top:2px solid #111}
 .estado{display:inline-block;padding:1mm 4mm;border-radius:3mm;font-weight:700;font-size:10pt;
     background:{{(abono>=total?"#d4edda":"#fff3cd")}};color:{{(abono>=total?"#155724":"#856404")}}}
-@media print{body{padding:10mm}.no-print{display:none!important}}
+@media print{
+body{padding:10mm}
+.no-print{display:none!important}
+}
 </style></head><body>
 <button class="no-print" onclick="window.print()"
   style="margin-bottom:8mm;padding:2mm 8mm;background:#1A4A8A;color:#fff;border:none;
