@@ -49,7 +49,7 @@ function ApiPost($url, $body) {
 Write-Host "`n=== CREAR CLIENTE DE PRUEBA ===" -ForegroundColor Cyan
 $cliente = @{
     Codigo      = "PRUEBA-001"
-    Nombre      = "DISTRIBUIDORA TEST C.A."
+    Descripcion = "DISTRIBUIDORA TEST C.A."
     CiRif       = "J-12345678-9"
     Telefono    = "0244-555-1234"
     Ciudad      = "Villa de Cura"
@@ -59,7 +59,7 @@ $cliente = @{
 }
 try {
     $rc = ApiPost "/api/clientes" $cliente
-    Write-Host "  Cliente creado: $($cliente.Nombre)" -ForegroundColor Green
+    Write-Host "  Cliente creado: $($cliente.Descripcion)" -ForegroundColor Green
 } catch {
     if ($_.Exception.Response.StatusCode -eq 409) {
         Write-Host "  Cliente ya existe, continuando..." -ForegroundColor Yellow
@@ -71,14 +71,19 @@ try {
 # ── 3. Obtener productos con precio ──
 Write-Host "`n=== PRODUCTOS DISPONIBLES ===" -ForegroundColor Cyan
 $inventario = ApiGet "/api/inventario"
-$prods = $inventario | Where-Object { $_.precioActual -gt 0 } | Select-Object -First 3
+$prods = $inventario | Select-Object -First 3
 foreach ($p in $prods) {
     Write-Host "  $($p.codigo) - $($p.descripcion) @ `$$($p.precioActual)"
 }
 
 if ($prods.Count -lt 2) {
-    Write-Host "  No hay suficientes productos con precio. Abortando." -ForegroundColor Red
+    Write-Host "  No hay suficientes productos. Abortando." -ForegroundColor Red
     exit 1
+}
+
+# Asignar precio por defecto si es 0
+foreach ($p in $prods) {
+    if ($p.precioActual -le 0) { $p.precioActual = 15.00 }
 }
 
 # ── 4. Crear FACTURA FISCAL (con IVA 16%, carta) ──
