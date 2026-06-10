@@ -521,8 +521,8 @@ namespace SistemaGestion.Api.Endpoints
                 int filasVaciasNota = Math.Max(0, 18 - nItems);
                 for (int i = 0; i < filasVaciasNota; i++)
                     filasNota.Append("<tr><td>&nbsp;</td><td></td><td></td><td></td></tr>");
-                // Factura fiscal: ~22 filas visibles (263mm content - ~140mm header/footer = ~123mm / 5.5mm por fila)
-                int filasVaciasFact = Math.Max(0, 22 - nItems);
+                // Factura fiscal: ~28 filas visibles (289mm content - ~150mm header/footer = ~139mm / 5mm por fila)
+                int filasVaciasFact = Math.Max(0, 28 - nItems);
                 for (int i = 0; i < filasVaciasFact; i++)
                     filasFactura.Append("<tr><td>&nbsp;</td><td></td><td></td><td></td><td></td></tr>");
 
@@ -626,47 +626,47 @@ namespace SistemaGestion.Api.Endpoints
                 else
                 {
                     // ═══════════════════════════════════════════════════════
-                    //  FACTURA FISCAL — Tamaño carta (~21.5×28cm), con IVA
+                    //  FACTURA FISCAL — 154mm × 305mm (15.4×30.5cm), con IVA
                     // ═══════════════════════════════════════════════════════
                     html =
                     "<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'>" +
                     "<title>Factura " + H(numF) + "</title><style>" +
-                    "@page{size:letter;margin:8mm 10mm}" +
-                    "*{box-sizing:border-box;margin:0;padding:0;font-family:Arial,sans-serif;font-size:9pt}" +
+                    "@page{size:154mm 305mm;margin:8mm 10mm}" +
+                    "*{box-sizing:border-box;margin:0;padding:0;font-family:Arial,sans-serif;font-size:7.5pt}" +
                     "html,body{height:100%;margin:0}" +
-                    "body{width:190mm;margin:0 auto;color:#111}" +
-                    ".page-wrap{display:flex;flex-direction:column;min-height:263mm}" +
+                    "body{width:134mm;margin:0 auto;color:#111}" +
+                    ".page-wrap{display:flex;flex-direction:column;min-height:289mm}" +
                     ".items-section{flex:1}" +
-                    ".empresa{text-align:center;margin-bottom:3mm}" +
-                    ".empresa h1{font-size:16pt;color:#C00;font-weight:900;letter-spacing:1px}" +
-                    ".empresa .dir{font-size:7.5pt;color:#333;margin:1mm 0}" +
-                    ".empresa .rif{font-size:8.5pt;font-weight:700}" +
-                    ".doc-info{display:grid;grid-template-columns:auto 1fr auto;gap:2mm;align-items:center;border:1px solid #333;padding:2mm 3mm;margin-bottom:3mm}" +
-                    ".fecha-box{display:grid;grid-template-columns:repeat(3,22mm);gap:1mm;text-align:center}" +
-                    ".fecha-box div{border:1px solid #999;padding:1mm}" +
-                    ".fecha-box .lbl{font-size:6pt;font-weight:700;border:none;padding:0}" +
-                    ".fnum{font-size:14pt;font-weight:900;color:#C00}" +
-                    ".nctrl{font-size:9pt;font-weight:700}" +
-                    ".cli-box{border:1px solid #333;padding:2mm 3mm;margin-bottom:2mm;font-size:8.5pt}" +
-                    ".cli-box b{font-size:7pt;color:#555;text-transform:uppercase}" +
-                    ".cli-grid{display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:1mm;border:1px solid #333;padding:2mm 3mm;margin-bottom:3mm;font-size:8pt}" +
-                    ".cli-grid b{font-size:6.5pt;color:#555;text-transform:uppercase}" +
-                    "table{width:100%;border-collapse:collapse;border:1px solid #333;margin-bottom:3mm}" +
+                    ".empresa{text-align:center;margin-bottom:2mm}" +
+                    ".empresa h1{font-size:12pt;color:#C00;font-weight:900;letter-spacing:1px}" +
+                    ".empresa .dir{font-size:6pt;color:#333;margin:0.5mm 0}" +
+                    ".empresa .rif{font-size:7pt;font-weight:700}" +
+                    ".doc-info{display:grid;grid-template-columns:auto 1fr auto;gap:1mm;align-items:center;border:1px solid #333;padding:1.5mm 2mm;margin-bottom:2mm}" +
+                    ".fecha-box{display:grid;grid-template-columns:repeat(3,14mm);gap:1mm;text-align:center}" +
+                    ".fecha-box div{border:1px solid #999;padding:0.5mm;font-size:7pt}" +
+                    ".fecha-box .lbl{font-size:5pt;font-weight:700;border:none;padding:0}" +
+                    ".fnum{font-size:11pt;font-weight:900;color:#C00}" +
+                    ".nctrl{font-size:7pt;font-weight:700}" +
+                    ".cli-box{border:1px solid #333;padding:1.5mm 2mm;margin-bottom:1mm;font-size:7pt}" +
+                    ".cli-box b{font-size:6pt;color:#555;text-transform:uppercase}" +
+                    ".cli-grid{display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:0.5mm;border:1px solid #333;padding:1.5mm 2mm;margin-bottom:2mm;font-size:6.5pt}" +
+                    ".cli-grid b{font-size:5.5pt;color:#555;text-transform:uppercase}" +
+                    "table{width:100%;border-collapse:collapse;border:1px solid #333;margin-bottom:2mm}" +
                     "thead{background:#eee}" +
-                    "th{font-size:7.5pt;padding:2mm;border:1px solid #333;text-transform:uppercase;font-weight:700}" +
-                    "td{padding:1.5mm 2mm;border-bottom:1px solid #ccc;font-size:8.5pt;height:5.5mm}" +
+                    "th{font-size:6pt;padding:1.5mm;border:1px solid #333;text-transform:uppercase;font-weight:700}" +
+                    "td{padding:1mm 1.5mm;border-bottom:1px solid #ccc;font-size:7pt;height:5mm}" +
                     ".c{text-align:center}.r{text-align:right}" +
-                    ".footer-grid{display:grid;grid-template-columns:1fr 1fr;gap:3mm}" +
-                    ".fp-box{border:1px solid #333;padding:2mm 3mm;font-size:8pt}" +
-                    ".fp-box b{font-size:7pt;text-transform:uppercase}" +
-                    ".chk{display:inline-block;width:3.5mm;height:3.5mm;border:1px solid #333;text-align:center;font-size:7pt;line-height:3.5mm;margin-right:1mm;vertical-align:middle}" +
-                    ".fp-item{display:inline-block;margin-right:3mm;margin-bottom:1mm}" +
+                    ".footer-grid{display:grid;grid-template-columns:1fr 1fr;gap:2mm}" +
+                    ".fp-box{border:1px solid #333;padding:1.5mm 2mm;font-size:6.5pt}" +
+                    ".fp-box b{font-size:6pt;text-transform:uppercase}" +
+                    ".chk{display:inline-block;width:3mm;height:3mm;border:1px solid #333;text-align:center;font-size:6pt;line-height:3mm;margin-right:0.5mm;vertical-align:middle}" +
+                    ".fp-item{display:inline-block;margin-right:2mm;margin-bottom:0.5mm}" +
                     ".totales-box{border:1px solid #333}" +
-                    ".totales-box tr td{padding:1.5mm 3mm;border-bottom:1px solid #ccc;font-size:8.5pt}" +
-                    ".totales-box tr:last-child td{font-weight:900;font-size:10pt;border-top:2px solid #333;background:#f5f5f5}" +
-                    ".firma-grid{display:grid;grid-template-columns:1fr 1fr;gap:8mm;margin-top:5mm;text-align:center;font-size:7.5pt}" +
-                    ".firma-line{border-top:1px solid #333;padding-top:1mm;margin-top:10mm}" +
-                    ".no-print{margin-bottom:4mm;padding:2mm 8mm;background:#C00;color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:10pt}" +
+                    ".totales-box tr td{padding:1mm 2mm;border-bottom:1px solid #ccc;font-size:7pt}" +
+                    ".totales-box tr:last-child td{font-weight:900;font-size:8pt;border-top:2px solid #333;background:#f5f5f5}" +
+                    ".firma-grid{display:grid;grid-template-columns:1fr 1fr;gap:5mm;margin-top:3mm;text-align:center;font-size:6.5pt}" +
+                    ".firma-line{border-top:1px solid #333;padding-top:1mm;margin-top:8mm}" +
+                    ".no-print{margin-bottom:3mm;padding:2mm 6mm;background:#C00;color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:9pt}" +
                     "@media print{.no-print{display:none!important}body{margin:0}}" +
                     "</style></head><body>" +
                     "<button class='no-print' onclick='window.print()'>Imprimir</button>" +
@@ -676,19 +676,19 @@ namespace SistemaGestion.Api.Endpoints
                     "<div class='empresa'>" +
                     "<h1>EL HATO PASCHER C.A.</h1>" +
                     "<div class='dir'>Ctra. Villa de Cura - San Francisco de As&iacute;s, Local N&deg; S/N, Sector Los Colorados - Villa de Cura - Estado Aragua</div>" +
-                    "<div class='rif'>RIF: J-30571871-7 &nbsp;&nbsp;&nbsp; Telfs: 0244 386.10.13 - 386.33.04</div>" +
+                    "<div class='rif'>RIF: J-30571871-7 &nbsp;&nbsp; Telfs: 0244 386.10.13 - 386.33.04</div>" +
                     "</div>" +
 
                     // Info documento: Fecha | FACTURA N° | N° CONTROL
                     "<div class='doc-info'>" +
-                    "<div><b style='font-size:7pt'>FECHA</b><div class='fecha-box'>" +
+                    "<div><b style='font-size:6pt'>FECHA</b><div class='fecha-box'>" +
                     "<div class='lbl'>D&Iacute;A</div><div class='lbl'>MES</div><div class='lbl'>A&Ntilde;O</div>" +
                     "<div>" + H(fechaDia) + "</div><div>" + H(fechaMes) + "</div><div>" + H(fechaAno) + "</div>" +
                     "</div></div>" +
-                    "<div style='text-align:center'><span style='font-size:9pt;font-weight:700'>FACTURA</span><br>" +
+                    "<div style='text-align:center'><span style='font-size:7.5pt;font-weight:700'>FACTURA</span><br>" +
                     "<span class='fnum'>N&deg; " + H(numF) + "</span></div>" +
                     "<div style='text-align:right'><span class='nctrl'>N&deg; CONTROL</span><br>" +
-                    "<span style='font-size:10pt;font-weight:700'>00 &mdash; " + H(numF.PadLeft(6,'0')) + "</span></div>" +
+                    "<span style='font-size:8pt;font-weight:700'>00 &mdash; " + H(numF.PadLeft(6,'0')) + "</span></div>" +
                     "</div>" +
 
                     // Datos cliente linea 1
@@ -707,14 +707,14 @@ namespace SistemaGestion.Api.Endpoints
                     // Tabla de items (flex:1 para llenar la página)
                     "<div class='items-section'>" +
                     "<table><thead><tr>" +
-                    "<th style='width:12mm'>Cant.</th><th style='width:18mm'>Ref.</th><th>DESCRIPCI&Oacute;N</th>" +
-                    "<th style='width:24mm'>PRECIO UNITARIO</th><th style='width:24mm'>TOTAL</th>" +
+                    "<th style='width:10mm'>Cant.</th><th style='width:14mm'>Ref.</th><th>DESCRIPCI&Oacute;N</th>" +
+                    "<th style='width:20mm'>P. UNIT.</th><th style='width:20mm'>TOTAL</th>" +
                     "</tr></thead><tbody>" + filasFactura + "</tbody></table>" +
                     "</div>" +
 
                     // Pie: Forma de pago + Totales
                     "<div class='footer-grid'>" +
-                    "<div class='fp-box'><b>FORMA DE PAGO</b><br><br>" +
+                    "<div class='fp-box'><b>FORMA DE PAGO</b><br>" +
                     "<span class='fp-item'><span class='chk'>" + chkEfectivo + "</span>EFECTIVO</span>" +
                     "<span class='fp-item'><span class='chk'>" + chkCheque + "</span>CHEQUE</span>" +
                     "<span class='fp-item'><span class='chk'>" + chkTarjC + "</span>TARJ. CR&Eacute;DITO</span><br>" +
@@ -722,7 +722,7 @@ namespace SistemaGestion.Api.Endpoints
                     "<span class='fp-item'><span class='chk'>" + chkTarjD + "</span>TARJ. D&Eacute;BITO</span>" +
                     "</div>" +
                     "<table class='totales-box'>" +
-                    "<tr><td class='r'>SUB-TOTAL</td><td class='r' style='width:28mm'>" + (baseImponible + montoDesc).ToString("N2") + "</td></tr>" +
+                    "<tr><td class='r'>SUB-TOTAL</td><td class='r' style='width:22mm'>" + (baseImponible + montoDesc).ToString("N2") + "</td></tr>" +
                     (desc > 0 ? "<tr><td class='r'>DESCUENTO " + desc.ToString("N0") + "%</td><td class='r'>-" + montoDesc.ToString("N2") + "</td></tr>" : "") +
                     "<tr><td class='r'>EXENTO</td><td class='r'></td></tr>" +
                     "<tr><td class='r'>BASE IMPONIBLE</td><td class='r'>" + baseImponible.ToString("N2") + "</td></tr>" +
