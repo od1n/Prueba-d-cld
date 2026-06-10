@@ -1558,6 +1558,15 @@ namespace SistemaGestion
                 //         retroactivos cambian al editar una tasa vieja.
                 if (versionActual < 19)
                 {
+                    // Crear TasaCambio si no existe (BDs muy antiguas sin esta tabla)
+                    EjecutarSql(conn, tx, @"
+                        CREATE TABLE IF NOT EXISTS TasaCambio (
+                            Id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                            Fecha        TEXT    NOT NULL UNIQUE,
+                            TasaBCV      REAL    NOT NULL DEFAULT 0,
+                            TasaParalelo REAL    NOT NULL DEFAULT 0,
+                            Usuario      TEXT
+                        );");
                     AlterTableSafe(conn, tx,
                         "ALTER TABLE TasaCambio ADD COLUMN Origen TEXT NOT NULL DEFAULT 'MANUAL'");
                     AlterTableSafe(conn, tx,
