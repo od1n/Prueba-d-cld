@@ -1,0 +1,62 @@
+/* digitalizador.css — estilos específicos de la página de digitalización */
+
+/* ── pasos ── */
+.pasos{display:flex;background:var(--fondo-card);border-bottom:1px solid var(--borde);margin:-16px -16px 16px}
+.paso{flex:1;text-align:center;padding:10px 4px;font-size:.75rem;color:var(--texto-dim);
+  border-bottom:3px solid transparent;transition:.2s;font-family:var(--font)}
+.paso.activo{color:var(--cyan);border-color:var(--cyan);font-weight:600}
+.paso.ok{color:var(--verde);border-color:var(--verde)}
+
+/* ── tipo selector ── */
+.tipo-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
+.tipo-btn{border:2px solid var(--borde);border-radius:var(--radio);padding:14px 8px;
+  background:var(--fondo-card);cursor:pointer;text-align:center;
+  font-size:.88rem;font-weight:600;color:var(--texto-dim);
+  transition:.15s;font-family:var(--font)}
+.tipo-btn.sel{border-color:var(--cyan);background:#0d2a3a;color:var(--cyan)}
+.tipo-btn .ico{font-size:1.6rem;display:block;margin-bottom:4px}
+
+/* ── zona foto ── */
+#zona-foto{border:2px dashed var(--borde);border-radius:var(--radio);
+  padding:28px 16px;text-align:center;cursor:pointer;transition:.2s;background:var(--fondo-card)}
+#zona-foto:hover,#zona-foto.drag{border-color:var(--cyan);background:#0d2a3a}
+#zona-foto p{color:var(--texto-dim);font-size:.85rem;margin-top:6px}
+#input-file{display:none}
+#preview{width:100%;border-radius:var(--radio);margin-top:12px;display:none;
+  max-height:240px;object-fit:contain;border:1px solid var(--borde)}
+
+/* ── spinner ── */
+#spinner{display:none;text-align:center;padding:40px}
+#spinner .spinner{margin:0 auto 12px}
+#spinner p{color:var(--texto-dim);font-size:.88rem}
+
+/* ── tabla moldes confirmación ── */
+.tbl{width:100%;border-collapse:collapse;font-size:.82rem}
+.tbl th{background:var(--fondo);color:var(--texto-dim);font-weight:600;
+  padding:6px 4px;text-align:center;border-bottom:1px solid var(--borde)}
+.tbl td{padding:5px 4px;border-bottom:1px solid var(--borde);vertical-align:middle}
+.tbl input,.tbl select{width:100%;background:var(--fondo-inp);color:var(--texto);
+  border:1px solid var(--borde);border-radius:4px;padding:3px 4px;
+  font-size:.8rem;font-family:var(--font-mono)}
+.tbl select{font-family:var(--font)}
+
+/* ── alertas ── */
+.alerta-err{background:#2d0f0f;border:1px solid var(--rojo);color:var(--rojo);
+  border-radius:var(--radio);padding:10px 12px;font-size:.85rem;margin-top:8px}
+.alerta-ok{background:#0d2a17;border:1px solid var(--verde);color:var(--verde);
+  border-radius:var(--radio);padding:10px 12px;font-size:.85rem;margin-top:8px}
+.alerta-warn{background:#2a200d;border:1px solid var(--naranja);color:var(--naranja);
+  border-radius:var(--radio);padding:10px 12px;font-size:.85rem;margin-top:8px}
+
+/* ── pantalla éxito ── */
+.exito{text-align:center;padding:40px 16px}
+.exito .ico{font-size:3rem;display:block;margin-bottom:12px}
+.exito h2{color:var(--verde);font-size:1.2rem;margin-bottom:6px}
+.exito p{color:var(--texto-dim);font-size:.88rem}
+
+/* ── chip estado backend ── */
+.chip-backend{display:inline-flex;align-items:center;gap:6px;
+  background:var(--fondo-card);border:1px solid var(--borde);
+  border-radius:12px;padding:3px 10px;font-size:.75rem;color:var(--texto-dim)}
+.chip-dot{width:7px;height:7px;border-radius:50%;background:var(--verde)}
+.chip-dot.off{background:var(--rojo)}
