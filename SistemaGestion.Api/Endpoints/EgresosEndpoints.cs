@@ -8,7 +8,8 @@ namespace SistemaGestion.Api.Endpoints
 {
     public static class EgresosEndpoints
     {
-        private const string DIG_URL = "http://localhost:8080";
+        private static readonly string DIG_URL =
+            Environment.GetEnvironmentVariable("SG_DIG_URL") ?? "http://localhost:8080";
 
         public static void MapEgresosEndpoints(this WebApplication app)
         {

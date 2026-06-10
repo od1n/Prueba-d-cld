@@ -12,7 +12,8 @@ namespace SistemaGestion.Api.Endpoints
     /// </summary>
     public static class ProduccionEndpoints
     {
-        private const string DIG_URL = "http://localhost:8080";
+        private static readonly string DIG_URL =
+            Environment.GetEnvironmentVariable("SG_DIG_URL") ?? "http://localhost:8080";
 
         public static void MapProduccionEndpoints(this WebApplication app)
         {

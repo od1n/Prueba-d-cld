@@ -19,7 +19,7 @@ import db_writer
 
 app = FastAPI(title="Digitalizador SistemaGestion", version="1.0")
 app.add_middleware(CORSMiddleware,
-                   allow_origins=["http://localhost:5050", "https://localhost:5443"],
+                   allow_origins=["*"],  # La API hace proxy; acceso directo filtrado por red
                    allow_methods=["GET", "POST"],
                    allow_headers=["Content-Type"],
                    allow_credentials=False)
@@ -619,4 +619,4 @@ if __name__ == "__main__":
     print(f"\n  Digitalizador arrancando en  http://{ip}:8080")
     print(f"  Backend de visión: {info['nombre']} ({info['modelo']})")
     print(f"  Abre esa URL desde el celular (misma red WiFi)\n")
-    uvicorn.run("main:app", host="127.0.0.1", port=8080, reload=False)
+    uvicorn.run("main:app", host="0.0.0.0", port=8080, reload=False)
