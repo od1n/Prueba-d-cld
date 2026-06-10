@@ -1743,6 +1743,11 @@ namespace SistemaGestion
                     Orden       INTEGER NOT NULL DEFAULT 0,
                     EsMateriaPrima INTEGER NOT NULL DEFAULT 0
                 );");
+            // Columnas que pueden faltar si CategoriasGasto ya existía
+            AlterTableSafe(conn, tx, "ALTER TABLE CategoriasGasto ADD COLUMN Color TEXT DEFAULT '#1A4A8A'");
+            AlterTableSafe(conn, tx, "ALTER TABLE CategoriasGasto ADD COLUMN Activa INTEGER NOT NULL DEFAULT 1");
+            AlterTableSafe(conn, tx, "ALTER TABLE CategoriasGasto ADD COLUMN Orden INTEGER NOT NULL DEFAULT 0");
+            AlterTableSafe(conn, tx, "ALTER TABLE CategoriasGasto ADD COLUMN EsMateriaPrima INTEGER NOT NULL DEFAULT 0");
 
             // 4. Crear tabla Gastos nueva (solo si no existe ya con schema correcto)
             EjecutarSql(conn, tx, @"
@@ -1770,6 +1775,26 @@ namespace SistemaGestion
                     Observaciones   TEXT,
                     FOREIGN KEY (IdCategoria) REFERENCES CategoriasGasto(Id)
                 );");
+            // Columnas que pueden faltar si Gastos nueva ya existía parcialmente
+            AlterTableSafe(conn, tx, "ALTER TABLE Gastos ADD COLUMN IdCategoria INTEGER");
+            AlterTableSafe(conn, tx, "ALTER TABLE Gastos ADD COLUMN Concepto TEXT");
+            AlterTableSafe(conn, tx, "ALTER TABLE Gastos ADD COLUMN Proveedor TEXT");
+            AlterTableSafe(conn, tx, "ALTER TABLE Gastos ADD COLUMN IdInsumo INTEGER");
+            AlterTableSafe(conn, tx, "ALTER TABLE Gastos ADD COLUMN Cantidad REAL DEFAULT 0");
+            AlterTableSafe(conn, tx, "ALTER TABLE Gastos ADD COLUMN MonedaOriginal TEXT NOT NULL DEFAULT 'USD'");
+            AlterTableSafe(conn, tx, "ALTER TABLE Gastos ADD COLUMN TipoTasa TEXT NOT NULL DEFAULT 'USD_DIRECTO'");
+            AlterTableSafe(conn, tx, "ALTER TABLE Gastos ADD COLUMN TasaUsada REAL NOT NULL DEFAULT 0");
+            AlterTableSafe(conn, tx, "ALTER TABLE Gastos ADD COLUMN IdTasaCambio INTEGER");
+            AlterTableSafe(conn, tx, "ALTER TABLE Gastos ADD COLUMN MontoOriginal REAL NOT NULL DEFAULT 0");
+            AlterTableSafe(conn, tx, "ALTER TABLE Gastos ADD COLUMN MontoUSD REAL NOT NULL DEFAULT 0");
+            AlterTableSafe(conn, tx, "ALTER TABLE Gastos ADD COLUMN MontoBs REAL NOT NULL DEFAULT 0");
+            AlterTableSafe(conn, tx, "ALTER TABLE Gastos ADD COLUMN Estado TEXT NOT NULL DEFAULT 'Pagado'");
+            AlterTableSafe(conn, tx, "ALTER TABLE Gastos ADD COLUMN FechaVencimiento TEXT");
+            AlterTableSafe(conn, tx, "ALTER TABLE Gastos ADD COLUMN FechaPago TEXT");
+            AlterTableSafe(conn, tx, "ALTER TABLE Gastos ADD COLUMN RutaComprobante TEXT");
+            AlterTableSafe(conn, tx, "ALTER TABLE Gastos ADD COLUMN Usuario TEXT NOT NULL DEFAULT 'Sistema'");
+            AlterTableSafe(conn, tx, "ALTER TABLE Gastos ADD COLUMN FechaRegistro TEXT NOT NULL DEFAULT ''");
+            AlterTableSafe(conn, tx, "ALTER TABLE Gastos ADD COLUMN Observaciones TEXT");
 
             // 5. Índices (idempotente)
             EjecutarSql(conn, tx,
