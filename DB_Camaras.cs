@@ -80,7 +80,47 @@ namespace SistemaGestion
         // Llamada desde MigrarEsquema en DB.cs cuando user_version < 23.
         internal static void EjecutarMigracionV23(SqliteConnection conn, SqliteTransaction tx)
         {
-            _ultimoSqlMigracion = "[v23-Camaras] CREATE Camaras + PermisosCamara + índices";
+            _ultimoSqlMigracion = "[v23-Camaras] verificar/rebuild tabla Camaras";
+
+            // ── Si existe una tabla Camaras con esquema viejo (sin columna Orden),
+            //    hacer rebuild migrando los datos al esquema nuevo.
+            //    Esquema viejo: Id, Nombre, Ip, Puerto, Usuario, Password, Canal, Protocolo, Ubicacion, Activa
+            //    Esquema nuevo: Id, Nombre, Ubicacion, IpLocal, PuertoRtsp, UsuarioCamara, ClaveCifrada, RutaStream, Modelo, Activa, Orden, FechaCreacion
+            if (TablaExiste(conn, tx, "Camaras") &&
+                !ColumnaExiste(conn, tx, "Camaras", "Orden"))
+            {
+                _ultimoSqlMigracion = "[v23] Rebuild Camaras — esquema viejo detectado";
+                EjecutarSql(conn, tx, "DROP TABLE IF EXISTS Camaras_old_v23");
+                EjecutarSql(conn, tx, "ALTER TABLE Camaras RENAME TO Camaras_old_v23");
+                EjecutarSql(conn, tx, @"
+                    CREATE TABLE Camaras (
+                        Id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                        Nombre        TEXT    NOT NULL,
+                        Ubicacion     TEXT    NOT NULL DEFAULT '',
+                        IpLocal       TEXT    NOT NULL DEFAULT '',
+                        PuertoRtsp    INTEGER NOT NULL DEFAULT 554,
+                        UsuarioCamara TEXT    NOT NULL DEFAULT 'admin',
+                        ClaveCifrada  TEXT    NOT NULL DEFAULT '',
+                        RutaStream    TEXT    NOT NULL DEFAULT '/Streaming/Channels/101',
+                        Modelo        TEXT    NOT NULL DEFAULT '',
+                        Activa        INTEGER NOT NULL DEFAULT 1,
+                        Orden         INTEGER NOT NULL DEFAULT 0,
+                        FechaCreacion TEXT    NOT NULL DEFAULT ''
+                    )");
+                // Migrar datos: mapear columnas viejas → nuevas
+                EjecutarSql(conn, tx, @"
+                    INSERT INTO Camaras (Id, Nombre, Ubicacion, IpLocal, PuertoRtsp,
+                                         UsuarioCamara, ClaveCifrada, Activa, FechaCreacion)
+                    SELECT Id, Nombre, COALESCE(Ubicacion,''), COALESCE(Ip,''),
+                           COALESCE(Puerto,554), COALESCE(Usuario,'admin'),
+                           COALESCE(Password,''), COALESCE(Activa,1),
+                           datetime('now','localtime')
+                    FROM Camaras_old_v23");
+                EjecutarSql(conn, tx, "DROP TABLE Camaras_old_v23");
+            }
+
+            // Crear tablas si no existen (BDs sin Camaras previo)
+            _ultimoSqlMigracion = "[v23] CREATE TABLE IF NOT EXISTS Camaras + PermisosCamara";
             var cmd = conn.CreateCommand();
             cmd.Transaction = tx;
             cmd.CommandText = @"
@@ -88,7 +128,7 @@ namespace SistemaGestion
                     Id            INTEGER PRIMARY KEY AUTOINCREMENT,
                     Nombre        TEXT    NOT NULL,
                     Ubicacion     TEXT    NOT NULL DEFAULT '',
-                    IpLocal       TEXT    NOT NULL,
+                    IpLocal       TEXT    NOT NULL DEFAULT '',
                     PuertoRtsp    INTEGER NOT NULL DEFAULT 554,
                     UsuarioCamara TEXT    NOT NULL DEFAULT 'admin',
                     ClaveCifrada  TEXT    NOT NULL DEFAULT '',
@@ -96,7 +136,7 @@ namespace SistemaGestion
                     Modelo        TEXT    NOT NULL DEFAULT '',
                     Activa        INTEGER NOT NULL DEFAULT 1,
                     Orden         INTEGER NOT NULL DEFAULT 0,
-                    FechaCreacion TEXT    NOT NULL
+                    FechaCreacion TEXT    NOT NULL DEFAULT ''
                 );
 
                 CREATE TABLE IF NOT EXISTS PermisosCamara (
@@ -106,13 +146,15 @@ namespace SistemaGestion
                     FOREIGN KEY (IdUsuario) REFERENCES Usuarios(Id) ON DELETE CASCADE,
                     FOREIGN KEY (IdCamara)  REFERENCES Camaras(Id)  ON DELETE CASCADE
                 );
-
-                CREATE INDEX IF NOT EXISTS idx_PermisosCamara_Usuario
-                    ON PermisosCamara(IdUsuario);
-                CREATE INDEX IF NOT EXISTS idx_Camaras_Activa_Orden
-                    ON Camaras(Activa, Orden, Nombre);
             ";
             cmd.ExecuteNonQuery();
+
+            // Índices (separados para que el tracking sea preciso)
+            _ultimoSqlMigracion = "[v23] CREATE INDEX idx_Camaras_Activa_Orden";
+            EjecutarSql(conn, tx,
+                "CREATE INDEX IF NOT EXISTS idx_PermisosCamara_Usuario ON PermisosCamara(IdUsuario)");
+            EjecutarSql(conn, tx,
+                "CREATE INDEX IF NOT EXISTS idx_Camaras_Activa_Orden ON Camaras(Activa, Orden, Nombre)");
         }
 
         // ── CRUD Camaras ─────────────────────────────────────────────────────
