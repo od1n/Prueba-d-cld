@@ -18,7 +18,7 @@ echo  Red OK - OLIMPO accesible.
 
 :: ── API (.NET, puertos 5050/5443) ────────────────────────────────
 echo Iniciando API...
-cd /d "C:\Users\naos\AppData\Local\SistemaGestion\publish\Api"
+cd /d "C:\SistemaGestion\publish\Api"
 call sg-env.cmd
 dotnet SistemaGestion.Api.dll
 pause
