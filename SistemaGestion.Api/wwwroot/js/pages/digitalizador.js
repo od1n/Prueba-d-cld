@@ -10,20 +10,73 @@ let datosExtra  = null;
 let moldesDB    = [];
 let insumosDB   = [];
 let tipoDoc     = 'planilla';
+let tabActiva   = 'digitalizar';
+
+// Filas dinámicas para carga manual
+let manualMoldes = [{ codigoMolde:'', primera:0, segunda:0, defectuosas:0 }];
+let manualMateriales = [];
 
 // ── Render principal ──────────────────────────────────────────
 function render() {
     app.innerHTML = `
-        ${renderTopbar('Digitalizar planilla')}
-        <div class="content" id="content" style="padding-bottom:80px">
-            <div class="pasos">
-                <div class="paso ${pasoActual>=1?'activo':''} ${pasoActual>1?'ok':''}" id="p1">1 · Foto</div>
-                <div class="paso ${pasoActual>=2?'activo':''} ${pasoActual>2?'ok':''}" id="p2">2 · Revisar</div>
-                <div class="paso ${pasoActual>=3?'activo':''}" id="p3">3 · Listo</div>
-            </div>
-            <div id="zona-paso"></div>
+        ${renderTopbar('Producción')}
+        <div class="content" style="padding-bottom:80px">
+          <div style="display:flex;gap:0;border-bottom:2px solid var(--borde);margin-bottom:0">
+            <button type="button" class="js-tab" data-id="digitalizar"
+              style="flex:1;padding:10px;border:none;cursor:pointer;font-size:.82rem;font-weight:600;font-family:inherit;
+                     background:${tabActiva==='digitalizar'?'var(--fondo-card)':'transparent'};
+                     color:${tabActiva==='digitalizar'?'var(--cyan)':'var(--texto-dim)'};
+                     border-bottom:3px solid ${tabActiva==='digitalizar'?'var(--cyan)':'transparent'};transition:.15s">📷 Digitalizar</button>
+            <button type="button" class="js-tab" data-id="manual"
+              style="flex:1;padding:10px;border:none;cursor:pointer;font-size:.82rem;font-weight:600;font-family:inherit;
+                     background:${tabActiva==='manual'?'var(--fondo-card)':'transparent'};
+                     color:${tabActiva==='manual'?'var(--cyan)':'var(--texto-dim)'};
+                     border-bottom:3px solid ${tabActiva==='manual'?'var(--cyan)':'transparent'};transition:.15s">✏ Carga Manual</button>
+            <button type="button" class="js-tab" data-id="historial"
+              style="flex:1;padding:10px;border:none;cursor:pointer;font-size:.82rem;font-weight:600;font-family:inherit;
+                     background:${tabActiva==='historial'?'var(--fondo-card)':'transparent'};
+                     color:${tabActiva==='historial'?'var(--cyan)':'var(--texto-dim)'};
+                     border-bottom:3px solid ${tabActiva==='historial'?'var(--cyan)':'transparent'};transition:.15s">📋 Historial</button>
+          </div>
+          <div style="padding:8px 16px;text-align:right">
+            <a href="/api/produccion/planilla" target="_blank" class="btn btn-ghost btn-sm">🖨 Imprimir planilla</a>
+          </div>
+          <div id="tabContent"></div>
         </div>
         ${renderNav('produccion')}`;
+
+    setupTabs();
+    renderActiveTab();
+}
+
+function setupTabs() {
+    document.querySelectorAll('.js-tab').forEach(btn => {
+        btn.addEventListener('click', () => {
+            tabActiva = btn.dataset.id;
+            render();
+        });
+    });
+}
+
+function renderActiveTab() {
+    const zona = document.getElementById('tabContent');
+    if (!zona) return;
+    if (tabActiva === 'digitalizar') renderTabDigitalizar(zona);
+    else if (tabActiva === 'manual') renderTabManual(zona);
+    else if (tabActiva === 'historial') renderTabHistorial(zona);
+}
+
+// ════════════════════════════════════════════════════════════════
+// TAB: DIGITALIZAR (flujo OCR existente)
+// ════════════════════════════════════════════════════════════════
+function renderTabDigitalizar(zona) {
+    zona.innerHTML = `
+        <div class="pasos">
+            <div class="paso ${pasoActual>=1?'activo':''} ${pasoActual>1?'ok':''}" id="p1">1 · Foto</div>
+            <div class="paso ${pasoActual>=2?'activo':''} ${pasoActual>2?'ok':''}" id="p2">2 · Revisar</div>
+            <div class="paso ${pasoActual>=3?'activo':''}" id="p3">3 · Listo</div>
+        </div>
+        <div id="zona-paso"></div>`;
     mostrarPaso(pasoActual);
 }
 
@@ -35,6 +88,7 @@ function mostrarPaso(n) {
         el.className = 'paso' + (i+1 < n ? ' ok' : i+1 === n ? ' activo' : '');
     });
     const zona = document.getElementById('zona-paso');
+    if (!zona) return;
     if (n === 1) zona.innerHTML = htmlPaso1();
     else if (n === 2) zona.innerHTML = htmlPaso2();
     else zona.innerHTML = htmlPaso3();
@@ -393,12 +447,336 @@ function reiniciar() {
     archivoSel = null;
     datosExtra  = null;
     tipoDoc     = 'planilla';
+    pasoActual  = 1;
     mostrarPaso(1);
 }
 
-// initPaso3 conecta el botón al reiniciar (ya no hay onclick inline)
 function initPaso3() {
     document.getElementById('btn-reiniciar')?.addEventListener('click', reiniciar);
+}
+
+// ════════════════════════════════════════════════════════════════
+// TAB: CARGA MANUAL
+// ════════════════════════════════════════════════════════════════
+async function renderTabManual(zona) {
+    zona.innerHTML = '<div class="loading-msg"><div class="spinner"></div> Cargando catálogos...</div>';
+
+    try {
+        const [ms, ins] = await Promise.all([
+            apiGet('/api/produccion/moldes').catch(() => []),
+            apiGet('/api/produccion/insumos').catch(() => []),
+        ]);
+        moldesDB = ms || [];
+        insumosDB = ins || [];
+    } catch { /* continuar sin catálogos */ }
+
+    const hoy = new Date().toISOString().slice(0,10);
+
+    const opsMolde = moldesDB.map(m =>
+        `<option value="${esh(m.codigo)}">${esh(m.codigo)} — ${esh(m.descripcion)}</option>`
+    ).join('');
+
+    const opsIns = insumosDB.map(x =>
+        `<option value="${esh(x.codigo)}">${esh(x.descripcion)}</option>`
+    ).join('');
+
+    function filasMoldeHTML() {
+        return manualMoldes.map((mm, i) => `<tr>
+            <td><select class="mm-molde" data-idx="${i}" style="min-width:90px">
+                <option value="">— selecciona —</option>${opsMolde.replace(
+                    mm.codigoMolde ? `value="${esh(mm.codigoMolde)}"` : '###NONE###',
+                    mm.codigoMolde ? `value="${esh(mm.codigoMolde)}" selected` : '###NONE###')}
+            </select></td>
+            <td><input type="number" class="mm-p1" data-idx="${i}" min="0" value="${mm.primera}" style="width:60px"></td>
+            <td><input type="number" class="mm-p2" data-idx="${i}" min="0" value="${mm.segunda}" style="width:60px"></td>
+            <td><input type="number" class="mm-def" data-idx="${i}" min="0" value="${mm.defectuosas}" style="width:60px;color:var(--rojo)"></td>
+            <td><button type="button" class="mm-del btn btn-ghost btn-sm" data-idx="${i}" ${manualMoldes.length<=1?'disabled':''} style="padding:2px 6px">✕</button></td>
+        </tr>`).join('');
+    }
+
+    function filasMatHTML() {
+        return manualMateriales.map((mm, i) => `<tr>
+            <td><select class="mmat-ins" data-idx="${i}" style="min-width:110px">
+                <option value="">— selecciona —</option>${opsIns.replace(
+                    mm.codigoInsumo ? `value="${esh(mm.codigoInsumo)}"` : '###NONE###',
+                    mm.codigoInsumo ? `value="${esh(mm.codigoInsumo)}" selected` : '###NONE###')}
+            </select></td>
+            <td><input type="number" class="mmat-kg" data-idx="${i}" min="0" step="0.1" value="${mm.kg}" style="width:80px"></td>
+            <td><button type="button" class="mmat-del btn btn-ghost btn-sm" data-idx="${i}" style="padding:2px 6px">✕</button></td>
+        </tr>`).join('');
+    }
+
+    zona.innerHTML = `
+    <div class="card">
+        <div class="card-title">Datos generales</div>
+        <div class="form-grid-2">
+            <div class="input-group">
+                <label class="input-label">Fecha</label>
+                <input class="input-field" type="date" id="man-fecha" value="${hoy}">
+            </div>
+            <div class="input-group">
+                <label class="input-label">Operario</label>
+                <input class="input-field" id="man-operario" placeholder="Nombre del operario">
+            </div>
+            <div class="input-group">
+                <label class="input-label">Turno</label>
+                <select class="input-field" id="man-turno">
+                    <option value="">— Seleccionar —</option>
+                    <option value="Mañana">Mañana</option>
+                    <option value="Tarde">Tarde</option>
+                    <option value="Noche">Noche</option>
+                </select>
+            </div>
+            <div class="input-group">
+                <label class="input-label">Material</label>
+                <select class="input-field" id="man-material">
+                    <option value="Virgen">Virgen</option>
+                    <option value="Reciclado">Reciclado</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="flex-between" style="margin-bottom:8px">
+            <div class="card-title" style="margin:0">Moldes</div>
+            <button type="button" class="btn btn-ghost btn-sm" id="man-add-molde">+ Agregar molde</button>
+        </div>
+        <div style="overflow-x:auto">
+        <table class="tbl">
+            <thead><tr>
+                <th>Molde</th><th>1ª Cal.</th><th>2ª Cal.</th><th style="color:var(--rojo)">Def.</th><th></th>
+            </tr></thead>
+            <tbody id="man-moldes-body">${filasMoldeHTML()}</tbody>
+        </table>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="flex-between" style="margin-bottom:8px">
+            <div class="card-title" style="margin:0">Materiales consumidos</div>
+            <button type="button" class="btn btn-ghost btn-sm" id="man-add-mat">+ Agregar material</button>
+        </div>
+        <div style="overflow-x:auto">
+        <table class="tbl">
+            <thead><tr><th>Insumo</th><th>Kg</th><th></th></tr></thead>
+            <tbody id="man-mat-body">${filasMatHTML()}</tbody>
+        </table>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="input-group">
+            <label class="input-label">Observaciones</label>
+            <textarea class="input-field" id="man-obs" rows="2" style="resize:vertical" placeholder="Opcional"></textarea>
+        </div>
+    </div>
+
+    <div id="alerta-manual" style="margin-bottom:8px"></div>
+    <button class="btn btn-cyan btn-full" id="man-guardar">Guardar registro</button>`;
+
+    // ── Eventos ──
+    function syncMoldesFromDOM() {
+        manualMoldes = [];
+        document.querySelectorAll('.mm-molde').forEach((sel, i) => {
+            manualMoldes.push({
+                codigoMolde: sel.value,
+                primera: +(document.querySelector(`.mm-p1[data-idx="${i}"]`)?.value) || 0,
+                segunda: +(document.querySelector(`.mm-p2[data-idx="${i}"]`)?.value) || 0,
+                defectuosas: +(document.querySelector(`.mm-def[data-idx="${i}"]`)?.value) || 0,
+            });
+        });
+    }
+    function syncMatFromDOM() {
+        manualMateriales = [];
+        document.querySelectorAll('.mmat-ins').forEach((sel, i) => {
+            manualMateriales.push({
+                codigoInsumo: sel.value,
+                kg: +(document.querySelector(`.mmat-kg[data-idx="${i}"]`)?.value) || 0,
+            });
+        });
+    }
+    function refreshMoldesTable() {
+        document.getElementById('man-moldes-body').innerHTML = filasMoldeHTML();
+        bindMoldeEvents();
+    }
+    function refreshMatTable() {
+        document.getElementById('man-mat-body').innerHTML = filasMatHTML();
+        bindMatEvents();
+    }
+    function bindMoldeEvents() {
+        document.querySelectorAll('.mm-del').forEach(btn => {
+            btn.addEventListener('click', () => {
+                syncMoldesFromDOM();
+                const idx = +btn.dataset.idx;
+                if (manualMoldes.length > 1) manualMoldes.splice(idx, 1);
+                refreshMoldesTable();
+            });
+        });
+    }
+    function bindMatEvents() {
+        document.querySelectorAll('.mmat-del').forEach(btn => {
+            btn.addEventListener('click', () => {
+                syncMatFromDOM();
+                const idx = +btn.dataset.idx;
+                manualMateriales.splice(idx, 1);
+                refreshMatTable();
+            });
+        });
+    }
+
+    document.getElementById('man-add-molde').addEventListener('click', () => {
+        syncMoldesFromDOM();
+        manualMoldes.push({ codigoMolde:'', primera:0, segunda:0, defectuosas:0 });
+        refreshMoldesTable();
+    });
+    document.getElementById('man-add-mat').addEventListener('click', () => {
+        syncMatFromDOM();
+        manualMateriales.push({ codigoInsumo:'', kg:0 });
+        refreshMatTable();
+    });
+
+    bindMoldeEvents();
+    bindMatEvents();
+
+    document.getElementById('man-guardar').addEventListener('click', guardarManual);
+}
+
+async function guardarManual() {
+    const btn = document.getElementById('man-guardar');
+    const alerta = document.getElementById('alerta-manual');
+    alerta.innerHTML = '';
+
+    // Sync from DOM
+    const moldes = [];
+    document.querySelectorAll('.mm-molde').forEach((sel, i) => {
+        moldes.push({
+            codigoMolde: sel.value,
+            primera: +(document.querySelector(`.mm-p1[data-idx="${i}"]`)?.value) || 0,
+            segunda: +(document.querySelector(`.mm-p2[data-idx="${i}"]`)?.value) || 0,
+            defectuosas: +(document.querySelector(`.mm-def[data-idx="${i}"]`)?.value) || 0,
+        });
+    });
+    const materiales = [];
+    document.querySelectorAll('.mmat-ins').forEach((sel, i) => {
+        const kg = +(document.querySelector(`.mmat-kg[data-idx="${i}"]`)?.value) || 0;
+        if (sel.value && kg > 0)
+            materiales.push({ codigoInsumo: sel.value, kg });
+    });
+
+    const validMoldes = moldes.filter(m => m.codigoMolde);
+    if (validMoldes.length === 0) {
+        alerta.innerHTML = '<div class="alerta-err">Debe seleccionar al menos un molde.</div>';
+        return;
+    }
+
+    const payload = {
+        fecha: document.getElementById('man-fecha')?.value || null,
+        operario: document.getElementById('man-operario')?.value || null,
+        turno: document.getElementById('man-turno')?.value || null,
+        material: document.getElementById('man-material')?.value || 'Virgen',
+        observaciones: document.getElementById('man-obs')?.value || null,
+        moldes: validMoldes,
+        materiales,
+    };
+
+    btn.disabled = true; btn.textContent = 'Guardando…';
+
+    try {
+        const data = await apiPost('/api/produccion/registro', payload);
+        if (data.error) throw new Error(data.error);
+        alerta.innerHTML = `<div class="alerta-ok">✓ Guardado: ${esh(String(data.insertados||0))} molde(s) registrados para ${esh(data.fecha||'')}</div>`;
+        // Reset form
+        manualMoldes = [{ codigoMolde:'', primera:0, segunda:0, defectuosas:0 }];
+        manualMateriales = [];
+        btn.textContent = 'Guardar registro';
+        btn.disabled = false;
+    } catch (err) {
+        alerta.innerHTML = `<div class="alerta-err">⚠ ${esh(err.message)}</div>`;
+        btn.textContent = 'Guardar registro';
+        btn.disabled = false;
+    }
+}
+
+// ════════════════════════════════════════════════════════════════
+// TAB: HISTORIAL
+// ════════════════════════════════════════════════════════════════
+async function renderTabHistorial(zona) {
+    const hoy = new Date().toISOString().slice(0,10);
+    const hace7 = new Date(Date.now() - 7*86400000).toISOString().slice(0,10);
+
+    zona.innerHTML = `
+    <div class="card">
+        <div class="card-title">Filtrar por fecha</div>
+        <div class="form-grid-2">
+            <div class="input-group">
+                <label class="input-label">Desde</label>
+                <input class="input-field" type="date" id="hist-desde" value="${hace7}">
+            </div>
+            <div class="input-group">
+                <label class="input-label">Hasta</label>
+                <input class="input-field" type="date" id="hist-hasta" value="${hoy}">
+            </div>
+        </div>
+        <button class="btn btn-cyan btn-sm" id="hist-buscar" style="margin-top:8px">Buscar</button>
+    </div>
+    <div id="hist-lista"><div class="loading-msg"><div class="spinner"></div> Cargando registros...</div></div>`;
+
+    document.getElementById('hist-buscar').addEventListener('click', cargarHistorial);
+    cargarHistorial();
+}
+
+async function cargarHistorial() {
+    const desde = document.getElementById('hist-desde')?.value || '';
+    const hasta = document.getElementById('hist-hasta')?.value || '';
+    const listaDiv = document.getElementById('hist-lista');
+    if (!listaDiv) return;
+
+    listaDiv.innerHTML = '<div class="loading-msg"><div class="spinner"></div> Cargando...</div>';
+
+    try {
+        const params = new URLSearchParams();
+        if (desde) params.set('desde', desde);
+        if (hasta) params.set('hasta', hasta);
+        const registros = await apiGet('/api/produccion/registros?' + params.toString());
+
+        if (!registros || registros.length === 0) {
+            listaDiv.innerHTML = `
+                <div class="empty">
+                    <div class="empty-icon">📋</div>
+                    <div class="empty-text">No hay registros en este rango de fechas</div>
+                </div>`;
+            return;
+        }
+
+        let html = '';
+        let fechaActual = '';
+        for (const r of registros) {
+            if (r.fecha !== fechaActual) {
+                fechaActual = r.fecha;
+                html += `<div class="section-header" style="margin-top:12px">${esh(formatFecha(r.fecha))}</div>`;
+            }
+            const total = (r.primera||0) + (r.segunda||0) + (r.defectuosas||0);
+            html += `
+            <div class="list-item">
+                <div class="list-item-main">
+                    <div class="list-item-title">${esh(r.molde)}</div>
+                    <div class="list-item-sub">
+                        ${esh(r.operario||'—')} · ${esh(r.turno||'—')} · ${esh(r.material||'')}
+                    </div>
+                </div>
+                <div style="text-align:right;font-size:.8rem">
+                    <span class="tag tag-verde">1ª ${r.primera||0}</span>
+                    <span class="tag tag-naranja">2ª ${r.segunda||0}</span>
+                    <span class="tag tag-rojo">Def ${r.defectuosas||0}</span>
+                    <div class="text-dim text-sm" style="margin-top:2px">Total: <span class="bold">${total}</span></div>
+                </div>
+            </div>`;
+        }
+        listaDiv.innerHTML = html;
+    } catch (err) {
+        listaDiv.innerHTML = `<div class="alerta-err">⚠ ${esh(err.message)}</div>`;
+    }
 }
 
 // ── Arranque ──────────────────────────────────────────────

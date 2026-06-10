@@ -144,6 +144,191 @@ namespace SistemaGestion.Api.Endpoints
                         statusCode: 503);
                 }
             }).RequireAuthorization();
+
+            // ── Registro manual de producción (sin digitalizador) ─────────
+
+            app.MapPost("/api/produccion/registro", (HttpContext ctx, RegistroProduccionRequest req) =>
+            {
+                if (req.Moldes == null || req.Moldes.Count == 0)
+                    return Results.BadRequest(new { error = "Debe incluir al menos un molde." });
+
+                string fecha = string.IsNullOrWhiteSpace(req.Fecha)
+                    ? DateTime.Today.ToString("yyyy-MM-dd") : req.Fecha;
+                string usuario = ctx.User?.FindFirst("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name")?.Value ?? "portal";
+
+                using var c = Db.Conn();
+                using var tx = c.BeginTransaction();
+                try
+                {
+                    int insertados = 0;
+                    foreach (var m in req.Moldes)
+                    {
+                        if (string.IsNullOrWhiteSpace(m.CodigoMolde)) continue;
+                        var cmd = c.CreateCommand(); cmd.Transaction = tx;
+                        cmd.CommandText = @"INSERT INTO RegistroProduccionDia
+                            (Fecha,CodigoMolde,Material,Operario,Turno,
+                             CantPrimeraCalidad,CantSegundaCalidad,CantDefectuosas,Observaciones)
+                            VALUES($f,$mol,$mat,$op,$turno,$p1,$p2,$def,$obs)";
+                        cmd.Parameters.AddWithValue("$f", fecha);
+                        cmd.Parameters.AddWithValue("$mol", m.CodigoMolde);
+                        cmd.Parameters.AddWithValue("$mat", req.Material ?? "Virgen");
+                        cmd.Parameters.AddWithValue("$op", req.Operario ?? usuario);
+                        cmd.Parameters.AddWithValue("$turno", req.Turno ?? "");
+                        cmd.Parameters.AddWithValue("$p1", m.Primera);
+                        cmd.Parameters.AddWithValue("$p2", m.Segunda);
+                        cmd.Parameters.AddWithValue("$def", m.Defectuosas);
+                        cmd.Parameters.AddWithValue("$obs", req.Observaciones ?? "");
+                        cmd.ExecuteNonQuery();
+                        insertados++;
+                    }
+
+                    // Descontar insumos del kardex si se proporcionan materiales
+                    if (req.Materiales != null)
+                    {
+                        foreach (var mat in req.Materiales)
+                        {
+                            if (string.IsNullOrWhiteSpace(mat.CodigoInsumo) || mat.Kg <= 0) continue;
+                            // Update stock
+                            var upd = c.CreateCommand(); upd.Transaction = tx;
+                            upd.CommandText = @"UPDATE ProductosProveedor SET StockActual=MAX(0,StockActual-$kg)
+                                WHERE CodigoInterno=$cod";
+                            upd.Parameters.AddWithValue("$kg", (double)mat.Kg);
+                            upd.Parameters.AddWithValue("$cod", mat.CodigoInsumo);
+                            upd.ExecuteNonQuery();
+
+                            // Kardex movement
+                            var mv = c.CreateCommand(); mv.Transaction = tx;
+                            mv.CommandText = @"INSERT INTO MovimientosMateriaPrima
+                                (IdInsumo,FechaHora,TipoMovimiento,Concepto,Cantidad,Usuario)
+                                SELECT Id,datetime('now','localtime'),'SALIDA',$conc,$kg,$usr
+                                FROM ProductosProveedor WHERE CodigoInterno=$cod";
+                            mv.Parameters.AddWithValue("$cod", mat.CodigoInsumo);
+                            mv.Parameters.AddWithValue("$conc", "Producción " + fecha);
+                            mv.Parameters.AddWithValue("$kg", (double)mat.Kg);
+                            mv.Parameters.AddWithValue("$usr", usuario);
+                            mv.ExecuteNonQuery();
+                        }
+                    }
+
+                    tx.Commit();
+                    return Results.Ok(new { ok = true, insertados, fecha });
+                }
+                catch (Exception ex)
+                {
+                    tx.Rollback();
+                    return Results.Problem(ex.Message);
+                }
+            }).RequireAuthorization();
+
+            // ── Listado de registros recientes ────────────────────────────
+
+            app.MapGet("/api/produccion/registros", (string? desde, string? hasta) =>
+            {
+                string d = desde ?? DateTime.Today.AddDays(-7).ToString("yyyy-MM-dd");
+                string h = hasta ?? DateTime.Today.ToString("yyyy-MM-dd");
+                using var c = Db.Conn();
+                var cmd = c.CreateCommand();
+                cmd.CommandText = @"SELECT Id,Fecha,CodigoMolde,Material,Operario,Turno,
+                    CantPrimeraCalidad,CantSegundaCalidad,CantDefectuosas,Observaciones
+                    FROM RegistroProduccionDia WHERE Fecha BETWEEN $d AND $h
+                    ORDER BY Fecha DESC, Id DESC LIMIT 100";
+                cmd.Parameters.AddWithValue("$d", d);
+                cmd.Parameters.AddWithValue("$h", h);
+                var lista = new List<object>();
+                using var r = cmd.ExecuteReader();
+                while (r.Read())
+                    lista.Add(new {
+                        id=Db.I(r,0), fecha=Db.S(r,1), molde=Db.S(r,2), material=Db.S(r,3),
+                        operario=Db.S(r,4), turno=Db.S(r,5),
+                        primera=Db.I2(r,6), segunda=Db.I2(r,7), defectuosas=Db.I2(r,8),
+                        obs=Db.S(r,9)
+                    });
+                return Results.Ok(lista);
+            }).RequireAuthorization();
+
+            // ── Planilla imprimible en blanco ─────────────────────────────
+
+            app.MapGet("/api/produccion/planilla", async (HttpContext ctx) =>
+            {
+                // Load mold catalog for headers
+                using var c = Db.Conn();
+                var cmd = c.CreateCommand();
+                cmd.CommandText = "SELECT CodigoMold, Descripcion FROM TbMoldes ORDER BY CodigoMold";
+                var moldes = new List<(string cod, string desc)>();
+                using var r = cmd.ExecuteReader();
+                while (r.Read()) moldes.Add((Db.S(r,0), Db.S(r,1)));
+
+                var hoy = DateTime.Today.ToString("dd/MM/yyyy");
+                var html = "<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'>" +
+                "<title>Planilla de Producción</title><style>" +
+                "@page{size:letter landscape;margin:8mm}" +
+                "*{box-sizing:border-box;margin:0;padding:0;font-family:Arial,sans-serif;font-size:9pt}" +
+                "body{color:#111}" +
+                ".hdr{text-align:center;margin-bottom:4mm}" +
+                ".hdr h1{font-size:14pt;font-weight:900}" +
+                ".hdr .sub{font-size:8pt;color:#555}" +
+                ".info{display:flex;gap:4mm;margin-bottom:3mm;font-size:9pt}" +
+                ".info div{border-bottom:1px solid #333;flex:1;padding:1mm 0}" +
+                ".info label{font-weight:700;font-size:8pt}" +
+                "table{width:100%;border-collapse:collapse;margin-bottom:3mm}" +
+                "th,td{border:1px solid #333;padding:2mm 3mm;text-align:center}" +
+                "th{background:#eee;font-size:7.5pt;text-transform:uppercase}" +
+                "td{height:8mm}" +
+                ".noprint{margin-bottom:4mm;padding:2mm 8mm;background:#333;color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:10pt}" +
+                "@media print{.noprint{display:none!important}}" +
+                "</style></head><body>" +
+                "<button class='noprint' onclick='window.print()'>Imprimir</button>" +
+                "<div class='hdr'>" +
+                "<h1>EL HATO PASCHER C.A.</h1>" +
+                "<div class='sub'>PLANILLA DE CONTROL DE PRODUCCIÓN DIARIA</div>" +
+                "</div>" +
+                "<div class='info'>" +
+                "<div><label>FECHA:</label> ___/___/______</div>" +
+                "<div><label>OPERARIO:</label> _________________________</div>" +
+                "<div><label>TURNO:</label> __________</div>" +
+                "<div><label>MATERIAL:</label> ☐ Virgen ☐ Reciclado</div>" +
+                "</div>" +
+                "<table><thead><tr><th style='width:30mm'>MOLDE</th><th>1ª CALIDAD</th><th>2ª CALIDAD</th><th>RECICLADO</th><th style='color:red'>DEFECTUOSAS</th><th>TOTAL</th></tr></thead><tbody>";
+
+                // One row per mold from catalog, plus empty rows
+                foreach (var (cod, desc) in moldes)
+                    html += $"<tr><td style='text-align:left;font-size:8pt'>{System.Web.HttpUtility.HtmlEncode(cod)} - {System.Web.HttpUtility.HtmlEncode(desc)}</td><td></td><td></td><td></td><td></td><td></td></tr>";
+
+                // Add 5 blank rows for unlisted molds
+                for (int i = 0; i < 5; i++)
+                    html += "<tr><td></td><td></td><td></td><td></td><td></td><td></td></tr>";
+
+                html += "<tr style='font-weight:700;background:#f5f5f5'><td>TOTALES</td><td></td><td></td><td></td><td></td><td></td></tr>" +
+                "</tbody></table>" +
+                "<table><thead><tr><th style='width:30mm'>MATERIAL / INSUMO</th><th>KG UTILIZADOS</th><th>LOTE</th><th>OBSERVACIONES</th></tr></thead><tbody>";
+
+                for (int i = 0; i < 6; i++)
+                    html += "<tr><td></td><td></td><td></td><td></td></tr>";
+
+                html += "</tbody></table>" +
+                "<div class='info' style='margin-top:8mm'>" +
+                "<div><label>OBSERVACIONES:</label> ___________________________________________</div>" +
+                "</div>" +
+                "<div class='info' style='margin-top:12mm'>" +
+                "<div style='text-align:center;border-top:1px solid #333;border-bottom:none;padding-top:1mm'><label>FIRMA OPERARIO</label></div>" +
+                "<div style='text-align:center;border-top:1px solid #333;border-bottom:none;padding-top:1mm'><label>FIRMA SUPERVISOR</label></div>" +
+                "</div>" +
+                "</body></html>";
+
+                ctx.Response.ContentType = "text/html; charset=utf-8";
+                await ctx.Response.WriteAsync(html);
+            }).RequireAuthorization();
         }
     }
+
+    public record MoldeRegistro(string CodigoMolde, int Primera, int Segunda, int Defectuosas);
+    public record MaterialRegistro(string CodigoInsumo, decimal Kg);
+    public record RegistroProduccionRequest(
+        string? Fecha,
+        string? Material,
+        string? Operario,
+        string? Turno,
+        string? Observaciones,
+        List<MoldeRegistro>? Moldes,
+        List<MaterialRegistro>? Materiales);
 }

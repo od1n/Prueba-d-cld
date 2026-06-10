@@ -460,8 +460,8 @@ async function renderTabEmpleados() {
     </div>
     <div id="listaEmpleados"><div class="loading-msg"><div class="spinner"></div></div></div>`;
     try {
-        const solo = true; // estado del checkbox al momento de carga
-        const lista = await apiGet('/api/nomina/empleados?soloActivos=true') || [];
+        const solo = document.getElementById('soloActivos')?.checked ?? true;
+        const lista = await apiGet(`/api/nomina/empleados?soloActivos=${solo}`) || [];
         renderListaEmpleados(lista);
     } catch(err) {
         document.getElementById('listaEmpleados').innerHTML =

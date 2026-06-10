@@ -293,4 +293,11 @@ async function guardarMovimiento(tipo, codigo, idInsumo, esB) {
     }
 }
 
+function tagTipo(tipo) {
+    if (tipo === 'ENTRADA') return '<span class="tag tag-verde">ENTRADA</span>';
+    if (tipo === 'SALIDA')  return '<span class="tag tag-rojo">SALIDA</span>';
+    if (tipo === 'AJUSTE')  return '<span class="tag tag-naranja">AJUSTE</span>';
+    return '<span class="tag tag-dim">' + esh(tipo) + '</span>';
+}
+
 render();

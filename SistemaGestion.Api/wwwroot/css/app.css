@@ -338,6 +338,22 @@ select.input-field { cursor: pointer; }
 .text-sm   { font-size: 13px; }
 .bold { font-weight: 700; }
 .hidden { display: none !important; }
+.mb-4  { margin-bottom: 4px; }
+.mb-12 { margin-bottom: 12px; }
+.section-header { font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--texto-dim); letter-spacing: 0.5px; }
+
+/* Autocomplete dropdowns */
+.autocomplete-drop {
+  position: absolute; left: 0; right: 0; top: 100%;
+  background: var(--fondo-card); border: 1px solid var(--borde);
+  border-radius: var(--radio); max-height: 220px; overflow-y: auto;
+  z-index: 100; box-shadow: 0 8px 24px rgba(0,0,0,.4);
+}
+.ac-item {
+  padding: 8px 12px; cursor: pointer; font-size: 9pt;
+  border-bottom: 1px solid var(--borde); color: var(--texto);
+}
+.ac-item:hover { background: var(--borde); }
 
 /* Botón logout del topbar — corregido tap target */
 .topbar-logout {

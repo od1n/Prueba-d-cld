@@ -26,7 +26,7 @@ async function render() {
         ${TIPOS.map(t => `
         <button type="button" class="btn-tipo js-tipo" data-id="${t.id}"
           style="white-space:nowrap;padding:7px 14px;border-radius:20px;border:1px solid var(--borde);
-                 background:${t.id===tipoActivo?'var(--azul)':'var(--superficie)'};
+                 background:${t.id===tipoActivo?'var(--azul)':'var(--fondo-card)'};
                  color:${t.id===tipoActivo?'#fff':'var(--texto)'};cursor:pointer;font:inherit">
           ${t.icon} ${t.label}
         </button>`).join('')}
@@ -55,7 +55,7 @@ async function render() {
             tipoActivo = btn.dataset.id;
             document.querySelectorAll('.js-tipo').forEach(b => {
                 const activo = b.dataset.id === tipoActivo;
-                b.style.background = activo ? 'var(--azul)' : 'var(--superficie)';
+                b.style.background = activo ? 'var(--azul)' : 'var(--fondo-card)';
                 b.style.color      = activo ? '#fff' : 'var(--texto)';
             });
             // Ocultar fechas para inventario

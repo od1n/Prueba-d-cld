@@ -11,14 +11,14 @@ namespace SistemaGestion.Api.Endpoints
                 if (!TokenService.PuedeVerCxC(ctx.User)) return Results.Forbid();
                 using var c = Db.Conn();
                 var cmd = c.CreateCommand();
-                cmd.CommandText = "SELECT Codigo,Descripcion,CiRif,Telefono,Ciudad FROM Clientes ORDER BY Descripcion LIMIT 100";
+                cmd.CommandText = "SELECT Codigo,Descripcion,CiRif,Telefono,Ciudad,Direccion,Email,Contacto FROM Clientes ORDER BY Descripcion LIMIT 100";
                 var lista = new List<object>();
                 // Aplicar filtro en SQL para búsqueda por código, nombre y RIF
                 if (!string.IsNullOrWhiteSpace(q))
                 {
                     // Primero exacto por código, luego parcial por nombre y RIF
                     // ORDER BY prioridad: código exacto > código parcial > nombre > RIF
-                    cmd.CommandText = @"SELECT Codigo,Descripcion,CiRif,Telefono,Ciudad,
+                    cmd.CommandText = @"SELECT Codigo,Descripcion,CiRif,Telefono,Ciudad,Direccion,Email,Contacto,
                         CASE
                             WHEN Codigo = $qExact THEN 0
                             WHEN Codigo LIKE $qStart THEN 1
@@ -35,7 +35,8 @@ namespace SistemaGestion.Api.Endpoints
                 using var r = cmd.ExecuteReader();
                 while (r.Read())
                     lista.Add(new { codigo=Db.S(r,0), nombre=Db.S(r,1), ciRif=Db.S(r,2),
-                        telefono=Db.S(r,3), ciudad=Db.S(r,4) });
+                        telefono=Db.S(r,3), ciudad=Db.S(r,4), direccion=Db.S(r,5),
+                        email=Db.S(r,6), contacto=Db.S(r,7) });
                 return Results.Ok(lista);
             }).RequireAuthorization();
 
@@ -74,8 +75,163 @@ namespace SistemaGestion.Api.Endpoints
                 }
                 return Results.Ok(new { cliente, saldoTotal, vencido, cuentas });
             }).RequireAuthorization();
+
+            // ── POST crear cliente ───────────────────────────────────────
+            app.MapPost("/api/clientes", (HttpContext ctx, ClienteRequest req) =>
+            {
+                if (!TokenService.PuedeVerCxC(ctx.User)) return Results.Forbid();
+                if (string.IsNullOrWhiteSpace(req.Codigo) || string.IsNullOrWhiteSpace(req.Descripcion))
+                    return Results.BadRequest(new { error = "Código y nombre son obligatorios." });
+
+                using var c = Db.Conn();
+                // Verificar que no exista
+                var chk = c.CreateCommand();
+                chk.CommandText = "SELECT COUNT(*) FROM Clientes WHERE Codigo=$cod";
+                chk.Parameters.AddWithValue("$cod", req.Codigo.Trim());
+                if ((long)(chk.ExecuteScalar() ?? 0L) > 0)
+                    return Results.Conflict(new { error = $"Ya existe un cliente con código '{req.Codigo.Trim()}'." });
+
+                var cmd = c.CreateCommand();
+                cmd.CommandText = @"INSERT INTO Clientes (Codigo,Descripcion,CiRif,Telefono,Ciudad,Direccion,Email,Contacto)
+                    VALUES($cod,$desc,$rif,$tel,$ciu,$dir,$email,$cont)";
+                cmd.Parameters.AddWithValue("$cod",   req.Codigo.Trim());
+                cmd.Parameters.AddWithValue("$desc",  req.Descripcion.Trim());
+                cmd.Parameters.AddWithValue("$rif",   req.CiRif?.Trim() ?? "");
+                cmd.Parameters.AddWithValue("$tel",   req.Telefono?.Trim() ?? "");
+                cmd.Parameters.AddWithValue("$ciu",   req.Ciudad?.Trim() ?? "");
+                cmd.Parameters.AddWithValue("$dir",   req.Direccion?.Trim() ?? "");
+                cmd.Parameters.AddWithValue("$email", req.Email?.Trim() ?? "");
+                cmd.Parameters.AddWithValue("$cont",  req.Contacto?.Trim() ?? "");
+                cmd.ExecuteNonQuery();
+                return Results.Created($"/api/clientes/{Uri.EscapeDataString(req.Codigo.Trim())}",
+                    new { codigo = req.Codigo.Trim(), nombre = req.Descripcion.Trim() });
+            }).RequireAuthorization();
+
+            // ── PUT actualizar cliente ────────────────────────────────────
+            app.MapPut("/api/clientes/{codigo}", (HttpContext ctx, string codigo, ClienteRequest req) =>
+            {
+                if (!TokenService.PuedeVerCxC(ctx.User)) return Results.Forbid();
+                if (string.IsNullOrWhiteSpace(req.Descripcion))
+                    return Results.BadRequest(new { error = "El nombre es obligatorio." });
+
+                using var c = Db.Conn();
+                var chk = c.CreateCommand();
+                chk.CommandText = "SELECT COUNT(*) FROM Clientes WHERE Codigo=$cod";
+                chk.Parameters.AddWithValue("$cod", codigo);
+                if ((long)(chk.ExecuteScalar() ?? 0L) == 0)
+                    return Results.NotFound(new { error = "Cliente no encontrado." });
+
+                var cmd = c.CreateCommand();
+                cmd.CommandText = @"UPDATE Clientes SET Descripcion=$desc, CiRif=$rif, Telefono=$tel,
+                    Ciudad=$ciu, Direccion=$dir, Email=$email, Contacto=$cont
+                    WHERE Codigo=$cod";
+                cmd.Parameters.AddWithValue("$cod",   codigo);
+                cmd.Parameters.AddWithValue("$desc",  req.Descripcion.Trim());
+                cmd.Parameters.AddWithValue("$rif",   req.CiRif?.Trim() ?? "");
+                cmd.Parameters.AddWithValue("$tel",   req.Telefono?.Trim() ?? "");
+                cmd.Parameters.AddWithValue("$ciu",   req.Ciudad?.Trim() ?? "");
+                cmd.Parameters.AddWithValue("$dir",   req.Direccion?.Trim() ?? "");
+                cmd.Parameters.AddWithValue("$email", req.Email?.Trim() ?? "");
+                cmd.Parameters.AddWithValue("$cont",  req.Contacto?.Trim() ?? "");
+                cmd.ExecuteNonQuery();
+                return Results.Ok(new { ok = true });
+            }).RequireAuthorization();
+
+            // ── DELETE eliminar cliente ───────────────────────────────────
+            app.MapDelete("/api/clientes/{codigo}", (HttpContext ctx, string codigo) =>
+            {
+                if (!TokenService.PuedeVerCxC(ctx.User)) return Results.Forbid();
+                using var c = Db.Conn();
+                var chk = c.CreateCommand();
+                chk.CommandText = "SELECT COUNT(*) FROM Clientes WHERE Codigo=$cod";
+                chk.Parameters.AddWithValue("$cod", codigo);
+                if ((long)(chk.ExecuteScalar() ?? 0L) == 0)
+                    return Results.NotFound(new { error = "Cliente no encontrado." });
+
+                var cmd = c.CreateCommand();
+                cmd.CommandText = "DELETE FROM Clientes WHERE Codigo=$cod";
+                cmd.Parameters.AddWithValue("$cod", codigo);
+                cmd.ExecuteNonQuery();
+                return Results.Ok(new { ok = true });
+            }).RequireAuthorization();
+
+            // ── POST importar CSV ────────────────────────────────────────
+            app.MapPost("/api/clientes/importar-csv", (HttpContext ctx, ImportCsvRequest req) =>
+            {
+                if (!TokenService.PuedeVerCxC(ctx.User)) return Results.Forbid();
+                if (req.Clientes == null || req.Clientes.Count == 0)
+                    return Results.BadRequest(new { error = "No hay clientes para importar." });
+
+                using var c = Db.Conn();
+                using var tx = c.BeginTransaction();
+                int importados = 0, errores = 0;
+                var detallesErrores = new List<string>();
+                try
+                {
+                    foreach (var cl in req.Clientes)
+                    {
+                        if (string.IsNullOrWhiteSpace(cl.Codigo) || string.IsNullOrWhiteSpace(cl.Descripcion))
+                        {
+                            errores++;
+                            detallesErrores.Add($"Fila sin código o nombre: '{cl.Codigo}'");
+                            continue;
+                        }
+                        try
+                        {
+                            var cmd = c.CreateCommand(); cmd.Transaction = tx;
+                            cmd.CommandText = @"INSERT OR REPLACE INTO Clientes
+                                (Codigo,Descripcion,CiRif,Telefono,Ciudad,Direccion,Email,Contacto)
+                                VALUES($cod,$desc,$rif,$tel,$ciu,$dir,$email,$cont)";
+                            cmd.Parameters.AddWithValue("$cod",   cl.Codigo.Trim());
+                            cmd.Parameters.AddWithValue("$desc",  cl.Descripcion.Trim());
+                            cmd.Parameters.AddWithValue("$rif",   cl.CiRif?.Trim() ?? "");
+                            cmd.Parameters.AddWithValue("$tel",   cl.Telefono?.Trim() ?? "");
+                            cmd.Parameters.AddWithValue("$ciu",   cl.Ciudad?.Trim() ?? "");
+                            cmd.Parameters.AddWithValue("$dir",   cl.Direccion?.Trim() ?? "");
+                            cmd.Parameters.AddWithValue("$email", cl.Email?.Trim() ?? "");
+                            cmd.Parameters.AddWithValue("$cont",  cl.Contacto?.Trim() ?? "");
+                            cmd.ExecuteNonQuery();
+                            importados++;
+                        }
+                        catch
+                        {
+                            errores++;
+                            detallesErrores.Add($"Error insertando '{cl.Codigo}'");
+                        }
+                    }
+                    tx.Commit();
+                    return Results.Ok(new { importados, errores, detallesErrores });
+                }
+                catch (Exception ex)
+                {
+                    tx.Rollback();
+                    return Results.Problem(ex.Message);
+                }
+            }).RequireAuthorization();
         }
     }
+
+    public record ClienteRequest(
+        string? Codigo,
+        string? Descripcion,
+        string? CiRif,
+        string? Telefono,
+        string? Ciudad,
+        string? Direccion,
+        string? Email,
+        string? Contacto);
+
+    public record ImportClienteCsv(
+        string? Codigo,
+        string? Descripcion,
+        string? CiRif,
+        string? Telefono,
+        string? Ciudad,
+        string? Direccion,
+        string? Email,
+        string? Contacto);
+
+    public record ImportCsvRequest(List<ImportClienteCsv> Clientes);
 
     public static class FacturasEndpoints
     {
