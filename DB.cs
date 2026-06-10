@@ -1678,6 +1678,21 @@ namespace SistemaGestion
                         "CREATE INDEX IF NOT EXISTS idx_pp_prov ON ProductosProveedor(IdProveedorPrinc);");
                 }
 
+                // ── Retroactive fix: columnas faltantes en CategoriasGasto ──
+                // Corre SIEMPRE (fuera del bloque if versionActual < 20) para
+                // reparar BDs donde V20 corrió con código viejo sin Color/Orden.
+                if (TablaExiste(conn, tx, "CategoriasGasto"))
+                {
+                    if (!ColumnaExiste(conn, tx, "CategoriasGasto", "Color"))
+                        EjecutarSql(conn, tx, "ALTER TABLE CategoriasGasto ADD COLUMN Color TEXT DEFAULT '#1A4A8A'");
+                    if (!ColumnaExiste(conn, tx, "CategoriasGasto", "Activa"))
+                        EjecutarSql(conn, tx, "ALTER TABLE CategoriasGasto ADD COLUMN Activa INTEGER NOT NULL DEFAULT 1");
+                    if (!ColumnaExiste(conn, tx, "CategoriasGasto", "Orden"))
+                        EjecutarSql(conn, tx, "ALTER TABLE CategoriasGasto ADD COLUMN Orden INTEGER NOT NULL DEFAULT 0");
+                    if (!ColumnaExiste(conn, tx, "CategoriasGasto", "EsMateriaPrima"))
+                        EjecutarSql(conn, tx, "ALTER TABLE CategoriasGasto ADD COLUMN EsMateriaPrima INTEGER NOT NULL DEFAULT 0");
+                }
+
                 tx.Commit();
                 RegistrarAuditoria("MIGRACION_OK", "Sistema",
                     "Esquema actualizado a v" + SCHEMA_VERSION);
@@ -1806,18 +1821,29 @@ namespace SistemaGestion
             EjecutarSql(conn, tx,
                 "CREATE INDEX IF NOT EXISTS idx_gastos_vencimiento ON Gastos(FechaVencimiento);");
 
-            // 6. Categorías predefinidas (admin puede agregar/desactivar)
-            EjecutarSql(conn, tx, @"
-                INSERT OR IGNORE INTO CategoriasGasto (Nombre, Color, Orden, EsMateriaPrima) VALUES
-                    ('Materia Prima',          '#1A4A8A', 1, 1),
-                    ('Servicios públicos',     '#2D6CC0', 2, 0),
-                    ('Mantenimiento',          '#0F6E56', 3, 0),
-                    ('Oficina y papelería',    '#BA7517', 4, 0),
-                    ('Limpieza',               '#534AB7', 5, 0),
-                    ('Ferretería y herramientas','#A32D2D', 6, 0),
-                    ('Honorarios',             '#A35A1A', 7, 0),
-                    ('Combustible y transporte','#A8B1BB', 8, 0),
-                    ('Otros',                  '#888780', 99, 0);");
+            // 6. Categorías predefinidas — solo si la tabla está vacía.
+            //    Si ya tiene filas: es BD antigua con categorías propias; no sobrescribir.
+            //    Si está vacía: se acaba de crear con CREATE TABLE y tiene TODAS las columnas.
+            {
+                var cntCmd = conn.CreateCommand();
+                cntCmd.Transaction = tx;
+                cntCmd.CommandText = "SELECT COUNT(*) FROM CategoriasGasto";
+                long rowCount = (long)cntCmd.ExecuteScalar();
+                if (rowCount == 0)
+                {
+                    EjecutarSql(conn, tx, @"
+                        INSERT OR IGNORE INTO CategoriasGasto (Nombre, Color, Orden, EsMateriaPrima) VALUES
+                            ('Materia Prima',            '#1A4A8A', 1, 1),
+                            ('Servicios públicos',       '#2D6CC0', 2, 0),
+                            ('Mantenimiento',            '#0F6E56', 3, 0),
+                            ('Oficina y papelería',      '#BA7517', 4, 0),
+                            ('Limpieza',                 '#534AB7', 5, 0),
+                            ('Ferretería y herramientas','#A32D2D', 6, 0),
+                            ('Honorarios',               '#A35A1A', 7, 0),
+                            ('Combustible y transporte',  '#A8B1BB', 8, 0),
+                            ('Otros',                    '#888780', 99, 0);");
+                }
+            }
         }
 
         // ────────────────────────────────────────────────────────────────────
