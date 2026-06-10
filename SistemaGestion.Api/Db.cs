@@ -22,7 +22,9 @@ namespace SistemaGestion.Api
             {
                 using var c = Conn();
                 string[] fixes = {
-                    "ALTER TABLE Inventario ADD COLUMN Activo INTEGER NOT NULL DEFAULT 1"
+                    "ALTER TABLE Inventario ADD COLUMN Activo INTEGER NOT NULL DEFAULT 1",
+                    "ALTER TABLE Clientes ADD COLUMN Email TEXT DEFAULT ''",
+                    "ALTER TABLE Clientes ADD COLUMN Contacto TEXT DEFAULT ''"
                 };
                 foreach (var sql in fixes)
                 {

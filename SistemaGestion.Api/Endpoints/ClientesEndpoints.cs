@@ -375,9 +375,10 @@ namespace SistemaGestion.Api.Endpoints
 
                     // Insertar cabecera
                     var ins = c.CreateCommand(); ins.Transaction = tx;
+                    string tipoDoc = req.PctIva > 0 ? "FacturaConIVA" : "NotaEntrega";
                     ins.CommandText = @"INSERT INTO Facturas
-                        (NumeroF,Fecha,Codigo,Descuento,FormaDePago,Abono,IvaF,DiasCreditoF,TotalF,Observaciones)
-                        VALUES($n,$f,$cl,$desc,$fp,$ab,$iva,$dc,$tot,$obs)";
+                        (NumeroF,Fecha,Codigo,Descuento,FormaDePago,Abono,IvaF,DiasCreditoF,TotalF,Observaciones,TipoDocumento)
+                        VALUES($n,$f,$cl,$desc,$fp,$ab,$iva,$dc,$tot,$obs,$tipo)";
                     ins.Parameters.AddWithValue("$n",   numF);
                     ins.Parameters.AddWithValue("$f",   fecha);
                     ins.Parameters.AddWithValue("$cl",  req.CodigoCliente ?? "");
@@ -388,6 +389,7 @@ namespace SistemaGestion.Api.Endpoints
                     ins.Parameters.AddWithValue("$dc",  req.DiasCredito);
                     ins.Parameters.AddWithValue("$tot", (double)total);
                     ins.Parameters.AddWithValue("$obs", req.Observaciones ?? "");
+                    ins.Parameters.AddWithValue("$tipo", tipoDoc);
                     ins.ExecuteNonQuery();
 
                     // Obtener rowid
