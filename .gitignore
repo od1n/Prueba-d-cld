@@ -48,3 +48,7 @@ winforms-patterns/
 .env
 *.env
 digitalizador/.env
+recursos
+grafiacos/
+ehp-deploy.zip
+SISTEMA_INTEGRATION_SUMMARY.md
