@@ -206,7 +206,7 @@ function renderNav(activa) {
         { id: 'compras',    icon: '🛒', label: 'Compras',  href: '/pages/compras.html' },
         { id: 'reportes',   icon: '📊', label: 'Reportes', href: '/pages/reportes.html' },
         { id: 'nomina',     icon: '💰', label: 'Nómina',   href: '/pages/nomina.html' },
-        { id: 'produccion', icon: '⊡',  label: 'Scan',     href: '/pages/digitalizador.html' },
+        { id: 'produccion', icon: '🏭', label: 'Producción', href: '/pages/digitalizador.html' },
     ];
     return `
     <nav class="bottom-nav" role="navigation" aria-label="Navegación principal">
