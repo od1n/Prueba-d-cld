@@ -1633,6 +1633,7 @@ namespace SistemaGestion
                 //   FK), la renombramos a Gastos_legacy_v9 para conservar los
                 //   datos y crear la nueva con el schema correcto.
                 // ── Retroactive rebuild: CategoriasGasto schema completo ──────────────
+                _ultimoSqlMigracion = "[pre-v20] Retroactive rebuild CategoriasGasto — check";
                 // BDs pre-v20 tienen CategoriasGasto sin Color/Orden/EsMateriaPrima.
                 // ALTER TABLE ADD COLUMN puede fallar en algunos estados de la BD;
                 // usamos el enfoque recomendado por SQLite: crear tabla temporal con
@@ -1760,9 +1761,12 @@ namespace SistemaGestion
             {
                 tx.Rollback();
                 RegistrarAuditoria("MIGRACION_ERROR", "Sistema", ex.Message);
+                string sqlCtx = _ultimoSqlMigracion ?? "(desconocido)";
+                if (sqlCtx.Length > 300) sqlCtx = sqlCtx[..300] + "...";
                 throw new Exception(
                     "Error al migrar la base de datos a v" + SCHEMA_VERSION + ":\n" +
-                    ex.Message + "\n\nContacta al administrador del sistema.", ex);
+                    ex.Message + "\n\nÚltimo SQL:\n" + sqlCtx +
+                    "\n\nContacta al administrador del sistema.", ex);
             }
         }
 
@@ -1770,6 +1774,7 @@ namespace SistemaGestion
         private static void EjecutarMigracion(
             SqliteConnection conn, SqliteTransaction tx, int version, string sql)
         {
+            _ultimoSqlMigracion = $"[v{version}] {sql}";
             var cmd = conn.CreateCommand();
             cmd.Transaction = tx;
             cmd.CommandText  = sql;
@@ -1784,6 +1789,7 @@ namespace SistemaGestion
         /// </summary>
         private static void EjecutarMigracionV20(SqliteConnection conn, SqliteTransaction tx)
         {
+            _ultimoSqlMigracion = "[v20] inicio EjecutarMigracionV20";
             // 1. Verificar si la tabla Gastos existe y si tiene IdCategoria
             bool gastosExiste = TablaExiste(conn, tx, "Gastos");
             bool tieneIdCategoria = false;
@@ -1808,6 +1814,7 @@ namespace SistemaGestion
             }
 
             // 3. Crear tabla CategoriasGasto (idempotente)
+            _ultimoSqlMigracion = "[v20-paso3] CREATE TABLE IF NOT EXISTS CategoriasGasto";
             EjecutarSql(conn, tx, @"
                 CREATE TABLE IF NOT EXISTS CategoriasGasto (
                     Id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1830,6 +1837,7 @@ namespace SistemaGestion
                 EjecutarSql(conn, tx, "ALTER TABLE CategoriasGasto ADD COLUMN EsMateriaPrima INTEGER DEFAULT 0");
 
             // 4. Crear tabla Gastos nueva (solo si no existe ya con schema correcto)
+            _ultimoSqlMigracion = "[v20-paso4] CREATE TABLE IF NOT EXISTS Gastos (nueva)";
             EjecutarSql(conn, tx, @"
                 CREATE TABLE IF NOT EXISTS Gastos (
                     Id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1921,6 +1929,7 @@ namespace SistemaGestion
         //  romper la apertura del módulo y los reportes.
         private static void EjecutarMigracionV21(SqliteConnection conn, SqliteTransaction tx)
         {
+            _ultimoSqlMigracion = "[v21] inicio EjecutarMigracionV21";
             // 1. Agregar columnas (idempotente — comprueba antes)
             if (!ColumnaExiste(conn, tx, "Facturas", "Anulada"))
                 EjecutarSql(conn, tx, "ALTER TABLE Facturas ADD COLUMN Anulada INTEGER NOT NULL DEFAULT 0;");
@@ -1993,6 +2002,7 @@ namespace SistemaGestion
         //  El usuario puede luego corregir individualmente las que considere.
         private static void EjecutarMigracionV22(SqliteConnection conn, SqliteTransaction tx)
         {
+            _ultimoSqlMigracion = "[v22] inicio EjecutarMigracionV22";
             // 1. Agregar columnas (idempotente)
             if (!ColumnaExiste(conn, tx, "Facturas", "TipoDocumento"))
                 EjecutarSql(conn, tx,
@@ -2053,8 +2063,12 @@ namespace SistemaGestion
             return false;
         }
 
+        // Último SQL ejecutado por EjecutarSql — para diagnóstico en catch de MigrarEsquema
+        [ThreadStatic] private static string? _ultimoSqlMigracion;
+
         private static void EjecutarSql(SqliteConnection conn, SqliteTransaction tx, string sql)
         {
+            _ultimoSqlMigracion = sql;
             var cmd = conn.CreateCommand();
             cmd.Transaction = tx;
             cmd.CommandText = sql;

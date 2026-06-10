@@ -603,6 +603,7 @@ namespace SistemaGestion
         /// </summary>
         public static void MigrarV25(SqliteConnection conn, SqliteTransaction tx)
         {
+            _ultimoSqlMigracion = "[v25] inicio MigrarV25 — CantDefectuosas";
             // AlterTableSafe ignora el error si la columna ya existe
             var cmd = conn.CreateCommand();
             cmd.Transaction = tx;

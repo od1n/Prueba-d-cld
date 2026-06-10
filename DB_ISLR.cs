@@ -96,6 +96,7 @@ namespace SistemaGestion
         //   if (versionActual < 24) MigrarV24(conn, tx);
         public static void MigrarV24(SqliteConnection conn, SqliteTransaction tx)
         {
+            _ultimoSqlMigracion = "[v24] inicio MigrarV24 — ISLR";
             var cmd = conn.CreateCommand();
             cmd.Transaction = tx;
             cmd.CommandText = @"

@@ -80,6 +80,7 @@ namespace SistemaGestion
         // Llamada desde MigrarEsquema en DB.cs cuando user_version < 23.
         internal static void EjecutarMigracionV23(SqliteConnection conn, SqliteTransaction tx)
         {
+            _ultimoSqlMigracion = "[v23-Camaras] CREATE Camaras + PermisosCamara + índices";
             var cmd = conn.CreateCommand();
             cmd.Transaction = tx;
             cmd.CommandText = @"
