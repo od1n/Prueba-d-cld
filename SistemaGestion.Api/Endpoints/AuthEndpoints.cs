@@ -87,6 +87,24 @@ namespace SistemaGestion.Api.Endpoints
                     reset.Parameters.AddWithValue("$id", id);
                     reset.ExecuteNonQuery();
 
+                    // Migrar hash legacy SHA-256 → PBKDF2 (v2:) automáticamente
+                    if (!hash.StartsWith("v2:"))
+                    {
+                        try
+                        {
+                            var salt = RandomNumberGenerator.GetBytes(16);
+                            using var pbkdf2 = new Rfc2898DeriveBytes(req.Contrasena, salt, 600_000, HashAlgorithmName.SHA256);
+                            var nuevoHash = $"v2:{Convert.ToHexString(salt).ToLower()}:{Convert.ToHexString(pbkdf2.GetBytes(32)).ToLower()}";
+                            var updHash = c.CreateCommand();
+                            updHash.CommandText = "UPDATE Usuarios SET PasswordHash=$h WHERE Id=$id";
+                            updHash.Parameters.AddWithValue("$h", nuevoHash);
+                            updHash.Parameters.AddWithValue("$id", id);
+                            updHash.ExecuteNonQuery();
+                            Console.WriteLine($"[AUTH] Hash migrado a PBKDF2 para usuario: {nombre}");
+                        }
+                        catch (Exception exH) { Console.WriteLine($"[AUTH] WARN migración hash: {exH.Message}"); }
+                    }
+
                     RegistrarAuditoria(c, "LOGIN_MOVIL", "Usuarios", $"Login portal móvil: {nombre} ({rol})");
 
                     var (token, jti) = TokenService.GenerarToken(id, nombre, nomComp, rol);

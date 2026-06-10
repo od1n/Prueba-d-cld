@@ -10,6 +10,8 @@ namespace SistemaGestion.Api.Endpoints
     {
         private static readonly string DIG_URL =
             Environment.GetEnvironmentVariable("SG_DIG_URL") ?? "http://localhost:8080";
+        private static readonly string DIG_TOKEN =
+            Environment.GetEnvironmentVariable("SG_INTERNAL_TOKEN") ?? "";
 
         public static void MapEgresosEndpoints(this WebApplication app)
         {
@@ -73,6 +75,8 @@ namespace SistemaGestion.Api.Endpoints
                 try
                 {
                     var cli  = http.CreateClient("digitalizador");
+                    if (!string.IsNullOrEmpty(DIG_TOKEN))
+                        cli.DefaultRequestHeaders.Add("X-Internal-Token", DIG_TOKEN);
                     var resp = await cli.GetAsync($"{DIG_URL}/api/estado");
                     if (resp.IsSuccessStatusCode)
                     {
@@ -131,6 +135,8 @@ namespace SistemaGestion.Api.Endpoints
                 try
                 {
                     var cli            = http.CreateClient("digitalizador");
+                    if (!string.IsNullOrEmpty(DIG_TOKEN))
+                        cli.DefaultRequestHeaders.Add("X-Internal-Token", DIG_TOKEN);
                     var backendActual  = Db.GetConfig("vision_backend", "ollama");
 
                     // Leer imagen a memoria y reenviar como multipart al Python

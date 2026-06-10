@@ -14,6 +14,8 @@ namespace SistemaGestion.Api.Endpoints
     {
         private static readonly string DIG_URL =
             Environment.GetEnvironmentVariable("SG_DIG_URL") ?? "http://localhost:8080";
+        private static readonly string DIG_TOKEN =
+            Environment.GetEnvironmentVariable("SG_INTERNAL_TOKEN") ?? "";
 
         public static void MapProduccionEndpoints(this WebApplication app)
         {
@@ -65,6 +67,8 @@ namespace SistemaGestion.Api.Endpoints
                 try
                 {
                     var cli = http.CreateClient("digitalizador");
+                    if (!string.IsNullOrEmpty(DIG_TOKEN))
+                        cli.DefaultRequestHeaders.Add("X-Internal-Token", DIG_TOKEN);
                     var resp = await cli.GetAsync($"{DIG_URL}/api/estado");
                     var body = await resp.Content.ReadAsStringAsync();
                     return Results.Text(body, "application/json");
@@ -89,6 +93,8 @@ namespace SistemaGestion.Api.Endpoints
                 try
                 {
                     var cli  = http.CreateClient("digitalizador");
+                    if (!string.IsNullOrEmpty(DIG_TOKEN))
+                        cli.DefaultRequestHeaders.Add("X-Internal-Token", DIG_TOKEN);
                     var tipo = form["tipo"].FirstOrDefault() ?? "planilla";
 
                     // Leer la imagen a memoria y reenviar como multipart
@@ -122,6 +128,8 @@ namespace SistemaGestion.Api.Endpoints
                 try
                 {
                     var cli  = http.CreateClient("digitalizador");
+                    if (!string.IsNullOrEmpty(DIG_TOKEN))
+                        cli.DefaultRequestHeaders.Add("X-Internal-Token", DIG_TOKEN);
                     var json = await new StreamReader(req.Body).ReadToEndAsync();
                     using var content = new StringContent(json,
                         System.Text.Encoding.UTF8, "application/json");

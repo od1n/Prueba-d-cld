@@ -7,21 +7,45 @@
 from __future__ import annotations
 
 import json
+import os
+import secrets
 import socket
 from typing import Annotated
 
-from fastapi import FastAPI, File, Form, UploadFile, Request
+from fastapi import FastAPI, File, Form, UploadFile, Request, Depends, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 import extractor
 import db_writer
 
+# ── Token de autenticación interna ────────────────────────────────────
+# Solo la API .NET debe llamar a este servicio. El token se pasa via
+# variable de entorno SG_INTERNAL_TOKEN. Si no se define, se genera uno
+# aleatorio al arrancar y se imprime para configurar la API.
+INTERNAL_TOKEN = os.environ.get("SG_INTERNAL_TOKEN", "")
+if not INTERNAL_TOKEN:
+    INTERNAL_TOKEN = secrets.token_hex(32)
+    print(f"  [SEGURIDAD] Token interno generado: {INTERNAL_TOKEN}")
+    print(f"  [SEGURIDAD] Configura SG_INTERNAL_TOKEN en la API para conectar.\n")
+
+
+def verificar_token(request: Request):
+    """Middleware de autenticación: rechaza peticiones sin token válido.
+    Excepción: GET / (UI del digitalizador) y GET /api/estado (health check)."""
+    token = request.headers.get("X-Internal-Token", "")
+    if not secrets.compare_digest(token, INTERNAL_TOKEN):
+        raise HTTPException(status_code=403, detail="Token interno inválido")
+
+
 app = FastAPI(title="Digitalizador SistemaGestion", version="1.0")
+
+# CORS restringido: solo orígenes de la API (no wildcard)
+_cors_origins = os.environ.get("SG_CORS_ORIGINS", "http://localhost:5050,https://localhost:5443").split(",")
 app.add_middleware(CORSMiddleware,
-                   allow_origins=["*"],  # La API hace proxy; acceso directo filtrado por red
+                   allow_origins=[o.strip() for o in _cors_origins],
                    allow_methods=["GET", "POST"],
-                   allow_headers=["Content-Type"],
+                   allow_headers=["Content-Type", "X-Internal-Token"],
                    allow_credentials=False)
 
 
@@ -69,15 +93,15 @@ def estado():
         "db_ok":   db_writer.DB_PATH.exists(),
     }
 
-@app.get("/api/moldes")
+@app.get("/api/moldes", dependencies=[Depends(verificar_token)])
 def moldes():
     return db_writer.obtener_todos_moldes()
 
-@app.get("/api/insumos")
+@app.get("/api/insumos", dependencies=[Depends(verificar_token)])
 def insumos():
     return db_writer.obtener_insumos()
 
-@app.post("/api/extraer")
+@app.post("/api/extraer", dependencies=[Depends(verificar_token)])
 async def extraer(
     imagen:  UploadFile = File(...),
     tipo:    str        = Form("planilla"),
@@ -95,7 +119,7 @@ async def extraer(
     except Exception as ex:
         return JSONResponse({"ok": False, "error": str(ex)}, status_code=500)
 
-@app.post("/api/confirmar")
+@app.post("/api/confirmar", dependencies=[Depends(verificar_token)])
 async def confirmar(request: Request):
     """Recibe el JSON confirmado por el usuario y lo escribe en la BD."""
     datos = await request.json()
