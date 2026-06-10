@@ -71,19 +71,36 @@ try {
 # ── 3. Obtener productos con precio ──
 Write-Host "`n=== PRODUCTOS DISPONIBLES ===" -ForegroundColor Cyan
 $inventario = ApiGet "/api/inventario"
+if ($inventario.Count -lt 2) {
+    Write-Host "  Inventario vacio. Buscando facturas existentes..." -ForegroundColor Yellow
+
+    # Buscar facturas existentes
+    $hoy = Get-Date -Format "yyyy-MM-dd"
+    $inicio = (Get-Date).AddYears(-2).ToString("yyyy-MM-dd")
+    try {
+        $facturas = ApiGet "/api/facturas?desde=$inicio&hasta=$hoy"
+        if ($facturas.Count -gt 0) {
+            Write-Host "`n=== FACTURAS EXISTENTES (primeras 5) ===" -ForegroundColor Cyan
+            $facturas | Select-Object -First 5 | ForEach-Object {
+                $num = $_.numeroF
+                Write-Host "  $num - $($_.cliente) - Total: `$$($_.total)" -ForegroundColor White
+                Write-Host "    Imprimir: $Server/api/facturas/$num/imprimir" -ForegroundColor Green
+            }
+        } else {
+            Write-Host "  No hay facturas existentes tampoco." -ForegroundColor Red
+        }
+    } catch {
+        Write-Host "  Error buscando facturas: $($_.Exception.Message)" -ForegroundColor Red
+    }
+    Write-Host "`n  Para crear facturas de prueba, primero registre productos desde la app de escritorio." -ForegroundColor Yellow
+    exit 0
+}
+
 $prods = $inventario | Select-Object -First 3
 foreach ($p in $prods) {
-    Write-Host "  $($p.codigo) - $($p.descripcion) @ `$$($p.precioActual)"
-}
-
-if ($prods.Count -lt 2) {
-    Write-Host "  No hay suficientes productos. Abortando." -ForegroundColor Red
-    exit 1
-}
-
-# Asignar precio por defecto si es 0
-foreach ($p in $prods) {
+    # Asignar precio por defecto si es 0
     if ($p.precioActual -le 0) { $p.precioActual = 15.00 }
+    Write-Host "  $($p.codigo) - $($p.descripcion) @ `$$($p.precioActual)"
 }
 
 # ── 4. Crear FACTURA FISCAL (con IVA 16%, carta) ──
