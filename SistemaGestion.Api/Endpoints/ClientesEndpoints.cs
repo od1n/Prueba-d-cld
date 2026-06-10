@@ -566,7 +566,8 @@ namespace SistemaGestion.Api.Endpoints
                     "html,body{height:100%;margin:0}" +
                     "body{width:128mm;margin:0 auto;color:#111}" +
                     ".page-wrap{display:flex;flex-direction:column;min-height:198mm}" +
-                    ".items-section{flex:1}" +
+                    ".items-section{flex:1;display:flex;flex-direction:column}" +
+                    ".items-section table{flex:1}" +
                     ".hdr{border:1px solid #333;margin-bottom:2mm}" +
                     ".hdr-top{display:grid;grid-template-columns:40mm 1fr 40mm;border-bottom:1px solid #333}" +
                     ".hdr-top>div{padding:2mm;border-right:1px solid #333}" +
@@ -636,7 +637,8 @@ namespace SistemaGestion.Api.Endpoints
                     "html,body{height:100%;margin:0}" +
                     "body{width:134mm;margin:0 auto;color:#111}" +
                     ".page-wrap{display:flex;flex-direction:column;min-height:289mm}" +
-                    ".items-section{flex:1}" +
+                    ".items-section{flex:1;display:flex;flex-direction:column}" +
+                    ".items-section table{flex:1}" +
                     ".empresa{text-align:center;margin-bottom:2mm}" +
                     ".empresa h1{font-size:12pt;color:#C00;font-weight:900;letter-spacing:1px}" +
                     ".empresa .dir{font-size:6pt;color:#333;margin:0.5mm 0}" +
