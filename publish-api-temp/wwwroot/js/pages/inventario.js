@@ -1,0 +1,83 @@
+// inventario.js
+if (!Auth.requireAuth()) {}
+const app = document.getElementById('app');
+let todos = [], filtrados = [];
+
+async function render() {
+    app.innerHTML = `
+        ${renderTopbar('Stock / Inventario')}
+        <div class="content">
+            <div class="search-wrap">
+                <span class="search-icon">⌕</span>
+                <input class="input-field" id="buscar" type="search" placeholder="Buscar por código o descripción..."
+                    autocomplete="off" oninput="filtrar(this.value)" autofocus>
+            </div>
+            <div id="filtros" class="btn-group mb-16">
+                <button class="btn btn-ghost" id="fTodos"  onclick="setFiltro('todos')">Todos</button>
+                <button class="btn btn-ghost" id="fBajo"   onclick="setFiltro('bajo')">⚠ Bajo mín.</button>
+            </div>
+            <div id="lista"><div class="loading-msg"><div class="spinner"></div></div></div>
+        </div>
+        ${renderNav('inventario')}`;
+    await cargar();
+}
+
+async function cargar() {
+    try {
+        todos = await apiGet('/api/inventario') || [];
+        filtrados = todos;
+        renderLista(filtrados);
+    } catch (err) {
+        document.getElementById('lista').innerHTML =
+            `<div class="alert-banner">Error: ${esh(err.message)}</div>`;
+    }
+}
+
+let filtroActual = 'todos';
+function setFiltro(f) {
+    filtroActual = f;
+    const q = document.getElementById('buscar')?.value || '';
+    filtrar(q);
+    ['fTodos','fBajo'].forEach(id => document.getElementById(id)?.classList.remove('btn-cyan'));
+    document.getElementById(f === 'todos' ? 'fTodos' : 'fBajo')?.classList.add('btn-cyan');
+}
+
+function filtrar(q) {
+    let lista = todos;
+    if (q.trim()) {
+        const qL = q.toLowerCase();
+        lista = lista.filter(i =>
+            i.codigo.toLowerCase().includes(qL) ||
+            (i.descripcion?.toLowerCase().includes(qL)));
+    }
+    if (filtroActual === 'bajo') lista = lista.filter(i => i.bajMin);
+    filtrados = lista;
+    renderLista(filtrados);
+}
+
+function renderLista(lista) {
+    const div = document.getElementById('lista');
+    if (lista.length === 0) {
+        div.innerHTML = `<div class="empty"><div class="empty-icon">▦</div><div class="empty-text">Sin resultados</div></div>`;
+        return;
+    }
+    div.innerHTML = `
+        <div class="card-title text-dim mb-8">${lista.length} productos</div>
+        <div class="card" style="padding:0" role="list">
+        ${lista.map(i => `
+            <div class="list-item" style="padding:12px 16px" role="listitem">
+                <div class="list-item-main">
+                    <div class="list-item-title">${esh(i.descripcion)}</div>
+                    <div class="list-item-sub">${esh(i.codigo)} · ${esh(i.unidad)} · ${formatUSD(i.precioActual)}</div>
+                </div>
+                <div style="text-align:right;flex-shrink:0;margin-left:12px">
+                    <div class="mono bold ${i.bajMin?'':'text-cyan'}" style="${i.bajMin?'color:var(--rojo)':''}"
+                         ${i.bajMin?'aria-label="Stock bajo mínimo"':''}>
+                        ${formatNum(i.stock, 2)}
+                    </div>
+                    ${i.bajMin ? `<div class="text-sm" style="color:var(--rojo)">mín ${formatNum(i.stockMin)}</div>` : ''}
+                </div>
+            </div>`).join('')}
+        </div>`;
+}
+render();
