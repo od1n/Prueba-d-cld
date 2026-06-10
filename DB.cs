@@ -1596,20 +1596,41 @@ namespace SistemaGestion
                 //   viejo con columna 'Categoria' TEXT en lugar de IdCategoria
                 //   FK), la renombramos a Gastos_legacy_v9 para conservar los
                 //   datos y crear la nueva con el schema correcto.
-                // ── Retroactive fix: CategoriasGasto puede existir con schema incompleto
-                // Corre ANTES de v20 para que si la tabla YA existe con schema viejo,
-                // las columnas sean agregadas ANTES de que EjecutarMigracionV20 intente usarlas.
-                // Usa ColumnaExiste (no excepciones) y DEFAULT sin NOT NULL para compatibilidad.
-                if (TablaExiste(conn, tx, "CategoriasGasto"))
+                // ── Retroactive rebuild: CategoriasGasto schema completo ──────────────
+                // BDs pre-v20 tienen CategoriasGasto sin Color/Orden/EsMateriaPrima.
+                // ALTER TABLE ADD COLUMN puede fallar en algunos estados de la BD;
+                // usamos el enfoque recomendado por SQLite: crear tabla temporal con
+                // schema correcto, copiar datos y renombrar (idempotente).
+                if (TablaExiste(conn, tx, "CategoriasGasto") &&
+                    (!ColumnaExiste(conn, tx, "CategoriasGasto", "Color") ||
+                     !ColumnaExiste(conn, tx, "CategoriasGasto", "Orden") ||
+                     !ColumnaExiste(conn, tx, "CategoriasGasto", "EsMateriaPrima") ||
+                     !ColumnaExiste(conn, tx, "CategoriasGasto", "Activa")))
                 {
-                    if (!ColumnaExiste(conn, tx, "CategoriasGasto", "Color"))
-                        EjecutarSql(conn, tx, "ALTER TABLE CategoriasGasto ADD COLUMN Color TEXT DEFAULT '#1A4A8A'");
-                    if (!ColumnaExiste(conn, tx, "CategoriasGasto", "Activa"))
-                        EjecutarSql(conn, tx, "ALTER TABLE CategoriasGasto ADD COLUMN Activa INTEGER DEFAULT 1");
-                    if (!ColumnaExiste(conn, tx, "CategoriasGasto", "Orden"))
-                        EjecutarSql(conn, tx, "ALTER TABLE CategoriasGasto ADD COLUMN Orden INTEGER DEFAULT 0");
-                    if (!ColumnaExiste(conn, tx, "CategoriasGasto", "EsMateriaPrima"))
-                        EjecutarSql(conn, tx, "ALTER TABLE CategoriasGasto ADD COLUMN EsMateriaPrima INTEGER DEFAULT 0");
+                    // Solo copiar columnas que existen actualmente; las faltantes toman DEFAULT
+                    bool cgHasColor  = ColumnaExiste(conn, tx, "CategoriasGasto", "Color");
+                    bool cgHasActiva = ColumnaExiste(conn, tx, "CategoriasGasto", "Activa");
+                    bool cgHasOrden  = ColumnaExiste(conn, tx, "CategoriasGasto", "Orden");
+                    bool cgHasEsMat  = ColumnaExiste(conn, tx, "CategoriasGasto", "EsMateriaPrima");
+                    var cgCols = new System.Collections.Generic.List<string> { "Id", "Nombre" };
+                    if (cgHasColor)  cgCols.Add("Color");
+                    if (cgHasActiva) cgCols.Add("Activa");
+                    if (cgHasOrden)  cgCols.Add("Orden");
+                    if (cgHasEsMat)  cgCols.Add("EsMateriaPrima");
+                    string cgColList = string.Join(", ", cgCols);
+                    EjecutarSql(conn, tx, "DROP TABLE IF EXISTS CategoriasGasto_rebuild");
+                    EjecutarSql(conn, tx, @"CREATE TABLE CategoriasGasto_rebuild (
+                            Id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                            Nombre         TEXT    NOT NULL UNIQUE,
+                            Color          TEXT    DEFAULT '#1A4A8A',
+                            Activa         INTEGER DEFAULT 1,
+                            Orden          INTEGER DEFAULT 0,
+                            EsMateriaPrima INTEGER DEFAULT 0
+                        )");
+                    EjecutarSql(conn, tx,
+                        $"INSERT INTO CategoriasGasto_rebuild ({cgColList}) SELECT {cgColList} FROM CategoriasGasto");
+                    EjecutarSql(conn, tx, "DROP TABLE CategoriasGasto");
+                    EjecutarSql(conn, tx, "ALTER TABLE CategoriasGasto_rebuild RENAME TO CategoriasGasto");
                 }
 
                 if (versionActual < 20)
