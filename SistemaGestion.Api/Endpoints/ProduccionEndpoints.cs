@@ -259,23 +259,28 @@ namespace SistemaGestion.Api.Endpoints
                 while (r.Read()) moldes.Add((Db.S(r,0), Db.S(r,1)));
 
                 var hoy = DateTime.Today.ToString("dd/MM/yyyy");
+                // Count molds to calculate available space
+                var nMoldes = moldes.Count;
+                // Max blank rows: ensure total fits on one page (max ~20 data rows)
+                var blankRows = Math.Max(2, Math.Min(5, 18 - nMoldes));
+
                 var html = "<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'>" +
                 "<title>Planilla de Producción</title><style>" +
-                "@page{size:letter landscape;margin:8mm}" +
-                "*{box-sizing:border-box;margin:0;padding:0;font-family:Arial,sans-serif;font-size:9pt}" +
-                "body{color:#111}" +
-                ".hdr{text-align:center;margin-bottom:4mm}" +
-                ".hdr h1{font-size:14pt;font-weight:900}" +
-                ".hdr .sub{font-size:8pt;color:#555}" +
-                ".info{display:flex;gap:4mm;margin-bottom:3mm;font-size:9pt}" +
-                ".info div{border-bottom:1px solid #333;flex:1;padding:1mm 0}" +
-                ".info label{font-weight:700;font-size:8pt}" +
-                "table{width:100%;border-collapse:collapse;margin-bottom:3mm}" +
-                "th,td{border:1px solid #333;padding:2mm 3mm;text-align:center}" +
-                "th{background:#eee;font-size:7.5pt;text-transform:uppercase}" +
-                "td{height:8mm}" +
-                ".noprint{margin-bottom:4mm;padding:2mm 8mm;background:#333;color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:10pt}" +
-                "@media print{.noprint{display:none!important}}" +
+                "@page{size:letter landscape;margin:6mm 8mm}" +
+                "*{box-sizing:border-box;margin:0;padding:0;font-family:Arial,sans-serif;font-size:8pt}" +
+                "body{color:#111;width:100%;max-width:100%}" +
+                ".hdr{text-align:center;margin-bottom:2mm}" +
+                ".hdr h1{font-size:12pt;font-weight:900;margin-bottom:0}" +
+                ".hdr .sub{font-size:7.5pt;color:#555}" +
+                ".info{display:flex;gap:3mm;margin-bottom:2mm;font-size:8pt}" +
+                ".info div{border-bottom:1px solid #333;flex:1;padding:0.5mm 0}" +
+                ".info label{font-weight:700;font-size:7pt}" +
+                "table{width:100%;border-collapse:collapse;margin-bottom:2mm}" +
+                "th,td{border:1px solid #333;padding:1mm 2mm;text-align:center}" +
+                "th{background:#eee;font-size:6.5pt;text-transform:uppercase}" +
+                "td{height:5.5mm;font-size:7.5pt}" +
+                ".noprint{margin-bottom:3mm;padding:2mm 8mm;background:#333;color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:10pt}" +
+                "@media print{.noprint{display:none!important}html,body{width:100%;height:100%;}}" +
                 "</style></head><body>" +
                 "<button class='noprint' onclick='window.print()'>Imprimir</button>" +
                 "<div class='hdr'>" +
@@ -288,28 +293,28 @@ namespace SistemaGestion.Api.Endpoints
                 "<div><label>TURNO:</label> __________</div>" +
                 "<div><label>MATERIAL:</label> ☐ Virgen ☐ Reciclado</div>" +
                 "</div>" +
-                "<table><thead><tr><th style='width:30mm'>MOLDE</th><th>1ª CALIDAD</th><th>2ª CALIDAD</th><th>RECICLADO</th><th style='color:red'>DEFECTUOSAS</th><th>TOTAL</th></tr></thead><tbody>";
+                "<table><thead><tr><th style='width:28mm'>MOLDE</th><th>1ª CALIDAD</th><th>2ª CALIDAD</th><th>RECICLADO</th><th style='color:red'>DEFECTUOSAS</th><th>TOTAL</th></tr></thead><tbody>";
 
-                // One row per mold from catalog, plus empty rows
+                // One row per mold from catalog
                 foreach (var (cod, desc) in moldes)
-                    html += $"<tr><td style='text-align:left;font-size:8pt'>{System.Web.HttpUtility.HtmlEncode(cod)} - {System.Web.HttpUtility.HtmlEncode(desc)}</td><td></td><td></td><td></td><td></td><td></td></tr>";
+                    html += $"<tr><td style='text-align:left;font-size:7pt'>{System.Web.HttpUtility.HtmlEncode(cod)} - {System.Web.HttpUtility.HtmlEncode(desc)}</td><td></td><td></td><td></td><td></td><td></td></tr>";
 
-                // Add 5 blank rows for unlisted molds
-                for (int i = 0; i < 5; i++)
+                // Blank rows (dynamic based on mold count)
+                for (int i = 0; i < blankRows; i++)
                     html += "<tr><td></td><td></td><td></td><td></td><td></td><td></td></tr>";
 
                 html += "<tr style='font-weight:700;background:#f5f5f5'><td>TOTALES</td><td></td><td></td><td></td><td></td><td></td></tr>" +
                 "</tbody></table>" +
-                "<table><thead><tr><th style='width:30mm'>MATERIAL / INSUMO</th><th>KG UTILIZADOS</th><th>LOTE</th><th>OBSERVACIONES</th></tr></thead><tbody>";
+                "<table><thead><tr><th style='width:28mm'>MATERIAL / INSUMO</th><th>KG UTILIZADOS</th><th>LOTE</th><th>OBSERVACIONES</th></tr></thead><tbody>";
 
-                for (int i = 0; i < 6; i++)
+                for (int i = 0; i < 4; i++)
                     html += "<tr><td></td><td></td><td></td><td></td></tr>";
 
                 html += "</tbody></table>" +
-                "<div class='info' style='margin-top:8mm'>" +
+                "<div class='info' style='margin-top:3mm'>" +
                 "<div><label>OBSERVACIONES:</label> ___________________________________________</div>" +
                 "</div>" +
-                "<div class='info' style='margin-top:12mm'>" +
+                "<div class='info' style='margin-top:8mm'>" +
                 "<div style='text-align:center;border-top:1px solid #333;border-bottom:none;padding-top:1mm'><label>FIRMA OPERARIO</label></div>" +
                 "<div style='text-align:center;border-top:1px solid #333;border-bottom:none;padding-top:1mm'><label>FIRMA SUPERVISOR</label></div>" +
                 "</div>" +
