@@ -507,13 +507,24 @@ namespace SistemaGestion.Api.Endpoints
                 cmdL.Parameters.AddWithValue("$id", rowid);
                 var filasFactura = new System.Text.StringBuilder();
                 var filasNota = new System.Text.StringBuilder();
+                int nItems = 0;
                 using var rl = cmdL.ExecuteReader();
                 while (rl.Read()) {
+                    nItems++;
                     string codItem=Db.S(rl,0), descItem=Db.S(rl,1);
                     decimal pU=Db.D(rl,2), cnt=Db.D(rl,3), sub=pU*cnt;
                     filasFactura.Append($"<tr><td class='c'>{H(cnt.ToString("N0"))}</td><td>{H(codItem)}</td><td>{H(descItem)}</td><td class='r'>{pU.ToString("N2")}</td><td class='r'>{sub.ToString("N2")}</td></tr>");
                     filasNota.Append($"<tr><td class='c'>{H(cnt.ToString("N0"))}</td><td>{H(descItem)}</td><td class='r'>{pU.ToString("N2")}</td><td class='r'>{sub.ToString("N2")}</td></tr>");
                 }
+                // Filas vacías para llenar la tabla a altura fija
+                // Nota de entrega: ~18 filas visibles (198mm content - ~75mm header/footer = ~123mm / 5mm por fila)
+                int filasVaciasNota = Math.Max(0, 18 - nItems);
+                for (int i = 0; i < filasVaciasNota; i++)
+                    filasNota.Append("<tr><td>&nbsp;</td><td></td><td></td><td></td></tr>");
+                // Factura fiscal: ~22 filas visibles (263mm content - ~140mm header/footer = ~123mm / 5.5mm por fila)
+                int filasVaciasFact = Math.Max(0, 22 - nItems);
+                for (int i = 0; i < filasVaciasFact; i++)
+                    filasFactura.Append("<tr><td>&nbsp;</td><td></td><td></td><td></td><td></td></tr>");
 
                 // Calcular totales
                 decimal subtotalSinDesc = total - iva + (total - iva) * desc / (100 - desc);
@@ -552,7 +563,10 @@ namespace SistemaGestion.Api.Endpoints
                     "<title>Nota de Entrega " + H(numF) + "</title><style>" +
                     "@page{size:140mm 210mm;margin:6mm}" +
                     "*{box-sizing:border-box;margin:0;padding:0;font-family:Arial,sans-serif;font-size:8pt}" +
+                    "html,body{height:100%;margin:0}" +
                     "body{width:128mm;margin:0 auto;color:#111}" +
+                    ".page-wrap{display:flex;flex-direction:column;min-height:198mm}" +
+                    ".items-section{flex:1}" +
                     ".hdr{border:1px solid #333;margin-bottom:2mm}" +
                     ".hdr-top{display:grid;grid-template-columns:40mm 1fr 40mm;border-bottom:1px solid #333}" +
                     ".hdr-top>div{padding:2mm;border-right:1px solid #333}" +
@@ -577,6 +591,7 @@ namespace SistemaGestion.Api.Endpoints
                     "@media print{.no-print{display:none!important}body{margin:0}}" +
                     "</style></head><body>" +
                     "<button class='no-print' onclick='window.print()'>Imprimir</button>" +
+                    "<div class='page-wrap'>" +
 
                     // Encabezado
                     "<div class='hdr'><div class='hdr-top'>" +
@@ -591,11 +606,13 @@ namespace SistemaGestion.Api.Endpoints
                     "<div class='cli'><b>DIRECCIÓN:</b> " + H(dirCompleta) + "</div>" +
                     "<div class='cli' style='text-align:right'><b>TELF:</b> " + H(telCli) + "</div>" +
 
-                    // Tabla items
+                    // Tabla items (flex:1 para llenar la página)
+                    "<div class='items-section'>" +
                     "<table><thead><tr><th style='width:12mm'>Cant.</th><th>Descripción</th><th style='width:22mm'>P. Unit.</th><th style='width:22mm'>Total</th></tr></thead>" +
                     "<tbody>" + filasNota + "</tbody></table>" +
+                    "</div>" +
 
-                    // Pie: firma + totales
+                    // Pie: firma + totales (siempre al fondo)
                     "<div class='pie'>" +
                     "<div class='pie-izq'><div style='margin-top:8mm'>FIRMA</div><div style='font-size:6pt;color:#888'>Esta factura va sin tachadura ni enmendaduras</div></div>" +
                     "<table class='totales'>" +
@@ -603,6 +620,7 @@ namespace SistemaGestion.Api.Endpoints
                     (desc > 0 ? "<tr><td class='r'>DESCUENTO</td><td class='r'>-" + montoDesc.ToString("N2") + "</td></tr>" : "<tr><td class='r'>DESCUENTO</td><td class='r'></td></tr>") +
                     "<tr><td class='r'>TOTAL Bs F.</td><td class='r'>" + (totalBs > 0 ? totalBs.ToString("N2") : total.ToString("N2")) + "</td></tr>" +
                     "</table></div>" +
+                    "</div>" + // cierre page-wrap
                     "</body></html>";
                 }
                 else
@@ -615,7 +633,10 @@ namespace SistemaGestion.Api.Endpoints
                     "<title>Factura " + H(numF) + "</title><style>" +
                     "@page{size:letter;margin:8mm 10mm}" +
                     "*{box-sizing:border-box;margin:0;padding:0;font-family:Arial,sans-serif;font-size:9pt}" +
+                    "html,body{height:100%;margin:0}" +
                     "body{width:190mm;margin:0 auto;color:#111}" +
+                    ".page-wrap{display:flex;flex-direction:column;min-height:263mm}" +
+                    ".items-section{flex:1}" +
                     ".empresa{text-align:center;margin-bottom:3mm}" +
                     ".empresa h1{font-size:16pt;color:#C00;font-weight:900;letter-spacing:1px}" +
                     ".empresa .dir{font-size:7.5pt;color:#333;margin:1mm 0}" +
@@ -649,6 +670,7 @@ namespace SistemaGestion.Api.Endpoints
                     "@media print{.no-print{display:none!important}body{margin:0}}" +
                     "</style></head><body>" +
                     "<button class='no-print' onclick='window.print()'>Imprimir</button>" +
+                    "<div class='page-wrap'>" +
 
                     // Encabezado empresa
                     "<div class='empresa'>" +
@@ -682,11 +704,13 @@ namespace SistemaGestion.Api.Endpoints
                     "<div><b>Condici&oacute;n de Pago</b><br>" + H(condPago) + "</div>" +
                     "</div>" +
 
-                    // Tabla de items
+                    // Tabla de items (flex:1 para llenar la página)
+                    "<div class='items-section'>" +
                     "<table><thead><tr>" +
                     "<th style='width:12mm'>Cant.</th><th style='width:18mm'>Ref.</th><th>DESCRIPCI&Oacute;N</th>" +
                     "<th style='width:24mm'>PRECIO UNITARIO</th><th style='width:24mm'>TOTAL</th>" +
                     "</tr></thead><tbody>" + filasFactura + "</tbody></table>" +
+                    "</div>" +
 
                     // Pie: Forma de pago + Totales
                     "<div class='footer-grid'>" +
@@ -712,6 +736,7 @@ namespace SistemaGestion.Api.Endpoints
                     "<div><div class='firma-line'>Cliente Conforme</div></div>" +
                     "</div>" +
 
+                    "</div>" + // cierre page-wrap
                     "</body></html>";
                 }
 
