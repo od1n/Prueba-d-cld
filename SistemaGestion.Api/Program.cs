@@ -164,10 +164,10 @@ app.Use(async (ctx, next) =>
     h["Permissions-Policy"]       = "geolocation=(), microphone=(), camera=(self)";
     // CSP: el portal no carga scripts externos salvo Google Fonts (CSS).
     // Se permite 'unsafe-inline' temporalmente porque las páginas aún tienen
-    // Todo el JS está en archivos externos — 'unsafe-inline' eliminado de script-src.
+    // 'unsafe-inline' necesario para onclick handlers en las páginas del portal.
     h["Content-Security-Policy"]  =
         "default-src 'self'; " +
-        "script-src 'self'; " +
+        "script-src 'self' 'unsafe-inline'; " +
         "style-src  'self' 'unsafe-inline' https://fonts.googleapis.com; " +
         "font-src   'self' https://fonts.gstatic.com; " +
         "img-src    'self' data: blob:; " +
