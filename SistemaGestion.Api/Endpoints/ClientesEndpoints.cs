@@ -589,37 +589,37 @@ namespace SistemaGestion.Api.Endpoints
                     ".totales tr td{padding:1mm 2mm;border-bottom:1px solid #ccc;font-size:8pt}" +
                     ".totales tr:last-child td{font-weight:700;border-top:2px solid #333}" +
                     ".no-print{margin-bottom:4mm;padding:2mm 6mm;background:#333;color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:9pt}" +
-                    "@media print{.no-print{display:none!important}body{margin:0}}" +
+                    "@media print{.no-print{display:none!important}.pp{visibility:hidden}*{border-color:transparent!important;background:none!important}body{margin:0}}" +
                     "</style></head><body>" +
                     "<button class='no-print' onclick='window.print()'>Imprimir</button>" +
                     "<div class='page-wrap'>" +
 
                     // Encabezado
                     "<div class='hdr'><div class='hdr-top'>" +
-                    "<div style='text-align:center'><span class='lbl'>Factura</span><br><span class='val'>N° " + H(numF) + "</span></div>" +
+                    "<div style='text-align:center'><span class='lbl pp'>Factura</span><br><span class='val'>N° " + H(numF) + "</span></div>" +
                     "<div></div>" +
-                    "<div><span class='lbl'>Fecha</span><div class='fecha-grid'><div>" + H(fechaDia) + "</div><div>" + H(fechaMes) + "</div></div>" +
-                    "<span class='lbl'>R.I.F.:</span> " + H(rifCli) + "</div>" +
+                    "<div><span class='lbl pp'>Fecha</span><div class='fecha-grid'><div>" + H(fechaDia) + "</div><div>" + H(fechaMes) + "</div></div>" +
+                    "<span class='lbl pp'>R.I.F.:</span> " + H(rifCli) + "</div>" +
                     "</div></div>" +
 
                     // Datos cliente
-                    "<div class='cli'><b>NOMBRE:</b> " + H(nomCli) + "</div>" +
-                    "<div class='cli'><b>DIRECCIÓN:</b> " + H(dirCompleta) + "</div>" +
-                    "<div class='cli' style='text-align:right'><b>TELF:</b> " + H(telCli) + "</div>" +
+                    "<div class='cli'><b class='pp'>NOMBRE:</b> " + H(nomCli) + "</div>" +
+                    "<div class='cli'><b class='pp'>DIRECCIÓN:</b> " + H(dirCompleta) + "</div>" +
+                    "<div class='cli' style='text-align:right'><b class='pp'>TELF:</b> " + H(telCli) + "</div>" +
 
                     // Tabla items (flex:1 para llenar la página)
                     "<div class='items-section'>" +
-                    "<table><thead><tr><th style='width:12mm'>Cant.</th><th>Descripción</th><th style='width:22mm'>P. Unit.</th><th style='width:22mm'>Total</th></tr></thead>" +
+                    "<table><thead class='pp'><tr><th style='width:12mm'>Cant.</th><th>Descripción</th><th style='width:22mm'>P. Unit.</th><th style='width:22mm'>Total</th></tr></thead>" +
                     "<tbody>" + filasNota + "</tbody></table>" +
                     "</div>" +
 
                     // Pie: firma + totales (siempre al fondo)
                     "<div class='pie'>" +
-                    "<div class='pie-izq'><div style='margin-top:8mm'>FIRMA</div><div style='font-size:6pt;color:#888'>Esta factura va sin tachadura ni enmendaduras</div></div>" +
+                    "<div class='pie-izq pp'><div style='margin-top:8mm'>FIRMA</div><div style='font-size:6pt;color:#888'>Esta factura va sin tachadura ni enmendaduras</div></div>" +
                     "<table class='totales'>" +
-                    "<tr><td class='r'>SUB-TOTAL</td><td class='r' style='width:25mm'>" + baseImponible.ToString("N2") + "</td></tr>" +
-                    (desc > 0 ? "<tr><td class='r'>DESCUENTO</td><td class='r'>-" + montoDesc.ToString("N2") + "</td></tr>" : "<tr><td class='r'>DESCUENTO</td><td class='r'></td></tr>") +
-                    "<tr><td class='r'>TOTAL Bs F.</td><td class='r'>" + (totalBs > 0 ? totalBs.ToString("N2") : total.ToString("N2")) + "</td></tr>" +
+                    "<tr><td class='r pp'>SUB-TOTAL</td><td class='r'>" + baseImponible.ToString("N2") + "</td></tr>" +
+                    (desc > 0 ? "<tr><td class='r pp'>DESCUENTO</td><td class='r'>-" + montoDesc.ToString("N2") + "</td></tr>" : "<tr><td class='r pp'>DESCUENTO</td><td class='r'></td></tr>") +
+                    "<tr><td class='r pp'>TOTAL Bs F.</td><td class='r'>" + (totalBs > 0 ? totalBs.ToString("N2") : total.ToString("N2")) + "</td></tr>" +
                     "</table></div>" +
                     "</div>" + // cierre page-wrap
                     "</body></html>";
@@ -669,13 +669,13 @@ namespace SistemaGestion.Api.Endpoints
                     ".firma-grid{display:grid;grid-template-columns:1fr 1fr;gap:5mm;margin-top:3mm;text-align:center;font-size:6.5pt}" +
                     ".firma-line{border-top:1px solid #333;padding-top:1mm;margin-top:8mm}" +
                     ".no-print{margin-bottom:3mm;padding:2mm 6mm;background:#C00;color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:9pt}" +
-                    "@media print{.no-print{display:none!important}body{margin:0}}" +
+                    "@media print{.no-print{display:none!important}.pp{visibility:hidden}*{border-color:transparent!important;background:none!important}body{margin:0}}" +
                     "</style></head><body>" +
                     "<button class='no-print' onclick='window.print()'>Imprimir</button>" +
                     "<div class='page-wrap'>" +
 
-                    // Encabezado empresa
-                    "<div class='empresa'>" +
+                    // Encabezado empresa (TODO pre-impreso)
+                    "<div class='empresa pp'>" +
                     "<h1>EL HATO PASCHER C.A.</h1>" +
                     "<div class='dir'>Ctra. Villa de Cura - San Francisco de As&iacute;s, Local N&deg; S/N, Sector Los Colorados - Villa de Cura - Estado Aragua</div>" +
                     "<div class='rif'>RIF: J-30571871-7 &nbsp;&nbsp; Telfs: 0244 386.10.13 - 386.33.04</div>" +
@@ -683,32 +683,32 @@ namespace SistemaGestion.Api.Endpoints
 
                     // Info documento: Fecha | FACTURA N° | N° CONTROL
                     "<div class='doc-info'>" +
-                    "<div><b style='font-size:6pt'>FECHA</b><div class='fecha-box'>" +
-                    "<div class='lbl'>D&Iacute;A</div><div class='lbl'>MES</div><div class='lbl'>A&Ntilde;O</div>" +
+                    "<div><b class='pp' style='font-size:6pt'>FECHA</b><div class='fecha-box'>" +
+                    "<div class='lbl pp'>D&Iacute;A</div><div class='lbl pp'>MES</div><div class='lbl pp'>A&Ntilde;O</div>" +
                     "<div>" + H(fechaDia) + "</div><div>" + H(fechaMes) + "</div><div>" + H(fechaAno) + "</div>" +
                     "</div></div>" +
-                    "<div style='text-align:center'><span style='font-size:7.5pt;font-weight:700'>FACTURA</span><br>" +
+                    "<div style='text-align:center'><span class='pp' style='font-size:7.5pt;font-weight:700'>FACTURA</span><br>" +
                     "<span class='fnum'>N&deg; " + H(numF) + "</span></div>" +
-                    "<div style='text-align:right'><span class='nctrl'>N&deg; CONTROL</span><br>" +
+                    "<div style='text-align:right'><span class='nctrl pp'>N&deg; CONTROL</span><br>" +
                     "<span style='font-size:8pt;font-weight:700'>00 &mdash; " + H(numF.PadLeft(6,'0')) + "</span></div>" +
                     "</div>" +
 
                     // Datos cliente linea 1
-                    "<div class='cli-box'><b>Nombre o Raz&oacute;n Social:</b> " + H(nomCli) + "</div>" +
-                    "<div class='cli-box'><b>Domicilio Fiscal:</b> " + H(dirCompleta) + "</div>" +
+                    "<div class='cli-box'><b class='pp'>Nombre o Raz&oacute;n Social:</b> " + H(nomCli) + "</div>" +
+                    "<div class='cli-box'><b class='pp'>Domicilio Fiscal:</b> " + H(dirCompleta) + "</div>" +
 
                     // Datos cliente linea 2
                     "<div class='cli-grid'>" +
-                    "<div><b>RIF N&deg;</b><br>" + H(rifCli) + "</div>" +
-                    "<div><b>Tel&eacute;fonos</b><br>" + H(telCli) + "</div>" +
-                    "<div><b>Gu&iacute;a de Despacho</b><br>" + H(obs ?? "") + "</div>" +
-                    "<div><b>Orden de Compra N&deg;</b><br></div>" +
-                    "<div><b>Condici&oacute;n de Pago</b><br>" + H(condPago) + "</div>" +
+                    "<div><b class='pp'>RIF N&deg;</b><br>" + H(rifCli) + "</div>" +
+                    "<div><b class='pp'>Tel&eacute;fonos</b><br>" + H(telCli) + "</div>" +
+                    "<div><b class='pp'>Gu&iacute;a de Despacho</b><br>" + H(obs ?? "") + "</div>" +
+                    "<div><b class='pp'>Orden de Compra N&deg;</b><br></div>" +
+                    "<div><b class='pp'>Condici&oacute;n de Pago</b><br>" + H(condPago) + "</div>" +
                     "</div>" +
 
                     // Tabla de items (flex:1 para llenar la página)
                     "<div class='items-section'>" +
-                    "<table><thead><tr>" +
+                    "<table><thead class='pp'><tr>" +
                     "<th style='width:10mm'>Cant.</th><th style='width:14mm'>Ref.</th><th>DESCRIPCI&Oacute;N</th>" +
                     "<th style='width:20mm'>P. UNIT.</th><th style='width:20mm'>TOTAL</th>" +
                     "</tr></thead><tbody>" + filasFactura + "</tbody></table>" +
@@ -716,24 +716,24 @@ namespace SistemaGestion.Api.Endpoints
 
                     // Pie: Forma de pago + Totales
                     "<div class='footer-grid'>" +
-                    "<div class='fp-box'><b>FORMA DE PAGO</b><br>" +
-                    "<span class='fp-item'><span class='chk'>" + chkEfectivo + "</span>EFECTIVO</span>" +
-                    "<span class='fp-item'><span class='chk'>" + chkCheque + "</span>CHEQUE</span>" +
-                    "<span class='fp-item'><span class='chk'>" + chkTarjC + "</span>TARJ. CR&Eacute;DITO</span><br>" +
-                    "<span class='fp-item'><span class='chk'>" + chkTransf + "</span>TRANSF. BANCARIA</span>" +
-                    "<span class='fp-item'><span class='chk'>" + chkTarjD + "</span>TARJ. D&Eacute;BITO</span>" +
+                    "<div class='fp-box'><b class='pp'>FORMA DE PAGO</b><br>" +
+                    "<span class='fp-item'><span class='chk'>" + chkEfectivo + "</span><span class='pp'>EFECTIVO</span></span>" +
+                    "<span class='fp-item'><span class='chk'>" + chkCheque + "</span><span class='pp'>CHEQUE</span></span>" +
+                    "<span class='fp-item'><span class='chk'>" + chkTarjC + "</span><span class='pp'>TARJ. CR&Eacute;DITO</span></span><br>" +
+                    "<span class='fp-item'><span class='chk'>" + chkTransf + "</span><span class='pp'>TRANSF. BANCARIA</span></span>" +
+                    "<span class='fp-item'><span class='chk'>" + chkTarjD + "</span><span class='pp'>TARJ. D&Eacute;BITO</span></span>" +
                     "</div>" +
                     "<table class='totales-box'>" +
-                    "<tr><td class='r'>SUB-TOTAL</td><td class='r' style='width:22mm'>" + (baseImponible + montoDesc).ToString("N2") + "</td></tr>" +
-                    (desc > 0 ? "<tr><td class='r'>DESCUENTO " + desc.ToString("N0") + "%</td><td class='r'>-" + montoDesc.ToString("N2") + "</td></tr>" : "") +
-                    "<tr><td class='r'>EXENTO</td><td class='r'></td></tr>" +
-                    "<tr><td class='r'>BASE IMPONIBLE</td><td class='r'>" + baseImponible.ToString("N2") + "</td></tr>" +
-                    "<tr><td class='r'>IVA 16%</td><td class='r'>" + iva.ToString("N2") + "</td></tr>" +
-                    "<tr><td class='r'>TOTAL</td><td class='r'>" + total.ToString("N2") + "</td></tr>" +
+                    "<tr><td class='r pp'>SUB-TOTAL</td><td class='r' style='width:22mm'>" + (baseImponible + montoDesc).ToString("N2") + "</td></tr>" +
+                    (desc > 0 ? "<tr><td class='r pp'>DESCUENTO " + desc.ToString("N0") + "%</td><td class='r'>-" + montoDesc.ToString("N2") + "</td></tr>" : "") +
+                    "<tr><td class='r pp'>EXENTO</td><td class='r'></td></tr>" +
+                    "<tr><td class='r pp'>BASE IMPONIBLE</td><td class='r'>" + baseImponible.ToString("N2") + "</td></tr>" +
+                    "<tr><td class='r pp'>IVA 16%</td><td class='r'>" + iva.ToString("N2") + "</td></tr>" +
+                    "<tr><td class='r pp'>TOTAL</td><td class='r'>" + total.ToString("N2") + "</td></tr>" +
                     "</table></div>" +
 
-                    // Firmas
-                    "<div class='firma-grid'>" +
+                    // Firmas (todo pre-impreso)
+                    "<div class='firma-grid pp'>" +
                     "<div><div class='firma-line'>Firma y Sello</div></div>" +
                     "<div><div class='firma-line'>Cliente Conforme</div></div>" +
                     "</div>" +
