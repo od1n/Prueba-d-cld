@@ -266,7 +266,7 @@ namespace SistemaGestion.Api.Endpoints
 
                 var html = "<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'>" +
                 "<title>Planilla de Producción</title><style>" +
-                "@page{size:letter landscape;margin:6mm 8mm}" +
+                "@page{size:letter landscape;margin:15mm 8mm 6mm 8mm}" +
                 "*{box-sizing:border-box;margin:0;padding:0;font-family:Arial,sans-serif;font-size:8pt}" +
                 "body{color:#111;width:100%;max-width:100%}" +
                 ".hdr{text-align:center;margin-bottom:2mm}" +
