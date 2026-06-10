@@ -463,6 +463,15 @@ btnIrPaso3.addEventListener('click', () => {
 btnVolver1.addEventListener('click', () => irPaso(1));
 btnVolver2.addEventListener('click', () => irPaso(2));
 
+// Botón "Ingresar manualmente" — salta al formulario sin imagen
+const btnManual = document.getElementById('btnManual');
+if (btnManual) {
+    btnManual.addEventListener('click', () => {
+        fFecha.value = fFecha.value || new Date().toISOString().slice(0,10);
+        irPaso(2);
+    });
+}
+
 // ── Resumen ──────────────────────────────────────────────────────────────────
 function renderResumen() {
     const catSel = categorias.find(c => c.id == fCategoria.value);
