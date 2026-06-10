@@ -1596,6 +1596,22 @@ namespace SistemaGestion
                 //   viejo con columna 'Categoria' TEXT en lugar de IdCategoria
                 //   FK), la renombramos a Gastos_legacy_v9 para conservar los
                 //   datos y crear la nueva con el schema correcto.
+                // ── Retroactive fix: CategoriasGasto puede existir con schema incompleto
+                // Corre ANTES de v20 para que si la tabla YA existe con schema viejo,
+                // las columnas sean agregadas ANTES de que EjecutarMigracionV20 intente usarlas.
+                // Usa ColumnaExiste (no excepciones) y DEFAULT sin NOT NULL para compatibilidad.
+                if (TablaExiste(conn, tx, "CategoriasGasto"))
+                {
+                    if (!ColumnaExiste(conn, tx, "CategoriasGasto", "Color"))
+                        EjecutarSql(conn, tx, "ALTER TABLE CategoriasGasto ADD COLUMN Color TEXT DEFAULT '#1A4A8A'");
+                    if (!ColumnaExiste(conn, tx, "CategoriasGasto", "Activa"))
+                        EjecutarSql(conn, tx, "ALTER TABLE CategoriasGasto ADD COLUMN Activa INTEGER DEFAULT 1");
+                    if (!ColumnaExiste(conn, tx, "CategoriasGasto", "Orden"))
+                        EjecutarSql(conn, tx, "ALTER TABLE CategoriasGasto ADD COLUMN Orden INTEGER DEFAULT 0");
+                    if (!ColumnaExiste(conn, tx, "CategoriasGasto", "EsMateriaPrima"))
+                        EjecutarSql(conn, tx, "ALTER TABLE CategoriasGasto ADD COLUMN EsMateriaPrima INTEGER DEFAULT 0");
+                }
+
                 if (versionActual < 20)
                 {
                     EjecutarMigracionV20(conn, tx);
@@ -1678,20 +1694,6 @@ namespace SistemaGestion
                         "CREATE INDEX IF NOT EXISTS idx_pp_prov ON ProductosProveedor(IdProveedorPrinc);");
                 }
 
-                // ── Retroactive fix: columnas faltantes en CategoriasGasto ──
-                // Corre SIEMPRE (fuera del bloque if versionActual < 20) para
-                // reparar BDs donde V20 corrió con código viejo sin Color/Orden.
-                if (TablaExiste(conn, tx, "CategoriasGasto"))
-                {
-                    if (!ColumnaExiste(conn, tx, "CategoriasGasto", "Color"))
-                        EjecutarSql(conn, tx, "ALTER TABLE CategoriasGasto ADD COLUMN Color TEXT DEFAULT '#1A4A8A'");
-                    if (!ColumnaExiste(conn, tx, "CategoriasGasto", "Activa"))
-                        EjecutarSql(conn, tx, "ALTER TABLE CategoriasGasto ADD COLUMN Activa INTEGER NOT NULL DEFAULT 1");
-                    if (!ColumnaExiste(conn, tx, "CategoriasGasto", "Orden"))
-                        EjecutarSql(conn, tx, "ALTER TABLE CategoriasGasto ADD COLUMN Orden INTEGER NOT NULL DEFAULT 0");
-                    if (!ColumnaExiste(conn, tx, "CategoriasGasto", "EsMateriaPrima"))
-                        EjecutarSql(conn, tx, "ALTER TABLE CategoriasGasto ADD COLUMN EsMateriaPrima INTEGER NOT NULL DEFAULT 0");
-                }
 
                 tx.Commit();
                 RegistrarAuditoria("MIGRACION_OK", "Sistema",
@@ -1759,10 +1761,16 @@ namespace SistemaGestion
                     EsMateriaPrima INTEGER NOT NULL DEFAULT 0
                 );");
             // Columnas que pueden faltar si CategoriasGasto ya existía
-            AlterTableSafe(conn, tx, "ALTER TABLE CategoriasGasto ADD COLUMN Color TEXT DEFAULT '#1A4A8A'");
-            AlterTableSafe(conn, tx, "ALTER TABLE CategoriasGasto ADD COLUMN Activa INTEGER NOT NULL DEFAULT 1");
-            AlterTableSafe(conn, tx, "ALTER TABLE CategoriasGasto ADD COLUMN Orden INTEGER NOT NULL DEFAULT 0");
-            AlterTableSafe(conn, tx, "ALTER TABLE CategoriasGasto ADD COLUMN EsMateriaPrima INTEGER NOT NULL DEFAULT 0");
+            // Usa ColumnaExiste (check explícito, sin captura de excepciones)
+            // Sin NOT NULL en ALTER para máxima compatibilidad SQLite.
+            if (!ColumnaExiste(conn, tx, "CategoriasGasto", "Color"))
+                EjecutarSql(conn, tx, "ALTER TABLE CategoriasGasto ADD COLUMN Color TEXT DEFAULT '#1A4A8A'");
+            if (!ColumnaExiste(conn, tx, "CategoriasGasto", "Activa"))
+                EjecutarSql(conn, tx, "ALTER TABLE CategoriasGasto ADD COLUMN Activa INTEGER DEFAULT 1");
+            if (!ColumnaExiste(conn, tx, "CategoriasGasto", "Orden"))
+                EjecutarSql(conn, tx, "ALTER TABLE CategoriasGasto ADD COLUMN Orden INTEGER DEFAULT 0");
+            if (!ColumnaExiste(conn, tx, "CategoriasGasto", "EsMateriaPrima"))
+                EjecutarSql(conn, tx, "ALTER TABLE CategoriasGasto ADD COLUMN EsMateriaPrima INTEGER DEFAULT 0");
 
             // 4. Crear tabla Gastos nueva (solo si no existe ya con schema correcto)
             EjecutarSql(conn, tx, @"
