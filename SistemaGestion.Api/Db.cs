@@ -16,6 +16,34 @@ namespace SistemaGestion.Api
             // Verificar que existe
             if (!File.Exists(rutaBD))
                 throw new FileNotFoundException($"BD no encontrada: {rutaBD}");
+
+            // Fix defensivo: columnas que pueden faltar en BDs antiguas
+            try
+            {
+                using var c = Conn();
+                string[] fixes = {
+                    "ALTER TABLE Inventario ADD COLUMN Activo INTEGER NOT NULL DEFAULT 1"
+                };
+                foreach (var sql in fixes)
+                {
+                    try
+                    {
+                        using var cmd = c.CreateCommand();
+                        cmd.CommandText = sql;
+                        cmd.ExecuteNonQuery();
+                        Console.WriteLine($"[API] Fix aplicado: {sql[..Math.Min(sql.Length, 60)]}");
+                    }
+                    catch (Exception ex)
+                    {
+                        if (!ex.Message.Contains("duplicate column", StringComparison.OrdinalIgnoreCase))
+                            Console.WriteLine($"[API] WARN fix: {ex.Message}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[API] WARN fixes defensivos: {ex.Message}");
+            }
         }
 
         public static SqliteConnection Conn()
