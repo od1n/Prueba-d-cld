@@ -972,6 +972,42 @@ namespace SistemaGestion
             ";
             cmd.ExecuteNonQuery();
 
+            // ── Fix defensivo: CategoriasGasto puede existir con esquema
+            //    incompleto en BDs antiguas (pre-v20). Agregar columnas
+            //    faltantes AQUÍ, fuera de la transacción de MigrarEsquema,
+            //    para que las migraciones v10→v25 nunca fallen por
+            //    "no such column: Orden/Color".
+            //    Cada ALTER corre en autocommit; try/catch individual ignora
+            //    "duplicate column" si ya existe. 100% idempotente.
+            {
+                using var chk = c.CreateCommand();
+                chk.CommandText = "SELECT 1 FROM sqlite_master WHERE type='table' AND name='CategoriasGasto'";
+                if (chk.ExecuteScalar() != null)
+                {
+                    string[] colsFix = {
+                        "ALTER TABLE CategoriasGasto ADD COLUMN Color TEXT DEFAULT '#1A4A8A'",
+                        "ALTER TABLE CategoriasGasto ADD COLUMN Activa INTEGER DEFAULT 1",
+                        "ALTER TABLE CategoriasGasto ADD COLUMN Orden INTEGER DEFAULT 0",
+                        "ALTER TABLE CategoriasGasto ADD COLUMN EsMateriaPrima INTEGER DEFAULT 0"
+                    };
+                    foreach (var sql in colsFix)
+                    {
+                        try
+                        {
+                            using var fix = c.CreateCommand();
+                            fix.CommandText = sql;
+                            fix.ExecuteNonQuery();
+                        }
+                        catch (Exception exFix)
+                        {
+                            // "duplicate column name" es esperado si ya existe
+                            if (!exFix.Message.Contains("duplicate column", StringComparison.OrdinalIgnoreCase))
+                                Console.WriteLine($"[DB] WARN fix CategoriasGasto: {exFix.Message}");
+                        }
+                    }
+                }
+            }
+
             // Aplicar migraciones incrementales al esquema existente
             MigrarEsquema(c);
 
