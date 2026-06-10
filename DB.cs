@@ -1008,6 +1008,27 @@ namespace SistemaGestion
                 }
             }
 
+            // ── Fix defensivo: Inventario.Activo (v17 en DB_Deploy nunca se invocó) ──
+            {
+                using var chk = c.CreateCommand();
+                chk.CommandText = "SELECT 1 FROM sqlite_master WHERE type='table' AND name='Inventario'";
+                if (chk.ExecuteScalar() != null)
+                {
+                    try
+                    {
+                        using var fix = c.CreateCommand();
+                        fix.CommandText = "ALTER TABLE Inventario ADD COLUMN Activo INTEGER NOT NULL DEFAULT 1";
+                        fix.ExecuteNonQuery();
+                        Console.WriteLine("[DB] Fix: columna Activo agregada a Inventario");
+                    }
+                    catch (Exception exFix)
+                    {
+                        if (!exFix.Message.Contains("duplicate column", StringComparison.OrdinalIgnoreCase))
+                            Console.WriteLine($"[DB] WARN fix Inventario.Activo: {exFix.Message}");
+                    }
+                }
+            }
+
             // Aplicar migraciones incrementales al esquema existente
             MigrarEsquema(c);
 
