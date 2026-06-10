@@ -24,133 +24,164 @@ namespace SistemaGestion
         public static byte[] GenerarFactura(
             Factura factura,
             List<LineaFactura> lineas,
-            string nombreEmpresa = "Mi Empresa S.A.",
-            string rif = "",
-            string direccion = "",
-            string telefono = "")
+            string nombreEmpresa = "EL HATO PASCHER C.A.",
+            string rif = "J-30571871-7",
+            string direccion = "Ctra. Villa de Cura - San Francisco de Asís, Local N° S/N, Sector Los Colorados - Villa de Cura - Estado Aragua",
+            string telefono = "0244 386.10.13 - 386.33.04",
+            string rifCliente = "",
+            string dirCliente = "",
+            string telCliente = "")
         {
+            bool esNota = factura.EsNotaEntrega;
+
             var doc = Document.Create(container =>
             {
                 container.Page(page =>
                 {
-                    page.Size(PageSizes.A4);
-                    page.Margin(40);
-                    page.DefaultTextStyle(x => x.FontSize(10).FontFamily("Arial"));
+                    if (esNota)
+                    {
+                        // Nota de entrega: media carta (~140×210mm)
+                        page.Size(140, 210, Unit.Millimetre);
+                        page.Margin(6, Unit.Millimetre);
+                    }
+                    else
+                    {
+                        // Factura fiscal: tamaño carta
+                        page.Size(PageSizes.Letter);
+                        page.Margin(10, Unit.Millimetre);
+                    }
+                    page.DefaultTextStyle(x => x.FontSize(esNota ? 8f : 9f).FontFamily("Arial"));
 
                     // ── ENCABEZADO ────────────────────────────────────────
-                    page.Header().Element(header =>
+                    page.Header().Column(header =>
                     {
-                        header.Row(row =>
+                        if (!esNota)
                         {
-                            // Columna izquierda: datos empresa
-                            row.RelativeItem().Column(col =>
-                            {
-                                col.Item().Text(nombreEmpresa)
-                                    .FontSize(18).Bold().FontColor("#1E3A8A");
-                                if (!string.IsNullOrWhiteSpace(rif))
-                                    col.Item().Text("RIF: " + rif)
-                                        .FontSize(9).FontColor("#555555");
-                                if (!string.IsNullOrWhiteSpace(direccion))
-                                    col.Item().Text(direccion)
-                                        .FontSize(9).FontColor("#555555");
-                                if (!string.IsNullOrWhiteSpace(telefono))
-                                    col.Item().Text("Tel: " + telefono)
-                                        .FontSize(9).FontColor("#555555");
-                            });
+                            // ── Factura fiscal: encabezado EHP completo ──
+                            header.Item().AlignCenter().Text(nombreEmpresa)
+                                .FontSize(16).Bold().FontColor("#CC0000");
+                            header.Item().AlignCenter().Text(direccion)
+                                .FontSize(7).FontColor("#333333");
+                            header.Item().AlignCenter().Text("RIF: " + rif + "     Telfs: " + telefono)
+                                .FontSize(8).Bold();
+                            header.Item().Height(3);
 
-                            // Columna derecha: datos factura
-                            row.ConstantItem(200).Column(col =>
+                            header.Item().Border(1).Padding(3).Row(row =>
                             {
-                                col.Item().Background("#1E3A8A").Padding(8).Column(inner =>
+                                row.RelativeItem().Column(col =>
                                 {
-                                    inner.Item().Text("FACTURA")
-                                        .FontSize(16).Bold().FontColor("#FFFFFF")
-                                        .AlignCenter();
-                                    inner.Item().Text("N° " + factura.NumeroF)
-                                        .FontSize(13).Bold().FontColor("#FFFFFF")
-                                        .AlignCenter();
+                                    col.Item().Text("FECHA").FontSize(7).Bold();
+                                    col.Item().Text(factura.Fecha.ToString("dd / MM / yyyy")).FontSize(9);
                                 });
-
-                                col.Item().Padding(4).Column(inner =>
+                                row.RelativeItem().AlignCenter().Column(col =>
                                 {
-                                    inner.Item().Row(r =>
-                                    {
-                                        r.RelativeItem().Text("Fecha:").Bold();
-                                        r.RelativeItem().Text(factura.Fecha.ToString("dd/MM/yyyy")).AlignRight();
-                                    });
-                                    inner.Item().Row(r =>
-                                    {
-                                        r.RelativeItem().Text("Vence:").Bold();
-                                        r.RelativeItem().Text(
-                                            factura.DiasCreditoF > 0
-                                            ? factura.Fecha.AddDays(factura.DiasCreditoF).ToString("dd/MM/yyyy")
-                                            : "Contado").AlignRight();
-                                    });
-                                    inner.Item().Row(r =>
-                                    {
-                                        r.RelativeItem().Text("Forma pago:").Bold();
-                                        r.RelativeItem().Text(factura.FormaDePago ?? "").AlignRight();
-                                    });
+                                    col.Item().Text("FACTURA").FontSize(9).Bold();
+                                    col.Item().Text("N° " + factura.NumeroF)
+                                        .FontSize(14).Bold().FontColor("#CC0000");
+                                });
+                                row.RelativeItem().AlignRight().Column(col =>
+                                {
+                                    col.Item().Text("N° CONTROL").FontSize(7).Bold();
+                                    col.Item().Text("00 — " + factura.NumeroF.PadLeft(6, '0'))
+                                        .FontSize(10).Bold();
                                 });
                             });
-                        });
 
-                        // Linea divisora
-                        header.Row(_ => { });
-                        header.Height(2).Background("#1E3A8A");
-                        header.Height(6);
+                            header.Item().Height(2);
+                            header.Item().Border(1).Padding(2).Text(t =>
+                            {
+                                t.Span("Nombre o Razón Social: ").FontSize(7).Bold().FontColor("#555555");
+                                t.Span(factura.Codigo).FontSize(9);
+                            });
+                            header.Item().Border(1).Padding(2).Text(t =>
+                            {
+                                t.Span("Domicilio Fiscal: ").FontSize(7).Bold().FontColor("#555555");
+                                t.Span(dirCliente).FontSize(8);
+                            });
+                            header.Item().Height(1);
+                            header.Item().Border(1).Padding(2).Row(row =>
+                            {
+                                row.RelativeItem().Text(t => { t.Span("RIF: ").FontSize(6).Bold(); t.Span(rifCliente).FontSize(8); });
+                                row.RelativeItem().Text(t => { t.Span("Teléfono: ").FontSize(6).Bold(); t.Span(telCliente).FontSize(8); });
+                                row.RelativeItem().Text(t => { t.Span("Cond. Pago: ").FontSize(6).Bold(); t.Span(factura.FormaDePago ?? "").FontSize(8); });
+                            });
+                        }
+                        else
+                        {
+                            // ── Nota de entrega: encabezado simple ──
+                            header.Item().Border(1).Padding(2).Row(row =>
+                            {
+                                row.RelativeItem().Column(col =>
+                                {
+                                    col.Item().Text("NOTA DE ENTREGA").FontSize(7).Bold();
+                                    col.Item().Text("N° " + factura.NumeroF).FontSize(11).Bold();
+                                });
+                                row.ConstantItem(60).Column(col =>
+                                {
+                                    col.Item().Text("FECHA").FontSize(6).Bold();
+                                    col.Item().Text(factura.Fecha.ToString("dd/MM/yyyy")).FontSize(9);
+                                });
+                            });
+                            header.Item().Height(1);
+                            header.Item().Border(1).Padding(2).Text(t =>
+                            {
+                                t.Span("NOMBRE: ").FontSize(7).Bold();
+                                t.Span(factura.Codigo).FontSize(8);
+                            });
+                            header.Item().Border(1).Padding(2).Row(row =>
+                            {
+                                row.RelativeItem().Text(t => { t.Span("DIRECCIÓN: ").FontSize(7).Bold(); t.Span(dirCliente).FontSize(8); });
+                                row.ConstantItem(50).Text(t => { t.Span("TELF: ").FontSize(7).Bold(); t.Span(telCliente).FontSize(8); });
+                            });
+                        }
+                        header.Item().Height(3);
                     });
 
                     // ── CONTENIDO ─────────────────────────────────────────
+                    // Variables accesibles desde todo el contenido
+                    decimal desc = factura.Descuento;
+                    decimal iva  = factura.IvaF;
+                    decimal total = factura.TotalF;
+
                     page.Content().Column(content =>
                     {
-                        content.Item().Height(12);
-
-                        // Datos del cliente
-                        content.Item().Background("#F0F4FF").Padding(8).Row(row =>
-                        {
-                            row.RelativeItem().Column(col =>
-                            {
-                                col.Item().Text("CLIENTE").Bold().FontSize(8).FontColor("#555555");
-                                col.Item().Text(factura.Codigo).FontSize(11).Bold();
-                            });
-                            row.ConstantItem(200).Column(col =>
-                            {
-                                col.Item().Text("OBSERVACIONES").Bold().FontSize(8).FontColor("#555555");
-                                col.Item().Text(factura.Observaciones ?? "").FontSize(9);
-                                if (!string.IsNullOrWhiteSpace(factura.Transporte))
-                                    col.Item().Text("Transporte: " + factura.Transporte).FontSize(9);
-                            });
-                        });
-
-                        content.Item().Height(14);
+                        content.Item().Height(4);
 
                         // Tabla de productos
                         content.Item().Table(table =>
                         {
-                            // Definir columnas
+                            // Definir columnas según tipo
                             table.ColumnsDefinition(cols =>
                             {
-                                cols.ConstantColumn(45);   // #
-                                cols.ConstantColumn(70);   // Codigo
-                                cols.RelativeColumn();     // Descripcion
-                                cols.ConstantColumn(55);   // Cant
-                                cols.ConstantColumn(80);   // Precio
-                                cols.ConstantColumn(80);   // Subtotal
+                                if (esNota)
+                                {
+                                    cols.ConstantColumn(30);   // Cant
+                                    cols.RelativeColumn();     // Descripcion
+                                    cols.ConstantColumn(55);   // Precio
+                                    cols.ConstantColumn(55);   // Total
+                                }
+                                else
+                                {
+                                    cols.ConstantColumn(30);   // Cant
+                                    cols.ConstantColumn(55);   // Ref/Codigo
+                                    cols.RelativeColumn();     // Descripcion
+                                    cols.ConstantColumn(65);   // Precio
+                                    cols.ConstantColumn(65);   // Total
+                                }
                             });
 
                             // Encabezado de tabla
                             static IContainer HeaderCell(IContainer c) =>
-                                c.Background("#1E3A8A").Padding(5).AlignMiddle();
+                                c.Background("#1E3A8A").Padding(3).AlignMiddle();
 
                             table.Header(h =>
                             {
-                                h.Cell().Element(HeaderCell).Text("#").FontColor("#FFFFFF").Bold().AlignCenter();
-                                h.Cell().Element(HeaderCell).Text("Codigo").FontColor("#FFFFFF").Bold();
-                                h.Cell().Element(HeaderCell).Text("Descripcion").FontColor("#FFFFFF").Bold();
                                 h.Cell().Element(HeaderCell).Text("Cant.").FontColor("#FFFFFF").Bold().AlignCenter();
-                                h.Cell().Element(HeaderCell).Text("Precio Unit.").FontColor("#FFFFFF").Bold().AlignRight();
-                                h.Cell().Element(HeaderCell).Text("Subtotal").FontColor("#FFFFFF").Bold().AlignRight();
+                                if (!esNota)
+                                    h.Cell().Element(HeaderCell).Text("Ref.").FontColor("#FFFFFF").Bold();
+                                h.Cell().Element(HeaderCell).Text("Descripción").FontColor("#FFFFFF").Bold();
+                                h.Cell().Element(HeaderCell).Text("P. Unit.").FontColor("#FFFFFF").Bold().AlignRight();
+                                h.Cell().Element(HeaderCell).Text("Total").FontColor("#FFFFFF").Bold().AlignRight();
                             });
 
                             // Filas de productos
@@ -164,98 +195,175 @@ namespace SistemaGestion
                                 string bg = par ? "#F0F4FF" : "#FFFFFF";
 
                                 static IContainer DataCell(IContainer c, string bg) =>
-                                    c.Background(bg).Padding(5).AlignMiddle();
+                                    c.Background(bg).Padding(3).AlignMiddle();
 
                                 decimal subtotal = linea.Cantidad * linea.PrecioUnit;
                                 totalLineas += subtotal;
 
                                 table.Cell().Element(c => DataCell(c, bg))
-                                    .Text(fila.ToString()).AlignCenter().FontColor("#777777");
-                                table.Cell().Element(c => DataCell(c, bg))
-                                    .Text(linea.CodigoItem);
+                                    .Text(linea.Cantidad.ToString("N0")).AlignCenter();
+                                if (!esNota)
+                                    table.Cell().Element(c => DataCell(c, bg))
+                                        .Text(linea.CodigoItem).FontSize(8);
                                 table.Cell().Element(c => DataCell(c, bg))
                                     .Text(linea.Descripcion);
                                 table.Cell().Element(c => DataCell(c, bg))
-                                    .Text(linea.Cantidad.ToString("N2")).AlignCenter();
+                                    .Text(linea.PrecioUnit.ToString("N2")).AlignRight();
                                 table.Cell().Element(c => DataCell(c, bg))
-                                    .Text(linea.PrecioUnit.ToString("C2")).AlignRight();
-                                table.Cell().Element(c => DataCell(c, bg))
-                                    .Text(subtotal.ToString("C2")).AlignRight().Bold();
+                                    .Text(subtotal.ToString("N2")).AlignRight().Bold();
                             }
 
                             // Fila de totales
-                            decimal descMonto = totalLineas * factura.Descuento / 100;
+                            decimal descMonto = totalLineas * desc / 100;
                             decimal subTras   = totalLineas - descMonto;
-                            decimal iva       = factura.IvaF;
-                            decimal total     = factura.TotalF;
 
                             static IContainer TotalCell(IContainer c) =>
                                 c.BorderTop(1).BorderColor("#CCCCCC").Padding(5).AlignMiddle();
 
+                            uint spanEmpty = esNota ? 2u : 3u;
+
                             // Fila descuento (si aplica)
                             if (factura.Descuento > 0)
                             {
-                                table.Cell().ColumnSpan(4).Element(TotalCell).Text("");
+                                table.Cell().ColumnSpan(spanEmpty).Element(TotalCell).Text("");
                                 table.Cell().Element(TotalCell)
                                     .Text("Descuento (" + factura.Descuento + "%):")
                                     .AlignRight().FontColor("#777777");
                                 table.Cell().Element(TotalCell)
-                                    .Text("-" + descMonto.ToString("C2"))
+                                    .Text("-" + descMonto.ToString("N2"))
                                     .AlignRight().FontColor("#CC0000");
                             }
 
                             // Subtotal
-                            table.Cell().ColumnSpan(4).Element(TotalCell).Text("");
+                            table.Cell().ColumnSpan(spanEmpty).Element(TotalCell).Text("");
                             table.Cell().Element(TotalCell).Text("Subtotal:").AlignRight();
-                            table.Cell().Element(TotalCell).Text(subTras.ToString("C2")).AlignRight();
+                            table.Cell().Element(TotalCell).Text(subTras.ToString("N2")).AlignRight();
 
-                            // IVA
-                            table.Cell().ColumnSpan(4).Element(TotalCell).Text("");
-                            table.Cell().Element(TotalCell).Text("IVA:").AlignRight();
-                            table.Cell().Element(TotalCell).Text(iva.ToString("C2")).AlignRight();
+                            if (!esNota)
+                            {
+                                // IVA solo en factura fiscal
+                                table.Cell().ColumnSpan(spanEmpty).Element(TotalCell).Text("");
+                                table.Cell().Element(TotalCell).Text("IVA 16%:").AlignRight();
+                                table.Cell().Element(TotalCell).Text(iva.ToString("N2")).AlignRight();
+                            }
 
                             // TOTAL
-                            table.Cell().ColumnSpan(4).Background("#1E3A8A").Padding(5).Text("");
+                            table.Cell().ColumnSpan(esNota ? 2u : 4u).Background("#1E3A8A").Padding(5).Text("");
                             table.Cell().Background("#1E3A8A").Padding(5)
                                 .Text("TOTAL:").Bold().FontColor("#FFFFFF").AlignRight();
                             table.Cell().Background("#1E3A8A").Padding(5)
                                 .Text(total.ToString("C2")).Bold().FontColor("#FFFFFF").AlignRight();
                         });
 
-                        content.Item().Height(16);
+                        content.Item().Height(8);
+
+                        if (!esNota)
+                        {
+                            // ── Factura fiscal: forma de pago + totales desglosados ──
+                            content.Item().Row(row =>
+                            {
+                                row.RelativeItem().Border(1).Padding(4).Column(col =>
+                                {
+                                    col.Item().Text("FORMA DE PAGO").FontSize(7).Bold();
+                                    col.Item().Height(4);
+                                    string fp = factura.FormaDePago?.ToLower() ?? "";
+                                    string Chk(string k) => fp.Contains(k) ? "[X]" : "[  ]";
+                                    col.Item().Text($"{Chk("efectivo")} Efectivo   {Chk("cheque")} Cheque   {Chk("créd")} Tarj. Crédito").FontSize(8);
+                                    col.Item().Text($"{Chk("transf")} Transf. Bancaria   {Chk("débit")} Tarj. Débito").FontSize(8);
+                                });
+                                row.ConstantItem(180).Border(1).Column(col =>
+                                {
+                                    decimal bi = total - iva;
+                                    void Fila(string lbl, string val, bool bold = false) {
+                                        col.Item().BorderBottom(1).BorderColor("#CCC").Padding(2).Row(r => {
+                                            r.RelativeItem().Text(lbl).FontSize(8).AlignRight();
+                                            var t = r.ConstantItem(70).Text(val).FontSize(8).AlignRight();
+                                            if (bold) t.Bold();
+                                        });
+                                    }
+                                    Fila("SUB-TOTAL", (bi + (desc > 0 ? bi * factura.Descuento / (100 - factura.Descuento) : 0)).ToString("N2"));
+                                    if (desc > 0) Fila("DESCUENTO " + factura.Descuento + "%", "-" + (bi * factura.Descuento / (100 - factura.Descuento)).ToString("N2"));
+                                    Fila("EXENTO", "");
+                                    Fila("BASE IMPONIBLE", bi.ToString("N2"));
+                                    Fila("IVA 16%", iva.ToString("N2"));
+                                    Fila("TOTAL", total.ToString("N2"), true);
+                                });
+                            });
+
+                            // Firmas
+                            content.Item().Height(15);
+                            content.Item().Row(row =>
+                            {
+                                row.RelativeItem().Column(col =>
+                                {
+                                    col.Item().Height(20);
+                                    col.Item().BorderTop(1).PaddingTop(2).AlignCenter()
+                                        .Text("Firma y Sello").FontSize(7);
+                                });
+                                row.ConstantItem(20).Text("");
+                                row.RelativeItem().Column(col =>
+                                {
+                                    col.Item().Height(20);
+                                    col.Item().BorderTop(1).PaddingTop(2).AlignCenter()
+                                        .Text("Cliente Conforme").FontSize(7);
+                                });
+                            });
+                        }
+                        else
+                        {
+                            // ── Nota de entrega: pie simple ──
+                            content.Item().Row(row =>
+                            {
+                                row.RelativeItem().Column(col =>
+                                {
+                                    col.Item().Height(12);
+                                    col.Item().BorderTop(1).PaddingTop(2).AlignCenter()
+                                        .Text("FIRMA").FontSize(7);
+                                    col.Item().AlignCenter().Text("Esta factura va sin tachadura ni enmendaduras")
+                                        .FontSize(6).FontColor("#888888");
+                                });
+                                row.ConstantItem(80).Border(1).Column(col =>
+                                {
+                                    void Fila(string lbl, string val, bool bold = false) {
+                                        col.Item().BorderBottom(1).BorderColor("#CCC").Padding(1).Row(r => {
+                                            r.RelativeItem().Text(lbl).FontSize(7).AlignRight();
+                                            var t = r.ConstantItem(28).Text(val).FontSize(7).AlignRight();
+                                            if (bold) t.Bold();
+                                        });
+                                    }
+                                    Fila("SUB-TOTAL", (total - iva).ToString("N2"));
+                                    if (desc > 0) Fila("DESCUENTO", "-" + (total * desc / 100).ToString("N2"));
+                                    Fila("TOTAL", total.ToString("N2"), true);
+                                });
+                            });
+                        }
 
                         // Abono y saldo pendiente
                         if (factura.Abono > 0)
                         {
+                            content.Item().Height(6);
                             decimal saldo = factura.TotalF - factura.Abono;
                             content.Item().Row(row =>
                             {
                                 row.RelativeItem();
-                                row.ConstantItem(260).Column(col =>
+                                row.ConstantItem(200).Column(col =>
                                 {
-                                    col.Item().Background("#E8F5E9").Padding(6).Row(r =>
+                                    col.Item().Background("#E8F5E9").Padding(4).Row(r =>
                                     {
-                                        r.RelativeItem().Text("Abono recibido:").Bold();
+                                        r.RelativeItem().Text("Abono:").Bold().FontSize(8);
                                         r.RelativeItem().Text(factura.Abono.ToString("C2"))
-                                            .AlignRight().FontColor("#2E7D32");
+                                            .AlignRight().FontSize(8).FontColor("#2E7D32");
                                     });
-                                    col.Item().Background(saldo <= 0 ? "#E8F5E9" : "#FFF8E1").Padding(6).Row(r =>
+                                    col.Item().Background(saldo <= 0 ? "#E8F5E9" : "#FFF8E1").Padding(4).Row(r =>
                                     {
-                                        r.RelativeItem().Text("Saldo pendiente:").Bold();
+                                        r.RelativeItem().Text("Saldo:").Bold().FontSize(8);
                                         r.RelativeItem().Text(saldo.ToString("C2"))
-                                            .AlignRight()
+                                            .AlignRight().FontSize(8)
                                             .FontColor(saldo <= 0 ? "#2E7D32" : "#E65100");
                                     });
                                 });
                             });
                         }
-
-                        content.Item().Height(20);
-
-                        // Nota de pie
-                        content.Item().BorderTop(1).BorderColor("#DDDDDD").PaddingTop(8)
-                            .Text("Gracias por su preferencia.")
-                            .FontSize(9).Italic().FontColor("#777777").AlignCenter();
                     });
 
                     // ── PIE DE PAGINA ─────────────────────────────────────

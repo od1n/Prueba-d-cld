@@ -307,30 +307,39 @@ namespace SistemaGestion.Api.Endpoints
 
 
             // ── GET página imprimible ─────────────────────────────────────
+            // Detecta TipoDocumento para renderizar factura fiscal (con IVA,
+            // tamaño carta) o nota de entrega (sin IVA, media carta).
             app.MapGet("/api/facturas/{numero}/imprimir", async (string numero, HttpContext ctx) =>
             {
                 using var c = Db.Conn();
                 var cmd = c.CreateCommand();
                 cmd.CommandText = @"SELECT NumeroF,Fecha,Codigo,TotalF,Abono,IvaF,
-                    FormaDePago,Observaciones,rowid,Descuento
+                    FormaDePago,Observaciones,rowid,Descuento,
+                    COALESCE(TipoDocumento,'FacturaConIVA'),
+                    COALESCE(TasaBCVUsada,0)
                     FROM Facturas WHERE NumeroF=$n";
                 cmd.Parameters.AddWithValue("$n", numero);
                 using var r = cmd.ExecuteReader();
                 if (!r.Read()) { ctx.Response.StatusCode=404; return; }
-                decimal total=Db.D(r,3), abono=Db.D(r,4), iva=Db.D(r,5), desc=Db.D(r,9);
+                decimal total=Db.D(r,3), abono=Db.D(r,4), iva=Db.D(r,5), desc=Db.D(r,9),
+                        tasaBcv=Db.D(r,11);
                 int rowid=Db.I(r,8);
                 string numF=Db.S(r,0), fecha=Db.S(r,1), codCli=Db.S(r,2),
-                       fp=Db.S(r,6), obs=Db.S(r,7);
+                       fp=Db.S(r,6), obs=Db.S(r,7), tipoDoc=Db.S(r,10);
                 r.Close();
 
-                string nomCli = codCli;
+                // Datos del cliente
+                string nomCli=codCli, rifCli="", dirCli="", telCli="", ciudadCli="";
                 try {
                     var cc=c.CreateCommand();
-                    cc.CommandText="SELECT Descripcion FROM Clientes WHERE Codigo=$c";
+                    cc.CommandText="SELECT Descripcion,COALESCE(CiRif,''),COALESCE(Direccion,''),COALESCE(Telefono,''),COALESCE(Ciudad,'') FROM Clientes WHERE Codigo=$c";
                     cc.Parameters.AddWithValue("$c",codCli);
-                    nomCli = cc.ExecuteScalar()?.ToString() ?? codCli;
+                    using var rc=cc.ExecuteReader();
+                    if(rc.Read()){nomCli=Db.S(rc,0);rifCli=Db.S(rc,1);dirCli=Db.S(rc,2);telCli=Db.S(rc,3);ciudadCli=Db.S(rc,4);}
                 } catch {}
+                string dirCompleta = string.IsNullOrWhiteSpace(ciudadCli) ? dirCli : dirCli + ", " + ciudadCli;
 
+                // Items
                 var cmdL = c.CreateCommand();
                 cmdL.CommandText = @"SELECT df.Codigo, COALESCE(i.Descripcion,df.Codigo),
                     COALESCE(i.Precio,0), df.Cantidad
@@ -338,63 +347,215 @@ namespace SistemaGestion.Api.Endpoints
                     LEFT JOIN Inventario i ON i.Codigo=df.Codigo
                     WHERE df.IdFactura=$id";
                 cmdL.Parameters.AddWithValue("$id", rowid);
-                var filas = new System.Text.StringBuilder();
+                var filasFactura = new System.Text.StringBuilder();
+                var filasNota = new System.Text.StringBuilder();
                 using var rl = cmdL.ExecuteReader();
                 while (rl.Read()) {
-                    decimal pU=Db.D(rl,2), cnt=Db.D(rl,3);
-                    filas.Append("<tr><td>" + H(Db.S(rl,0)) + "</td><td>" + H(Db.S(rl,1)) +
-                        "</td><td class='r'>" + cnt.ToString("N2") +
-                        "</td><td class='r'>" + pU.ToString("N2") +
-                        "</td><td class='r'>" + (pU*cnt).ToString("N2") + "</td></tr>");
+                    string codItem=Db.S(rl,0), descItem=Db.S(rl,1);
+                    decimal pU=Db.D(rl,2), cnt=Db.D(rl,3), sub=pU*cnt;
+                    filasFactura.Append($"<tr><td class='c'>{H(cnt.ToString("N0"))}</td><td>{H(codItem)}</td><td>{H(descItem)}</td><td class='r'>{pU.ToString("N2")}</td><td class='r'>{sub.ToString("N2")}</td></tr>");
+                    filasNota.Append($"<tr><td class='c'>{H(cnt.ToString("N0"))}</td><td>{H(descItem)}</td><td class='r'>{pU.ToString("N2")}</td><td class='r'>{sub.ToString("N2")}</td></tr>");
                 }
-                string estado = abono >= total ? "Pagada" : "Pendiente";
-                string bg = abono >= total ? "#d4edda" : "#fff3cd";
-                string fg = abono >= total ? "#155724" : "#856404";
 
-                string html =
-                    "<!DOCTYPE html><html lang='es'><head>" +
-                    "<meta charset='UTF-8'><title>Factura " + H(numF) + "</title>" +
-                    "<style>" +
-                    "*{box-sizing:border-box;margin:0;padding:0;font-family:'Segoe UI',Arial,sans-serif;font-size:11pt}" +
-                    "body{padding:20mm 15mm;color:#111}" +
-                    ".titulo{font-size:20pt;font-weight:700;margin-bottom:2mm}" +
-                    ".sub{color:#555;margin-bottom:6mm;font-size:10pt}" +
-                    ".grid2{display:grid;grid-template-columns:1fr 1fr;gap:4mm;margin-bottom:6mm}" +
-                    ".campo{margin-bottom:2mm}.campo label{font-weight:600;font-size:9pt;text-transform:uppercase;color:#555}" +
-                    ".campo p{font-size:11pt}" +
-                    "table{width:100%;border-collapse:collapse;margin-bottom:6mm}" +
-                    "thead tr{background:#1A4A8A;color:#fff}" +
-                    "th,td{padding:2mm 3mm;text-align:left;border-bottom:1px solid #ddd}" +
-                    ".r{text-align:right}.total-row td{font-weight:700;border-top:2px solid #111}" +
-                    ".estado{display:inline-block;padding:1mm 4mm;border-radius:3mm;font-weight:700}" +
-                    "@media print{body{padding:10mm}.no-print{display:none!important}}" +
+                // Calcular totales
+                decimal subtotalSinDesc = total - iva + (total - iva) * desc / (100 - desc);
+                decimal montoDesc = desc > 0 ? subtotalSinDesc * desc / 100 : 0;
+                decimal baseImponible = subtotalSinDesc - montoDesc;
+                decimal totalBs = tasaBcv > 0 ? total * tasaBcv : 0;
+
+                // Parsear fecha
+                string fechaDia="", fechaMes="", fechaAno="";
+                if(DateTime.TryParse(fecha, out var dtFecha)){
+                    fechaDia=dtFecha.ToString("dd"); fechaMes=dtFecha.ToString("MM"); fechaAno=dtFecha.ToString("yyyy");
+                }
+
+                // Forma de pago checkboxes
+                string fpLower = (fp ?? "").ToLower();
+                string chkEfectivo = fpLower.Contains("efectivo") ? "X" : "&nbsp;";
+                string chkCheque = fpLower.Contains("cheque") ? "X" : "&nbsp;";
+                string chkTarjC = fpLower.Contains("credito") || fpLower.Contains("crédito") ? "X" : "&nbsp;";
+                string chkTransf = fpLower.Contains("transf") ? "X" : "&nbsp;";
+                string chkTarjD = fpLower.Contains("debito") || fpLower.Contains("débito") ? "X" : "&nbsp;";
+
+                // Condicion de pago
+                string condPago = "Contado";
+                if(fp != null && fp.Contains("Crédito", StringComparison.OrdinalIgnoreCase))
+                    condPago = fp;
+                else if(fp != null) condPago = fp;
+
+                string html;
+                if (tipoDoc == "NotaEntrega")
+                {
+                    // ═══════════════════════════════════════════════════════
+                    //  NOTA DE ENTREGA — Media carta (~14×21cm)
+                    // ═══════════════════════════════════════════════════════
+                    html =
+                    "<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'>" +
+                    "<title>Nota de Entrega " + H(numF) + "</title><style>" +
+                    "@page{size:140mm 210mm;margin:6mm}" +
+                    "*{box-sizing:border-box;margin:0;padding:0;font-family:Arial,sans-serif;font-size:8pt}" +
+                    "body{width:128mm;margin:0 auto;color:#111}" +
+                    ".hdr{border:1px solid #333;margin-bottom:2mm}" +
+                    ".hdr-top{display:grid;grid-template-columns:40mm 1fr 40mm;border-bottom:1px solid #333}" +
+                    ".hdr-top>div{padding:2mm;border-right:1px solid #333}" +
+                    ".hdr-top>div:last-child{border-right:none}" +
+                    ".lbl{font-size:7pt;color:#555;text-transform:uppercase}" +
+                    ".val{font-size:9pt;font-weight:700}" +
+                    ".fecha-grid{display:grid;grid-template-columns:1fr 1fr;gap:1mm;text-align:center}" +
+                    ".fecha-grid div{border:1px solid #999;padding:1mm;font-size:8pt}" +
+                    ".cli{border:1px solid #333;padding:1.5mm 2mm;font-size:8pt;margin-bottom:1mm}" +
+                    ".cli b{font-size:7pt;color:#555}" +
+                    "table{width:100%;border-collapse:collapse;border:1px solid #333;margin-bottom:2mm}" +
+                    "thead{background:#eee}" +
+                    "th{font-size:7pt;padding:1.5mm 2mm;border:1px solid #333;text-transform:uppercase}" +
+                    "td{padding:1.5mm 2mm;border-bottom:1px solid #ccc;font-size:8pt;height:5mm}" +
+                    ".c{text-align:center}.r{text-align:right}" +
+                    ".pie{display:grid;grid-template-columns:1fr 1fr;gap:2mm;font-size:8pt}" +
+                    ".pie-izq{border-top:1px solid #333;padding-top:2mm;text-align:center;font-size:7pt}" +
+                    ".totales{border:1px solid #333}" +
+                    ".totales tr td{padding:1mm 2mm;border-bottom:1px solid #ccc;font-size:8pt}" +
+                    ".totales tr:last-child td{font-weight:700;border-top:2px solid #333}" +
+                    ".no-print{margin-bottom:4mm;padding:2mm 6mm;background:#333;color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:9pt}" +
+                    "@media print{.no-print{display:none!important}body{margin:0}}" +
                     "</style></head><body>" +
-                    "<button class='no-print' onclick='window.print()' " +
-                    "style='margin-bottom:8mm;padding:2mm 8mm;background:#1A4A8A;color:#fff;" +
-                    "border:none;border-radius:4px;cursor:pointer;font-size:11pt'>&#128424; Imprimir</button>" +
-                    "<div class='titulo'>NOTA DE ENTREGA</div>" +
-                    "<div class='sub'>Sistema de Gestión — Portal Interno</div>" +
-                    "<div class='grid2'><div>" +
-                    "<div class='campo'><label>N° Documento</label><p style='font-size:14pt;font-weight:700'>" + H(numF) + "</p></div>" +
-                    "<div class='campo'><label>Fecha</label><p>" + H(fecha) + "</p></div>" +
-                    "<div class='campo'><label>Forma de pago</label><p>" + H(fp) + "</p></div>" +
-                    "</div><div>" +
-                    "<div class='campo'><label>Cliente</label><p>" + H(nomCli) + "</p></div>" +
-                    "<div class='campo'><label>Estado</label><p>" +
-                    "<span class='estado' style='background:" + bg + ";color:" + fg + "'>" + estado + "</span></p></div>" +
+                    "<button class='no-print' onclick='window.print()'>Imprimir</button>" +
+
+                    // Encabezado
+                    "<div class='hdr'><div class='hdr-top'>" +
+                    "<div style='text-align:center'><span class='lbl'>Factura</span><br><span class='val'>N° " + H(numF) + "</span></div>" +
+                    "<div></div>" +
+                    "<div><span class='lbl'>Fecha</span><div class='fecha-grid'><div>" + H(fechaDia) + "</div><div>" + H(fechaMes) + "</div></div>" +
+                    "<span class='lbl'>R.I.F.:</span> " + H(rifCli) + "</div>" +
                     "</div></div>" +
-                    "<table><thead><tr><th>Código</th><th>Descripción</th>" +
-                    "<th class='r'>Cant.</th><th class='r'>P.Unit</th><th class='r'>Subtotal</th></tr></thead>" +
-                    "<tbody>" + filas + "</tbody>" +
-                    "<tfoot>" +
-                    (desc > 0 ? "<tr><td colspan='4' class='r'>Descuento</td><td class='r'>-" + desc.ToString("N2") + "</td></tr>" : "") +
-                    "<tr><td colspan='4' class='r'>IVA</td><td class='r'>" + iva.ToString("N2") + "</td></tr>" +
-                    "<tr class='total-row'><td colspan='4' class='r'>TOTAL</td><td class='r'>" + total.ToString("N2") + "</td></tr>" +
-                    "</tfoot></table>" +
-                    (string.IsNullOrWhiteSpace(obs) ? "" :
-                        "<div style='border:1px solid #ddd;padding:3mm;border-radius:2mm;font-size:10pt;color:#555;margin-top:4mm'>" +
-                        "<strong>Observaciones:</strong> " + H(obs) + "</div>") +
+
+                    // Datos cliente
+                    "<div class='cli'><b>NOMBRE:</b> " + H(nomCli) + "</div>" +
+                    "<div class='cli'><b>DIRECCIÓN:</b> " + H(dirCompleta) + "</div>" +
+                    "<div class='cli' style='text-align:right'><b>TELF:</b> " + H(telCli) + "</div>" +
+
+                    // Tabla items
+                    "<table><thead><tr><th style='width:12mm'>Cant.</th><th>Descripción</th><th style='width:22mm'>P. Unit.</th><th style='width:22mm'>Total</th></tr></thead>" +
+                    "<tbody>" + filasNota + "</tbody></table>" +
+
+                    // Pie: firma + totales
+                    "<div class='pie'>" +
+                    "<div class='pie-izq'><div style='margin-top:8mm'>FIRMA</div><div style='font-size:6pt;color:#888'>Esta factura va sin tachadura ni enmendaduras</div></div>" +
+                    "<table class='totales'>" +
+                    "<tr><td class='r'>SUB-TOTAL</td><td class='r' style='width:25mm'>" + baseImponible.ToString("N2") + "</td></tr>" +
+                    (desc > 0 ? "<tr><td class='r'>DESCUENTO</td><td class='r'>-" + montoDesc.ToString("N2") + "</td></tr>" : "<tr><td class='r'>DESCUENTO</td><td class='r'></td></tr>") +
+                    "<tr><td class='r'>TOTAL Bs F.</td><td class='r'>" + (totalBs > 0 ? totalBs.ToString("N2") : total.ToString("N2")) + "</td></tr>" +
+                    "</table></div>" +
                     "</body></html>";
+                }
+                else
+                {
+                    // ═══════════════════════════════════════════════════════
+                    //  FACTURA FISCAL — Tamaño carta (~21.5×28cm), con IVA
+                    // ═══════════════════════════════════════════════════════
+                    html =
+                    "<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'>" +
+                    "<title>Factura " + H(numF) + "</title><style>" +
+                    "@page{size:letter;margin:8mm 10mm}" +
+                    "*{box-sizing:border-box;margin:0;padding:0;font-family:Arial,sans-serif;font-size:9pt}" +
+                    "body{width:190mm;margin:0 auto;color:#111}" +
+                    ".empresa{text-align:center;margin-bottom:3mm}" +
+                    ".empresa h1{font-size:16pt;color:#C00;font-weight:900;letter-spacing:1px}" +
+                    ".empresa .dir{font-size:7.5pt;color:#333;margin:1mm 0}" +
+                    ".empresa .rif{font-size:8.5pt;font-weight:700}" +
+                    ".doc-info{display:grid;grid-template-columns:auto 1fr auto;gap:2mm;align-items:center;border:1px solid #333;padding:2mm 3mm;margin-bottom:3mm}" +
+                    ".fecha-box{display:grid;grid-template-columns:repeat(3,22mm);gap:1mm;text-align:center}" +
+                    ".fecha-box div{border:1px solid #999;padding:1mm}" +
+                    ".fecha-box .lbl{font-size:6pt;font-weight:700;border:none;padding:0}" +
+                    ".fnum{font-size:14pt;font-weight:900;color:#C00}" +
+                    ".nctrl{font-size:9pt;font-weight:700}" +
+                    ".cli-box{border:1px solid #333;padding:2mm 3mm;margin-bottom:2mm;font-size:8.5pt}" +
+                    ".cli-box b{font-size:7pt;color:#555;text-transform:uppercase}" +
+                    ".cli-grid{display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:1mm;border:1px solid #333;padding:2mm 3mm;margin-bottom:3mm;font-size:8pt}" +
+                    ".cli-grid b{font-size:6.5pt;color:#555;text-transform:uppercase}" +
+                    "table{width:100%;border-collapse:collapse;border:1px solid #333;margin-bottom:3mm}" +
+                    "thead{background:#eee}" +
+                    "th{font-size:7.5pt;padding:2mm;border:1px solid #333;text-transform:uppercase;font-weight:700}" +
+                    "td{padding:1.5mm 2mm;border-bottom:1px solid #ccc;font-size:8.5pt;height:5.5mm}" +
+                    ".c{text-align:center}.r{text-align:right}" +
+                    ".footer-grid{display:grid;grid-template-columns:1fr 1fr;gap:3mm}" +
+                    ".fp-box{border:1px solid #333;padding:2mm 3mm;font-size:8pt}" +
+                    ".fp-box b{font-size:7pt;text-transform:uppercase}" +
+                    ".chk{display:inline-block;width:3.5mm;height:3.5mm;border:1px solid #333;text-align:center;font-size:7pt;line-height:3.5mm;margin-right:1mm;vertical-align:middle}" +
+                    ".fp-item{display:inline-block;margin-right:3mm;margin-bottom:1mm}" +
+                    ".totales-box{border:1px solid #333}" +
+                    ".totales-box tr td{padding:1.5mm 3mm;border-bottom:1px solid #ccc;font-size:8.5pt}" +
+                    ".totales-box tr:last-child td{font-weight:900;font-size:10pt;border-top:2px solid #333;background:#f5f5f5}" +
+                    ".firma-grid{display:grid;grid-template-columns:1fr 1fr;gap:8mm;margin-top:5mm;text-align:center;font-size:7.5pt}" +
+                    ".firma-line{border-top:1px solid #333;padding-top:1mm;margin-top:10mm}" +
+                    ".no-print{margin-bottom:4mm;padding:2mm 8mm;background:#C00;color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:10pt}" +
+                    "@media print{.no-print{display:none!important}body{margin:0}}" +
+                    "</style></head><body>" +
+                    "<button class='no-print' onclick='window.print()'>Imprimir</button>" +
+
+                    // Encabezado empresa
+                    "<div class='empresa'>" +
+                    "<h1>EL HATO PASCHER C.A.</h1>" +
+                    "<div class='dir'>Ctra. Villa de Cura - San Francisco de As&iacute;s, Local N&deg; S/N, Sector Los Colorados - Villa de Cura - Estado Aragua</div>" +
+                    "<div class='rif'>RIF: J-30571871-7 &nbsp;&nbsp;&nbsp; Telfs: 0244 386.10.13 - 386.33.04</div>" +
+                    "</div>" +
+
+                    // Info documento: Fecha | FACTURA N° | N° CONTROL
+                    "<div class='doc-info'>" +
+                    "<div><b style='font-size:7pt'>FECHA</b><div class='fecha-box'>" +
+                    "<div class='lbl'>D&Iacute;A</div><div class='lbl'>MES</div><div class='lbl'>A&Ntilde;O</div>" +
+                    "<div>" + H(fechaDia) + "</div><div>" + H(fechaMes) + "</div><div>" + H(fechaAno) + "</div>" +
+                    "</div></div>" +
+                    "<div style='text-align:center'><span style='font-size:9pt;font-weight:700'>FACTURA</span><br>" +
+                    "<span class='fnum'>N&deg; " + H(numF) + "</span></div>" +
+                    "<div style='text-align:right'><span class='nctrl'>N&deg; CONTROL</span><br>" +
+                    "<span style='font-size:10pt;font-weight:700'>00 &mdash; " + H(numF.PadLeft(6,'0')) + "</span></div>" +
+                    "</div>" +
+
+                    // Datos cliente linea 1
+                    "<div class='cli-box'><b>Nombre o Raz&oacute;n Social:</b> " + H(nomCli) + "</div>" +
+                    "<div class='cli-box'><b>Domicilio Fiscal:</b> " + H(dirCompleta) + "</div>" +
+
+                    // Datos cliente linea 2
+                    "<div class='cli-grid'>" +
+                    "<div><b>RIF N&deg;</b><br>" + H(rifCli) + "</div>" +
+                    "<div><b>Tel&eacute;fonos</b><br>" + H(telCli) + "</div>" +
+                    "<div><b>Gu&iacute;a de Despacho</b><br>" + H(obs ?? "") + "</div>" +
+                    "<div><b>Orden de Compra N&deg;</b><br></div>" +
+                    "<div><b>Condici&oacute;n de Pago</b><br>" + H(condPago) + "</div>" +
+                    "</div>" +
+
+                    // Tabla de items
+                    "<table><thead><tr>" +
+                    "<th style='width:12mm'>Cant.</th><th style='width:18mm'>Ref.</th><th>DESCRIPCI&Oacute;N</th>" +
+                    "<th style='width:24mm'>PRECIO UNITARIO</th><th style='width:24mm'>TOTAL</th>" +
+                    "</tr></thead><tbody>" + filasFactura + "</tbody></table>" +
+
+                    // Pie: Forma de pago + Totales
+                    "<div class='footer-grid'>" +
+                    "<div class='fp-box'><b>FORMA DE PAGO</b><br><br>" +
+                    "<span class='fp-item'><span class='chk'>" + chkEfectivo + "</span>EFECTIVO</span>" +
+                    "<span class='fp-item'><span class='chk'>" + chkCheque + "</span>CHEQUE</span>" +
+                    "<span class='fp-item'><span class='chk'>" + chkTarjC + "</span>TARJ. CR&Eacute;DITO</span><br>" +
+                    "<span class='fp-item'><span class='chk'>" + chkTransf + "</span>TRANSF. BANCARIA</span>" +
+                    "<span class='fp-item'><span class='chk'>" + chkTarjD + "</span>TARJ. D&Eacute;BITO</span>" +
+                    "</div>" +
+                    "<table class='totales-box'>" +
+                    "<tr><td class='r'>SUB-TOTAL</td><td class='r' style='width:28mm'>" + (baseImponible + montoDesc).ToString("N2") + "</td></tr>" +
+                    (desc > 0 ? "<tr><td class='r'>DESCUENTO " + desc.ToString("N0") + "%</td><td class='r'>-" + montoDesc.ToString("N2") + "</td></tr>" : "") +
+                    "<tr><td class='r'>EXENTO</td><td class='r'></td></tr>" +
+                    "<tr><td class='r'>BASE IMPONIBLE</td><td class='r'>" + baseImponible.ToString("N2") + "</td></tr>" +
+                    "<tr><td class='r'>IVA 16%</td><td class='r'>" + iva.ToString("N2") + "</td></tr>" +
+                    "<tr><td class='r'>TOTAL</td><td class='r'>" + total.ToString("N2") + "</td></tr>" +
+                    "</table></div>" +
+
+                    // Firmas
+                    "<div class='firma-grid'>" +
+                    "<div><div class='firma-line'>Firma y Sello</div></div>" +
+                    "<div><div class='firma-line'>Cliente Conforme</div></div>" +
+                    "</div>" +
+
+                    "</body></html>";
+                }
 
                 ctx.Response.ContentType = "text/html; charset=utf-8";
                 await ctx.Response.WriteAsync(html);
