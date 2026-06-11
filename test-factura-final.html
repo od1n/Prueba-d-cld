@@ -17,9 +17,10 @@ body{color:#111}
 .nctrl{font-size:8pt;font-weight:700}
 .cli-box{height:8mm;margin-top:1mm;border:1px solid #333;padding:1.5mm 2mm;font-size:8.5pt;overflow:hidden}
 .cli-box b{font-size:7pt;color:#555;text-transform:uppercase}
-.cli-grid{height:11mm;margin-top:1mm;display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:0.5mm;border:1px solid #333;padding:1.5mm 2mm;font-size:7.5pt;overflow:hidden}
+.cli-grid{height:11mm;margin-top:2mm;display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:0.5mm;border:1px solid #333;padding:1.5mm 2mm;font-size:7.5pt;overflow:hidden}
 .cli-grid b{font-size:6pt;color:#555;text-transform:uppercase}
-.items-section{height:63mm;margin-top:2mm;overflow:hidden}
+.above-footer{height:140mm;overflow:hidden}
+.items-section{height:63mm;margin-top:1mm;padding-right:3mm;overflow:hidden}
 table{width:100%;border-collapse:collapse;border:1px solid #333}
 thead{background:#eee}
 th{font-size:7pt;padding:1.5mm;border:1px solid #333;text-transform:uppercase;font-weight:700}
@@ -40,6 +41,9 @@ td{padding:0.7mm 1.5mm;border-bottom:1px solid #ccc;font-size:8.5pt;line-height:
 </style></head><body>
 <button class='no-print' onclick='window.print()'>Imprimir</button>
 <div class='page-wrap'>
+
+<!-- ABOVE-FOOTER: contenedor fijo 140mm. Cambios aqui NO mueven el footer -->
+<div class='above-footer'>
 
 <div class='empresa pp'>
 <h1>EL HATO PASCHER C.A.</h1>
@@ -80,6 +84,9 @@ td{padding:0.7mm 1.5mm;border-bottom:1px solid #ccc;font-size:8.5pt;line-height:
 </tbody></table>
 </div>
 
+</div><!-- cierre above-footer -->
+
+<!-- FOOTER: siempre arranca a 140mm del top de pagina -->
 <div class='footer-grid'>
 <div class='fp-box'><b class='pp'>FORMA DE PAGO</b><br>
 <span class='fp-item'><span class='chk'>X</span><span class='pp'>EFECTIVO</span></span>
@@ -89,10 +96,11 @@ td{padding:0.7mm 1.5mm;border-bottom:1px solid #ccc;font-size:8.5pt;line-height:
 <span class='fp-item'><span class='chk'>&nbsp;</span><span class='pp'>TARJ. D&Eacute;BITO</span></span>
 </div>
 <table class='totales-box'>
+<tr class='pp'><td colspan='2' style='height:9mm;padding:0'></td></tr>
 <tr><td class='r pp'>SUB-TOTAL</td><td class='r' style='width:22mm'>86.75</td></tr>
 <tr><td class='r pp'>EXENTO</td><td class='r'></td></tr>
 <tr><td class='r pp'>BASE IMPONIBLE</td><td class='r'>86.75</td></tr>
-<tr><td class='r pp'>IVA 16%</td><td class='r'>13.88</td></tr>
+<tr><td class='r pp' style='height:5mm'>IVA 16%</td><td class='r' style='height:5mm'>13.88</td></tr>
 <tr><td class='r pp'>TOTAL</td><td class='r'>100.63</td></tr>
 </table></div>
 

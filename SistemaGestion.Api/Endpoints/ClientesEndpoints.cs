@@ -649,9 +649,10 @@ namespace SistemaGestion.Api.Endpoints
                     ".nctrl{font-size:8pt;font-weight:700}" +
                     ".cli-box{height:8mm;margin-top:1mm;border:1px solid #333;padding:1.5mm 2mm;font-size:8.5pt;overflow:hidden}" +
                     ".cli-box b{font-size:7pt;color:#555;text-transform:uppercase}" +
-                    ".cli-grid{height:11mm;margin-top:1mm;display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:0.5mm;border:1px solid #333;padding:1.5mm 2mm;font-size:7.5pt;overflow:hidden}" +
+                    ".cli-grid{height:11mm;margin-top:2mm;display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:0.5mm;border:1px solid #333;padding:1.5mm 2mm;font-size:7.5pt;overflow:hidden}" +
                     ".cli-grid b{font-size:6pt;color:#555;text-transform:uppercase}" +
-                    ".items-section{height:63mm;margin-top:2mm;overflow:hidden}" +
+                    ".above-footer{height:140mm;overflow:hidden}" +
+                    ".items-section{height:63mm;margin-top:1mm;padding-right:3mm;overflow:hidden}" +
                     "table{width:100%;border-collapse:collapse;border:1px solid #333}" +
                     "thead{background:#eee}" +
                     "th{font-size:7pt;padding:1.5mm;border:1px solid #333;text-transform:uppercase;font-weight:700}" +
@@ -673,7 +674,8 @@ namespace SistemaGestion.Api.Endpoints
                     "<button class='no-print' onclick='window.print()'>Imprimir</button>" +
                     "<div class='page-wrap'>" +
 
-                    // Encabezado empresa (TODO pre-impreso)
+                    // Contenedor fijo 140mm: cambiar algo aqui NO mueve el footer
+                    "<div class='above-footer'>" +
                     "<div class='empresa pp'>" +
                     "<h1>EL HATO PASCHER C.A.</h1>" +
                     "<div class='dir'>Ctra. Villa de Cura - San Francisco de As&iacute;s, Local N&deg; S/N, Sector Los Colorados - Villa de Cura - Estado Aragua</div>" +
@@ -712,8 +714,9 @@ namespace SistemaGestion.Api.Endpoints
                     "<th style='width:22mm'>P. UNIT.</th><th style='width:23mm'>TOTAL</th>" +
                     "</tr></thead><tbody>" + filasFactura + "</tbody></table>" +
                     "</div>" +
+                    "</div>" + // cierre above-footer
 
-                    // Pie: Forma de pago + Totales
+                    // Pie: Forma de pago + Totales (SIEMPRE a 140mm del top)
                     "<div class='footer-grid'>" +
                     "<div class='fp-box'><b class='pp'>FORMA DE PAGO</b><br>" +
                     "<span class='fp-item'><span class='chk'>" + chkEfectivo + "</span><span class='pp'>EFECTIVO</span></span>" +
@@ -723,11 +726,12 @@ namespace SistemaGestion.Api.Endpoints
                     "<span class='fp-item'><span class='chk'>" + chkTarjD + "</span><span class='pp'>TARJ. D&Eacute;BITO</span></span>" +
                     "</div>" +
                     "<table class='totales-box'>" +
+                    "<tr class='pp'><td colspan='2' style='height:" + (desc > 0 ? "2" : "9") + "mm;padding:0'></td></tr>" +
                     "<tr><td class='r pp'>SUB-TOTAL</td><td class='r' style='width:22mm'>" + (baseImponible + montoDesc).ToString("N2") + "</td></tr>" +
                     (desc > 0 ? "<tr><td class='r pp'>DESCUENTO " + desc.ToString("N0") + "%</td><td class='r'>-" + montoDesc.ToString("N2") + "</td></tr>" : "") +
                     "<tr><td class='r pp'>EXENTO</td><td class='r'></td></tr>" +
                     "<tr><td class='r pp'>BASE IMPONIBLE</td><td class='r'>" + baseImponible.ToString("N2") + "</td></tr>" +
-                    "<tr><td class='r pp'>IVA 16%</td><td class='r'>" + iva.ToString("N2") + "</td></tr>" +
+                    "<tr><td class='r pp' style='height:5mm'>IVA 16%</td><td class='r' style='height:5mm'>" + iva.ToString("N2") + "</td></tr>" +
                     "<tr><td class='r pp'>TOTAL</td><td class='r'>" + total.ToString("N2") + "</td></tr>" +
                     "</table></div>" +
 
