@@ -1,0 +1,146 @@
+<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'>
+<title>Diagnóstico de alturas - Factura Fiscal</title>
+<style>
+@page{size:154mm 305mm;margin:0}
+*{box-sizing:border-box;margin:0;padding:0;font-family:Arial,sans-serif;font-size:8.5pt}
+html,body{margin:0;padding:0}
+body{color:#111}
+.page-wrap{width:134mm;margin:0 auto;padding-top:5mm;background:#fff}
+/* Cada sección con borde rojo para ver su altura real */
+.page-wrap > div, .page-wrap > table {outline:1px solid red;}
+.empresa{height:27mm;text-align:center;overflow:hidden;background:rgba(255,0,0,0.05)}
+.doc-info{height:13mm;margin-top:1mm;display:grid;grid-template-columns:auto 1fr auto;gap:1mm;align-items:center;border:1px solid #333;padding:1.5mm 2mm;overflow:hidden;background:rgba(0,255,0,0.05)}
+.cli-box{height:8mm;margin-top:1mm;border:1px solid #333;padding:1.5mm 2mm;font-size:8.5pt;overflow:hidden;background:rgba(0,0,255,0.05)}
+.cli-grid{height:11mm;margin-top:1mm;display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:0.5mm;border:1px solid #333;padding:1.5mm 2mm;font-size:7.5pt;overflow:hidden;background:rgba(255,255,0,0.1)}
+.items-section{height:152mm;margin-top:1mm;overflow:hidden;background:rgba(255,0,255,0.05)}
+table{width:100%;border-collapse:collapse;border:1px solid #333}
+thead{background:#eee}
+th{font-size:7pt;padding:1.5mm;border:1px solid #333;text-transform:uppercase;font-weight:700}
+td{padding:0.7mm 1.5mm;border-bottom:1px solid #ccc;font-size:8.5pt;line-height:1;height:5mm}
+.c{text-align:center}.r{text-align:right}
+.footer-grid{height:36mm;display:grid;grid-template-columns:1fr 1fr;gap:2mm;overflow:hidden;background:rgba(0,255,255,0.1)}
+.fp-box{border:1px solid #333;padding:1.5mm 2mm;font-size:7.5pt}
+.totales-box{border:1px solid #333}
+.totales-box tr td{padding:1mm 2mm;border-bottom:1px solid #ccc;font-size:8.5pt}
+.totales-box tr:last-child td{font-weight:900;font-size:9pt;border-top:2px solid #333}
+.firma-grid{height:24mm;margin-top:1mm;display:grid;grid-template-columns:1fr 1fr;gap:5mm;text-align:center;font-size:7.5pt;background:rgba(128,128,0,0.1)}
+.firma-line{border-top:1px solid #333;padding-top:1mm;margin-top:6mm}
+
+/* MARCADOR de 305mm desde el top */
+.marker-305{position:absolute;top:305mm;left:0;right:0;height:1px;background:red;z-index:999}
+.marker-305::after{content:'← 305mm (fin de página)';position:absolute;left:2mm;top:-4mm;color:red;font-weight:bold;font-size:10pt}
+.marker-265{position:absolute;top:265mm;left:0;right:0;height:1px;background:blue;z-index:999}
+.marker-265::after{content:'← 265mm (fin contenido calculado)';position:absolute;left:2mm;top:-4mm;color:blue;font-weight:bold;font-size:9pt}
+.ruler{position:absolute;right:-20mm;top:0;width:15mm;height:305mm;background:linear-gradient(to bottom,transparent 49%,#ccc 49%,#ccc 51%,transparent 51%);background-size:100% 10mm}
+
+/* Medidor JS */
+#medidas{position:fixed;top:5mm;right:5mm;background:#fff;border:2px solid red;padding:3mm;font-size:9pt;z-index:1000;max-height:90vh;overflow:auto}
+</style>
+</head><body>
+<div style="position:relative">
+<div class="marker-265"></div>
+<div class="marker-305"></div>
+</div>
+
+<div class="page-wrap" id="pw">
+<div class="empresa" id="s-empresa">
+<h1 style="font-size:12pt;color:#C00">EL HATO PASCHER C.A.</h1>
+<div style="font-size:7pt;color:#333">Ctra. Villa de Cura - San Francisco de Asís</div>
+<div style="font-size:8pt;font-weight:700">RIF: J-30571871-7</div>
+</div>
+
+<div class="doc-info" id="s-docinfo">
+<div><b style="font-size:6pt">FECHA</b><div style="display:grid;grid-template-columns:repeat(3,10mm);gap:0.5mm;text-align:center"><div style="font-size:5.5pt;font-weight:700">DÍA</div><div style="font-size:5.5pt;font-weight:700">MES</div><div style="font-size:5.5pt;font-weight:700">AÑO</div><div style="border:1px solid #999;padding:0.5mm;font-size:8pt">10</div><div style="border:1px solid #999;padding:0.5mm;font-size:8pt">08</div><div style="border:1px solid #999;padding:0.5mm;font-size:8pt">2026</div></div></div>
+<div style="text-align:center"><span style="font-size:7.5pt;font-weight:700">FACTURA</span><br><span style="font-size:11pt;font-weight:900;color:#C00">N° 2819</span></div>
+<div style="text-align:right"><span style="font-size:8pt;font-weight:700">N° CONTROL</span><br><span style="font-size:8pt;font-weight:700">00 — 002819</span></div>
+</div>
+
+<div class="cli-box" id="s-cli1"><b style="font-size:7pt;color:#555">NOMBRE O RAZÓN SOCIAL:</b> DISTRIBUIDORA TEST C.A.</div>
+<div class="cli-box" id="s-cli2"><b style="font-size:7pt;color:#555">DOMICILIO FISCAL:</b> Av. Bolívar, Centro Comercial Plaza, Local 15, Villa de Cura</div>
+
+<div class="cli-grid" id="s-cligrid">
+<div><b style="font-size:6pt;color:#555">RIF N°</b><br>J-12345678-9</div>
+<div><b style="font-size:6pt;color:#555">TELÉFONOS</b><br>0244-555-1234</div>
+<div><b style="font-size:6pt;color:#555">GUÍA DE DESPACHO</b><br>Factura fiscal de prueba</div>
+<div><b style="font-size:6pt;color:#555">ORDEN DE COMPRA N°</b><br></div>
+<div><b style="font-size:6pt;color:#555">CONDICIÓN DE PAGO</b><br>Contado</div>
+</div>
+
+<div class="items-section" id="s-items">
+<table id="tbl-items"><thead><tr>
+<th style="width:10mm">Cant.</th><th style="width:14mm">Ref.</th><th>DESCRIPCIÓN</th>
+<th style="width:20mm">P. UNIT.</th><th style="width:20mm">TOTAL</th>
+</tr></thead><tbody>
+<tr><td class="c">15</td><td>TEST-002</td><td>Codo PVC 1/2 pulg</td><td class="r">3.25</td><td class="r">48.75</td></tr>
+<tr><td class="c">8</td><td>TEST-003</td><td>Tee PVC 1/2 pulg</td><td class="r">4.75</td><td class="r">38.00</td></tr>
+<script>
+// 26 filas vacías (28 total - 2 items)
+for(let i=0;i<26;i++) document.write("<tr><td>&nbsp;</td><td></td><td></td><td></td><td></td></tr>");
+</script>
+</tbody></table>
+</div>
+
+<div class="footer-grid" id="s-footer">
+<div class="fp-box"><b style="font-size:7pt">FORMA DE PAGO</b><br>
+<span style="display:inline-block;margin-right:2mm"><span style="display:inline-block;width:3mm;height:3mm;border:1px solid #333;text-align:center;font-size:7pt;line-height:3mm;margin-right:0.5mm;vertical-align:middle">X</span>EFECTIVO</span>
+<span style="display:inline-block;margin-right:2mm"><span style="display:inline-block;width:3mm;height:3mm;border:1px solid #333;text-align:center;font-size:7pt;line-height:3mm;margin-right:0.5mm;vertical-align:middle">&nbsp;</span>CHEQUE</span>
+</div>
+<table class="totales-box">
+<tr><td class="r">SUB-TOTAL</td><td class="r" style="width:22mm">86.75</td></tr>
+<tr><td class="r">EXENTO</td><td class="r"></td></tr>
+<tr><td class="r">BASE IMPONIBLE</td><td class="r">86.75</td></tr>
+<tr><td class="r">IVA 16%</td><td class="r">13.88</td></tr>
+<tr><td class="r">TOTAL</td><td class="r">100.63</td></tr>
+</table>
+</div>
+
+<div class="firma-grid" id="s-firma">
+<div><div class="firma-line">Firma y Sello</div></div>
+<div><div class="firma-line">Cliente Conforme</div></div>
+</div>
+
+</div><!-- page-wrap -->
+
+<div id="medidas"></div>
+<script>
+window.onload = function(){
+  const ids = ['s-empresa','s-docinfo','s-cli1','s-cli2','s-cligrid','s-items','s-footer','s-firma'];
+  let html = '<b>ALTURAS REALES (px → mm):</b><br>';
+  let totalPx = 0;
+  const pw = document.getElementById('pw');
+  const pwRect = pw.getBoundingClientRect();
+  const pwStyle = getComputedStyle(pw);
+  const ptop = parseFloat(pwStyle.paddingTop);
+  html += 'padding-top: ' + ptop.toFixed(1) + 'px = ' + (ptop/3.78).toFixed(1) + 'mm<br>';
+  totalPx += ptop;
+  
+  ids.forEach(id => {
+    const el = document.getElementById(id);
+    const rect = el.getBoundingClientRect();
+    const style = getComputedStyle(el);
+    const h = rect.height;
+    const mt = parseFloat(style.marginTop) || 0;
+    const effH = h + mt;
+    totalPx += effH;
+    html += id + ': h=' + h.toFixed(1) + 'px(' + (h/3.78).toFixed(1) + 'mm) mt=' + mt.toFixed(1) + 'px eff=' + (effH/3.78).toFixed(1) + 'mm<br>';
+  });
+  
+  // Medir tabla interna de items
+  const tbl = document.getElementById('tbl-items');
+  if(tbl) {
+    html += '<br><b>Tabla items:</b> ' + tbl.getBoundingClientRect().height.toFixed(1) + 'px = ' + (tbl.getBoundingClientRect().height/3.78).toFixed(1) + 'mm<br>';
+    const rows = tbl.querySelectorAll('tbody tr');
+    if(rows.length > 0) {
+      html += 'Primera fila: ' + rows[0].getBoundingClientRect().height.toFixed(1) + 'px = ' + (rows[0].getBoundingClientRect().height/3.78).toFixed(1) + 'mm<br>';
+      html += 'Total filas: ' + rows.length + '<br>';
+    }
+  }
+  
+  html += '<br><b>TOTAL acumulado: ' + totalPx.toFixed(1) + 'px = ' + (totalPx/3.78).toFixed(1) + 'mm</b><br>';
+  html += 'Página: 305mm = ' + (305*3.78).toFixed(0) + 'px<br>';
+  html += '<b style="color:' + (totalPx/3.78 > 305 ? 'red' : 'green') + '">¿Cabe? ' + (totalPx/3.78 > 305 ? 'NO — excede por ' + ((totalPx/3.78)-305).toFixed(1) + 'mm' : 'SÍ — sobran ' + (305-(totalPx/3.78)).toFixed(1) + 'mm') + '</b>';
+  
+  document.getElementById('medidas').innerHTML = html;
+};
+</script>
+</body></html>

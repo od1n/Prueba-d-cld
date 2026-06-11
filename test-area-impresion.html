@@ -1,0 +1,46 @@
+<!DOCTYPE html><html><head><meta charset="UTF-8">
+<title>Diagnóstico: Área real de impresión</title>
+<style>
+@page{size:154mm 305mm;margin:0}
+*{box-sizing:border-box;margin:0;padding:0;font-family:Arial,sans-serif}
+html,body{margin:0;padding:0}
+.ruler{width:134mm;margin:0 auto;position:relative}
+.mark{height:10mm;border-bottom:1px solid #999;display:flex;align-items:center;padding-left:2mm;font-size:8pt}
+.mark:nth-child(odd){background:rgba(0,0,255,0.03)}
+.mark:nth-child(even){background:rgba(255,0,0,0.03)}
+.mark b{font-size:10pt;color:red}
+.mark.danger{background:rgba(255,0,0,0.15);font-weight:bold}
+@media print{
+  .no-print{display:none!important}
+  .mark{border-bottom:1px solid #000}
+}
+.no-print{position:fixed;top:5mm;right:5mm;background:#fff;border:2px solid red;padding:4mm;font-size:10pt;z-index:999;max-width:200px}
+</style>
+</head><body>
+<div class="no-print">
+  <b>INSTRUCCIONES:</b><br>
+  1. Ctrl+P para imprimir<br>
+  2. Scale: <b>100%</b><br>
+  3. Margins: <b>None</b><br>
+  4. Paper: <b>Factura Fiscal</b><br>
+  5. En el preview, ¿cuál es la <b>ÚLTIMA marca visible</b> dentro de la página?
+</div>
+<div class="ruler">
+<script>
+for(let i=0;i<31;i++){
+  let mm = (i+1)*10;
+  let cls = 'mark';
+  if(mm >= 260) cls += ' danger';
+  document.write('<div class="'+cls+'" style="'+(mm==305?'border-bottom:3px solid red':'')+'">'
+    + mm + 'mm'
+    + (mm==265?' — <b>contenido factura calculado</b>':'')
+    + (mm==305?' — <b>FIN DE PÁGINA</b>':'')
+    + (mm==250?' — zona segura':'')
+    + '</div>');
+}
+</script>
+</div>
+</body></html>
+</script>
+</div>
+</body></html>

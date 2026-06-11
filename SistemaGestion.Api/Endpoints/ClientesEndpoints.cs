@@ -521,8 +521,8 @@ namespace SistemaGestion.Api.Endpoints
                 int filasVaciasNota = Math.Max(0, 18 - nItems);
                 for (int i = 0; i < filasVaciasNota; i++)
                     filasNota.Append("<tr><td>&nbsp;</td><td></td><td></td><td></td></tr>");
-                // Factura fiscal: 15 filas máx (85mm items-section = ~15 filas × 5mm + thead)
-                int filasVaciasFact = Math.Max(0, 15 - nItems);
+                // Factura fiscal: 11 filas máx (63mm items-section, 11×5mm+6mm thead=61mm)
+                int filasVaciasFact = Math.Max(0, 11 - nItems);
                 for (int i = 0; i < filasVaciasFact; i++)
                     filasFactura.Append("<tr><td>&nbsp;</td><td></td><td></td><td></td><td></td></tr>");
 
@@ -636,12 +636,12 @@ namespace SistemaGestion.Api.Endpoints
                     "*{box-sizing:border-box;margin:0;padding:0;font-family:Arial,sans-serif;font-size:8.5pt}" +
                     "html,body{margin:0;padding:0}" +
                     "body{color:#111}" +
-                    ".page-wrap{width:134mm;margin:0 auto;padding-top:5mm}" +
-                    ".empresa{height:27mm;text-align:center;overflow:hidden}" +
+                    ".page-wrap{width:134mm;margin:0 auto;padding-top:4mm}" +
+                    ".empresa{height:26mm;text-align:center;overflow:hidden}" +
                     ".empresa h1{font-size:12pt;color:#C00;font-weight:900;letter-spacing:1px}" +
                     ".empresa .dir{font-size:7pt;color:#333;margin:0.5mm 0}" +
                     ".empresa .rif{font-size:8pt;font-weight:700}" +
-                    ".doc-info{height:13mm;margin-top:1mm;display:grid;grid-template-columns:auto 1fr auto;gap:1mm;align-items:center;border:1px solid #333;padding:1.5mm 2mm;overflow:hidden}" +
+                    ".doc-info{height:13mm;margin-top:1mm;display:grid;grid-template-columns:auto 1fr auto;gap:1mm;align-items:center;border:1px solid #333;padding:1.5mm 2mm 1.5mm 1mm;overflow:hidden}" +
                     ".fecha-box{display:grid;grid-template-columns:repeat(3,10mm);gap:0.5mm;text-align:center}" +
                     ".fecha-box div{border:1px solid #999;padding:0.5mm;font-size:8pt}" +
                     ".fecha-box .lbl{font-size:5.5pt;font-weight:700;border:none;padding:0}" +
@@ -651,19 +651,19 @@ namespace SistemaGestion.Api.Endpoints
                     ".cli-box b{font-size:7pt;color:#555;text-transform:uppercase}" +
                     ".cli-grid{height:11mm;margin-top:1mm;display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:0.5mm;border:1px solid #333;padding:1.5mm 2mm;font-size:7.5pt;overflow:hidden}" +
                     ".cli-grid b{font-size:6pt;color:#555;text-transform:uppercase}" +
-                    ".items-section{height:85mm;margin-top:1mm;overflow:hidden}" +
+                    ".items-section{height:63mm;margin-top:2mm;overflow:hidden}" +
                     "table{width:100%;border-collapse:collapse;border:1px solid #333}" +
                     "thead{background:#eee}" +
                     "th{font-size:7pt;padding:1.5mm;border:1px solid #333;text-transform:uppercase;font-weight:700}" +
                     "td{padding:0.7mm 1.5mm;border-bottom:1px solid #ccc;font-size:8.5pt;line-height:1;height:5mm}" +
                     ".c{text-align:center}.r{text-align:right}" +
-                    ".footer-grid{height:36mm;display:grid;grid-template-columns:1fr 1fr;gap:2mm;overflow:hidden}" +
+                    ".footer-grid{height:42mm;display:grid;grid-template-columns:1fr 1fr;gap:2mm;overflow:hidden}" +
                     ".fp-box{border:1px solid #333;padding:1.5mm 2mm;font-size:7.5pt}" +
                     ".fp-box b{font-size:7pt;text-transform:uppercase}" +
                     ".chk{display:inline-block;width:3mm;height:3mm;border:1px solid #333;text-align:center;font-size:7pt;line-height:3mm;margin-right:0.5mm;vertical-align:middle}" +
                     ".fp-item{display:inline-block;margin-right:2mm;margin-bottom:0.5mm}" +
                     ".totales-box{border:1px solid #333}" +
-                    ".totales-box tr td{padding:1mm 2mm;border-bottom:1px solid #ccc;font-size:8.5pt}" +
+                    ".totales-box tr td{padding:1mm 2mm;border-bottom:1px solid #ccc;font-size:8.5pt;line-height:1;height:7mm}" +
                     ".totales-box tr:last-child td{font-weight:900;font-size:9pt;border-top:2px solid #333}" +
                     ".firma-grid{height:24mm;margin-top:1mm;display:grid;grid-template-columns:1fr 1fr;gap:5mm;text-align:center;font-size:7.5pt}" +
                     ".firma-line{border-top:1px solid #333;padding-top:1mm;margin-top:6mm}" +
@@ -693,8 +693,8 @@ namespace SistemaGestion.Api.Endpoints
                     "</div>" +
 
                     // Datos cliente linea 1
-                    "<div class='cli-box'><b class='pp'>Nombre o Raz&oacute;n Social:</b> " + H(nomCli) + "</div>" +
-                    "<div class='cli-box'><b class='pp'>Domicilio Fiscal:</b> " + H(dirCompleta) + "</div>" +
+                    "<div class='cli-box' style='margin-top:2mm;height:7mm'><b class='pp'>Nombre o Raz&oacute;n Social:</b> " + H(nomCli) + "</div>" +
+                    "<div class='cli-box' style='height:9mm'><b class='pp'>Domicilio Fiscal:</b> " + H(dirCompleta) + "</div>" +
 
                     // Datos cliente linea 2
                     "<div class='cli-grid'>" +
@@ -709,7 +709,7 @@ namespace SistemaGestion.Api.Endpoints
                     "<div class='items-section'>" +
                     "<table><thead class='pp'><tr>" +
                     "<th style='width:10mm'>Cant.</th><th style='width:14mm'>Ref.</th><th>DESCRIPCI&Oacute;N</th>" +
-                    "<th style='width:20mm'>P. UNIT.</th><th style='width:20mm'>TOTAL</th>" +
+                    "<th style='width:22mm'>P. UNIT.</th><th style='width:23mm'>TOTAL</th>" +
                     "</tr></thead><tbody>" + filasFactura + "</tbody></table>" +
                     "</div>" +
 

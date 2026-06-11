@@ -1,0 +1,105 @@
+<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'>
+<title>Factura 2819 - TEST DEFINITIVO</title><style>
+@page{size:154mm 305mm;margin:0}
+*{box-sizing:border-box;margin:0;padding:0;font-family:Arial,sans-serif;font-size:8.5pt}
+html,body{margin:0;padding:0}
+body{color:#111}
+.page-wrap{width:134mm;margin:0 auto;padding-top:4mm}
+.empresa{height:26mm;text-align:center;overflow:hidden}
+.empresa h1{font-size:12pt;color:#C00;font-weight:900;letter-spacing:1px}
+.empresa .dir{font-size:7pt;color:#333;margin:0.5mm 0}
+.empresa .rif{font-size:8pt;font-weight:700}
+.doc-info{height:13mm;margin-top:1mm;display:grid;grid-template-columns:auto 1fr auto;gap:1mm;align-items:center;border:1px solid #333;padding:1.5mm 2mm 1.5mm 1mm;overflow:hidden}
+.fecha-box{display:grid;grid-template-columns:repeat(3,10mm);gap:0.5mm;text-align:center}
+.fecha-box div{border:1px solid #999;padding:0.5mm;font-size:8pt}
+.fecha-box .lbl{font-size:5.5pt;font-weight:700;border:none;padding:0}
+.fnum{font-size:11pt;font-weight:900;color:#C00}
+.nctrl{font-size:8pt;font-weight:700}
+.cli-box{height:8mm;margin-top:1mm;border:1px solid #333;padding:1.5mm 2mm;font-size:8.5pt;overflow:hidden}
+.cli-box b{font-size:7pt;color:#555;text-transform:uppercase}
+.cli-grid{height:11mm;margin-top:1mm;display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:0.5mm;border:1px solid #333;padding:1.5mm 2mm;font-size:7.5pt;overflow:hidden}
+.cli-grid b{font-size:6pt;color:#555;text-transform:uppercase}
+.items-section{height:63mm;margin-top:2mm;overflow:hidden}
+table{width:100%;border-collapse:collapse;border:1px solid #333}
+thead{background:#eee}
+th{font-size:7pt;padding:1.5mm;border:1px solid #333;text-transform:uppercase;font-weight:700}
+td{padding:0.7mm 1.5mm;border-bottom:1px solid #ccc;font-size:8.5pt;line-height:1;height:5mm}
+.c{text-align:center}.r{text-align:right}
+.footer-grid{height:42mm;display:grid;grid-template-columns:1fr 1fr;gap:2mm;overflow:hidden}
+.fp-box{border:1px solid #333;padding:1.5mm 2mm;font-size:7.5pt}
+.fp-box b{font-size:7pt;text-transform:uppercase}
+.chk{display:inline-block;width:3mm;height:3mm;border:1px solid #333;text-align:center;font-size:7pt;line-height:3mm;margin-right:0.5mm;vertical-align:middle}
+.fp-item{display:inline-block;margin-right:2mm;margin-bottom:0.5mm}
+.totales-box{border:1px solid #333}
+.totales-box tr td{padding:1mm 2mm;border-bottom:1px solid #ccc;font-size:8.5pt;line-height:1;height:7mm}
+.totales-box tr:last-child td{font-weight:900;font-size:9pt;border-top:2px solid #333}
+.firma-grid{height:24mm;margin-top:1mm;display:grid;grid-template-columns:1fr 1fr;gap:5mm;text-align:center;font-size:7.5pt}
+.firma-line{border-top:1px solid #333;padding-top:1mm;margin-top:6mm}
+.no-print{position:fixed;top:5mm;left:5mm;z-index:99;padding:2mm 6mm;background:#C00;color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:9pt}
+@media print{.no-print{display:none!important}.pp{visibility:hidden}.firma-grid{display:none!important}*{border-color:transparent!important;background:none!important}}
+</style></head><body>
+<button class='no-print' onclick='window.print()'>Imprimir</button>
+<div class='page-wrap'>
+
+<div class='empresa pp'>
+<h1>EL HATO PASCHER C.A.</h1>
+<div class='dir'>Ctra. Villa de Cura - San Francisco de As&iacute;s, Local N&deg; S/N, Sector Los Colorados - Villa de Cura - Estado Aragua</div>
+<div class='rif'>RIF: J-30571871-7 &nbsp;&nbsp; Telfs: 0244 386.10.13 - 386.33.04</div>
+</div>
+
+<div class='doc-info'>
+<div><b class='pp' style='font-size:6pt'>FECHA</b><div class='fecha-box'>
+<div class='lbl pp'>D&Iacute;A</div><div class='lbl pp'>MES</div><div class='lbl pp'>A&Ntilde;O</div>
+<div>11</div><div>06</div><div>2026</div>
+</div></div>
+<div style='text-align:center'><span class='pp' style='font-size:7.5pt;font-weight:700'>FACTURA</span><br>
+<span class='fnum pp'>N&deg; 2819</span></div>
+<div style='text-align:right'><span class='nctrl pp'>N&deg; CONTROL</span><br>
+<span class='pp' style='font-size:8pt;font-weight:700'>00 &mdash; 002819</span></div>
+</div>
+
+<div class='cli-box' style='margin-top:2mm;height:7mm'><b class='pp'>Nombre o Raz&oacute;n Social:</b> DISTRIBUIDORA TEST C.A.</div>
+<div class='cli-box' style='height:9mm'><b class='pp'>Domicilio Fiscal:</b> Av. Bol&iacute;var, Centro Comercial Plaza, Local 15, Villa de Cura</div>
+
+<div class='cli-grid'>
+<div><b class='pp'>RIF N&deg;</b><br>J-12345678-9</div>
+<div><b class='pp'>Tel&eacute;fonos</b><br>0244-555-1234</div>
+<div><b class='pp'>Gu&iacute;a de Despacho</b><br>Factura fiscal de prueba</div>
+<div><b class='pp'>Orden de Compra N&deg;</b><br></div>
+<div><b class='pp'>Condici&oacute;n de Pago</b><br>Contado</div>
+</div>
+
+<div class='items-section'>
+<table><thead class='pp'><tr>
+<th style='width:10mm'>Cant.</th><th style='width:14mm'>Ref.</th><th>DESCRIPCI&Oacute;N</th>
+<th style='width:22mm'>P. UNIT.</th><th style='width:23mm'>TOTAL</th>
+</tr></thead><tbody>
+<tr><td class='c'>15</td><td>TEST-002</td><td>Codo PVC 1/2 pulg</td><td class='r'>3.25</td><td class='r'>48.75</td></tr>
+<tr><td class='c'>8</td><td>TEST-003</td><td>Tee PVC 1/2 pulg</td><td class='r'>4.75</td><td class='r'>38.00</td></tr>
+<script>for(let i=0;i<9;i++)document.write("<tr><td>&nbsp;</td><td></td><td></td><td></td><td></td></tr>");</script>
+</tbody></table>
+</div>
+
+<div class='footer-grid'>
+<div class='fp-box'><b class='pp'>FORMA DE PAGO</b><br>
+<span class='fp-item'><span class='chk'>X</span><span class='pp'>EFECTIVO</span></span>
+<span class='fp-item'><span class='chk'>&nbsp;</span><span class='pp'>CHEQUE</span></span>
+<span class='fp-item'><span class='chk'>&nbsp;</span><span class='pp'>TARJ. CR&Eacute;DITO</span></span><br>
+<span class='fp-item'><span class='chk'>&nbsp;</span><span class='pp'>TRANSF. BANCARIA</span></span>
+<span class='fp-item'><span class='chk'>&nbsp;</span><span class='pp'>TARJ. D&Eacute;BITO</span></span>
+</div>
+<table class='totales-box'>
+<tr><td class='r pp'>SUB-TOTAL</td><td class='r' style='width:22mm'>86.75</td></tr>
+<tr><td class='r pp'>EXENTO</td><td class='r'></td></tr>
+<tr><td class='r pp'>BASE IMPONIBLE</td><td class='r'>86.75</td></tr>
+<tr><td class='r pp'>IVA 16%</td><td class='r'>13.88</td></tr>
+<tr><td class='r pp'>TOTAL</td><td class='r'>100.63</td></tr>
+</table></div>
+
+<div class='firma-grid pp'>
+<div><div class='firma-line'>Firma y Sello</div></div>
+<div><div class='firma-line'>Cliente Conforme</div></div>
+</div>
+
+</div>
+</body></html>

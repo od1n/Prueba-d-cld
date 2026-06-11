@@ -1,0 +1,96 @@
+<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'>
+<title>CALIBRACION DEFINITIVA</title>
+<style>
+@page{size:154mm 305mm;margin:0}
+*{box-sizing:border-box;margin:0;padding:0;font-family:Arial,sans-serif;font-size:8.5pt}
+html,body{margin:0;padding:0}
+body{color:#111}
+.page-wrap{width:134mm;margin:0 auto;padding-top:5mm}
+
+/* Mismas alturas EXACTAS que la factura real */
+.empresa{height:27mm}
+.doc-info{height:13mm;margin-top:1mm}
+.cli-box{height:8mm;margin-top:1mm}
+.cli-grid{height:11mm;margin-top:1mm}
+
+.marker{
+  height:6mm;
+  line-height:6mm;
+  border-top:1px solid #000;
+  font-weight:900;
+  display:flex;
+  justify-content:space-between;
+  padding:0 2mm;
+}
+.marker span:first-child{font-size:10pt}
+.marker span:last-child{font-size:9pt}
+.spacer{}
+
+.no-print{position:fixed;top:5mm;left:5mm;z-index:99;padding:3mm 6mm;background:#C00;color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:10pt}
+.instrucciones{position:fixed;top:15mm;left:5mm;z-index:99;background:#fff;border:2px solid #C00;padding:4mm;font-size:9pt;max-width:320px;line-height:1.6}
+
+@media print{
+  .no-print,.instrucciones{display:none!important}
+  *{border-color:#000!important}
+}
+</style></head><body>
+<button class='no-print' onclick='window.print()'>IMPRIMIR</button>
+<div class='instrucciones'>
+<b style="color:#C00;font-size:11pt">CALIBRACION UNICA</b><br><br>
+Imprime sobre hoja preimpresa de Factura Fiscal en SERVO.<br>
+Paper: <b>Factura Fiscal</b> | Margins: <b>None</b> | Scale: <b>100%</b><br><br>
+Hay 7 lineas (A a G) a diferentes alturas.<br>
+<b style="color:#C00">Dime CUAL linea coincide con la primera linea del area de TOTALES (SUB-TOTAL) de la hoja preimpresa.</b><br><br>
+Si queda entre dos: "entre C y D".<br>
+Con esa respuesta hago el ajuste definitivo.
+</div>
+
+<div class='page-wrap'>
+<!-- Header identico a la factura (mismas alturas, sin contenido visible) -->
+<div class='empresa'></div><!--5 a 32mm-->
+<div class='doc-info'></div><!--33 a 46mm-->
+<div class='cli-box'></div><!--47 a 55mm-->
+<div class='cli-box'></div><!--56 a 64mm-->
+<div class='cli-grid'></div><!--65 a 76mm-->
+
+<!--
+Despues de cli-grid: posicion = 76mm desde top de pagina.
+En la factura real, items-section tiene margin-top:1mm, asi que items empieza en 77mm.
+Footer-grid empieza en 77 + items_height.
+
+Marcadores representan donde estaria el inicio del footer (primera linea de totales)
+para diferentes alturas de items-section:
+
+A: items= 90mm -> footer a 167mm
+B: items=105mm -> footer a 182mm
+C: items=115mm -> footer a 192mm
+D: items=125mm -> footer a 202mm
+E: items=135mm -> footer a 212mm
+F: items=145mm -> footer a 222mm
+G: items=155mm -> footer a 232mm
+-->
+
+<!-- 1mm (margin-top de items) + 90mm (items A) = 91mm de spacer -->
+<div class='spacer' style='height:91mm'></div>
+<div class='marker'><span>A</span><span>86.75</span></div><!-- a 167mm -->
+
+<div class='spacer' style='height:9mm'></div><!-- 15-6=9 -->
+<div class='marker'><span>B</span><span>86.75</span></div><!-- a 182mm -->
+
+<div class='spacer' style='height:4mm'></div><!-- 10-6=4 -->
+<div class='marker'><span>C</span><span>86.75</span></div><!-- a 192mm -->
+
+<div class='spacer' style='height:4mm'></div>
+<div class='marker'><span>D</span><span>86.75</span></div><!-- a 202mm -->
+
+<div class='spacer' style='height:4mm'></div>
+<div class='marker'><span>E</span><span>86.75</span></div><!-- a 212mm -->
+
+<div class='spacer' style='height:4mm'></div>
+<div class='marker'><span>F</span><span>86.75</span></div><!-- a 222mm -->
+
+<div class='spacer' style='height:4mm'></div>
+<div class='marker'><span>G</span><span>86.75</span></div><!-- a 232mm -->
+
+</div>
+</body></html>
