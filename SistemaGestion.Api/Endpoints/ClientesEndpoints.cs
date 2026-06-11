@@ -632,14 +632,13 @@ namespace SistemaGestion.Api.Endpoints
                     html =
                     "<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'>" +
                     "<title>Factura " + H(numF) + "</title><style>" +
-                    "@page{size:154mm 305mm;margin:8mm 10mm}" +
+                    "@page{size:154mm 305mm;margin:5mm 10mm 10mm}" +
                     "*{box-sizing:border-box;margin:0;padding:0;font-family:Arial,sans-serif;font-size:7.5pt}" +
                     "html,body{height:100%;margin:0}" +
                     "body{width:134mm;margin:0 auto;color:#111}" +
-                    ".page-wrap{display:flex;flex-direction:column;min-height:289mm}" +
-                    ".items-section{flex:1;display:flex;flex-direction:column}" +
-                    ".items-section table{flex:1}" +
-                    ".empresa{text-align:center;margin-bottom:2mm}" +
+                    ".page-wrap{display:flex;flex-direction:column;height:290mm;overflow:hidden}" +
+                    ".items-section{flex:1;overflow:hidden}" +
+                    ".empresa{text-align:center;margin-bottom:0;height:30mm}" +
                     ".empresa h1{font-size:12pt;color:#C00;font-weight:900;letter-spacing:1px}" +
                     ".empresa .dir{font-size:6pt;color:#333;margin:0.5mm 0}" +
                     ".empresa .rif{font-size:7pt;font-weight:700}" +
@@ -666,8 +665,8 @@ namespace SistemaGestion.Api.Endpoints
                     ".totales-box{border:1px solid #333}" +
                     ".totales-box tr td{padding:1mm 2mm;border-bottom:1px solid #ccc;font-size:7pt}" +
                     ".totales-box tr:last-child td{font-weight:900;font-size:8pt;border-top:2px solid #333;background:#f5f5f5}" +
-                    ".firma-grid{display:grid;grid-template-columns:1fr 1fr;gap:5mm;margin-top:3mm;text-align:center;font-size:6.5pt}" +
-                    ".firma-line{border-top:1px solid #333;padding-top:1mm;margin-top:8mm}" +
+                    ".firma-grid{display:grid;grid-template-columns:1fr 1fr;gap:5mm;margin-top:2mm;text-align:center;font-size:6.5pt}" +
+                    ".firma-line{border-top:1px solid #333;padding-top:1mm;margin-top:6mm}" +
                     ".no-print{margin-bottom:3mm;padding:2mm 6mm;background:#C00;color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:9pt}" +
                     "@media print{.no-print{display:none!important}.pp{visibility:hidden}*{border-color:transparent!important;background:none!important}body{margin:0}}" +
                     "</style></head><body>" +
