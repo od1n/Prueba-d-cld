@@ -637,11 +637,11 @@ namespace SistemaGestion.Api.Endpoints
                     "html,body{margin:0;padding:0}" +
                     "body{color:#111}" +
                     ".page-wrap{width:134mm;margin:0 auto;padding-top:5mm}" +
-                    ".empresa{height:27mm;text-align:center}" +
+                    ".empresa{height:27mm;text-align:center;overflow:hidden}" +
                     ".empresa h1{font-size:12pt;color:#C00;font-weight:900;letter-spacing:1px}" +
                     ".empresa .dir{font-size:7pt;color:#333;margin:0.5mm 0}" +
                     ".empresa .rif{font-size:8pt;font-weight:700}" +
-                    ".doc-info{height:13mm;margin-top:1mm;display:grid;grid-template-columns:auto 1fr auto;gap:1mm;align-items:center;border:1px solid #333;padding:1.5mm 2mm}" +
+                    ".doc-info{height:13mm;margin-top:1mm;display:grid;grid-template-columns:auto 1fr auto;gap:1mm;align-items:center;border:1px solid #333;padding:1.5mm 2mm;overflow:hidden}" +
                     ".fecha-box{display:grid;grid-template-columns:repeat(3,10mm);gap:0.5mm;text-align:center}" +
                     ".fecha-box div{border:1px solid #999;padding:0.5mm;font-size:8pt}" +
                     ".fecha-box .lbl{font-size:5.5pt;font-weight:700;border:none;padding:0}" +
@@ -655,9 +655,9 @@ namespace SistemaGestion.Api.Endpoints
                     "table{width:100%;border-collapse:collapse;border:1px solid #333}" +
                     "thead{background:#eee}" +
                     "th{font-size:7pt;padding:1.5mm;border:1px solid #333;text-transform:uppercase;font-weight:700}" +
-                    "td{padding:1mm 1.5mm;border-bottom:1px solid #ccc;font-size:8.5pt;height:5mm}" +
+                    "td{padding:0.7mm 1.5mm;border-bottom:1px solid #ccc;font-size:8.5pt;line-height:1;height:5mm}" +
                     ".c{text-align:center}.r{text-align:right}" +
-                    ".footer-grid{height:36mm;display:grid;grid-template-columns:1fr 1fr;gap:2mm}" +
+                    ".footer-grid{height:36mm;display:grid;grid-template-columns:1fr 1fr;gap:2mm;overflow:hidden}" +
                     ".fp-box{border:1px solid #333;padding:1.5mm 2mm;font-size:7.5pt}" +
                     ".fp-box b{font-size:7pt;text-transform:uppercase}" +
                     ".chk{display:inline-block;width:3mm;height:3mm;border:1px solid #333;text-align:center;font-size:7pt;line-height:3mm;margin-right:0.5mm;vertical-align:middle}" +
@@ -668,7 +668,7 @@ namespace SistemaGestion.Api.Endpoints
                     ".firma-grid{height:24mm;margin-top:1mm;display:grid;grid-template-columns:1fr 1fr;gap:5mm;text-align:center;font-size:7.5pt}" +
                     ".firma-line{border-top:1px solid #333;padding-top:1mm;margin-top:6mm}" +
                     ".no-print{position:fixed;top:5mm;left:5mm;z-index:99;padding:2mm 6mm;background:#C00;color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:9pt}" +
-                    "@media print{.no-print{display:none!important}.pp{visibility:hidden}*{border-color:transparent!important;background:none!important}}" +
+                    "@media print{.no-print{display:none!important}.pp{visibility:hidden}.firma-grid{display:none!important}*{border-color:transparent!important;background:none!important}}" +
                     "</style></head><body>" +
                     "<button class='no-print' onclick='window.print()'>Imprimir</button>" +
                     "<div class='page-wrap'>" +
