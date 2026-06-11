@@ -688,9 +688,9 @@ namespace SistemaGestion.Api.Endpoints
                     "<div>" + H(fechaDia) + "</div><div>" + H(fechaMes) + "</div><div>" + H(fechaAno) + "</div>" +
                     "</div></div>" +
                     "<div style='text-align:center'><span class='pp' style='font-size:7.5pt;font-weight:700'>FACTURA</span><br>" +
-                    "<span class='fnum'>N&deg; " + H(numF) + "</span></div>" +
+                    "<span class='fnum pp'>N&deg; " + H(numF) + "</span></div>" +
                     "<div style='text-align:right'><span class='nctrl pp'>N&deg; CONTROL</span><br>" +
-                    "<span style='font-size:8pt;font-weight:700'>00 &mdash; " + H(numF.PadLeft(6,'0')) + "</span></div>" +
+                    "<span class='pp' style='font-size:8pt;font-weight:700'>00 &mdash; " + H(numF.PadLeft(6,'0')) + "</span></div>" +
                     "</div>" +
 
                     // Datos cliente linea 1
