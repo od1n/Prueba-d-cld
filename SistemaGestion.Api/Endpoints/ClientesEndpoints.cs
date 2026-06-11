@@ -634,41 +634,42 @@ namespace SistemaGestion.Api.Endpoints
                     "<title>Factura " + H(numF) + "</title><style>" +
                     "@page{size:154mm 305mm;margin:5mm 10mm 10mm}" +
                     "*{box-sizing:border-box;margin:0;padding:0;font-family:Arial,sans-serif;font-size:8.5pt}" +
-                    "html,body{height:100%;margin:0}" +
-                    "body{width:134mm;margin:0 auto;color:#111}" +
-                    ".page-wrap{display:flex;flex-direction:column;height:290mm;overflow:hidden}" +
-                    ".items-section{height:155mm;overflow:hidden}" +
-                    ".empresa{text-align:center;margin-bottom:0;height:30mm}" +
+                    "html,body{width:154mm;height:305mm;margin:0}" +
+                    "body{color:#111}" +
+                    ".page-wrap{position:relative;width:134mm;height:290mm;margin:0 auto}" +
+                    ".page-wrap>div{position:absolute;left:0;right:0;overflow:hidden}" +
+                    ".empresa{top:0;height:27mm;text-align:center}" +
                     ".empresa h1{font-size:12pt;color:#C00;font-weight:900;letter-spacing:1px}" +
                     ".empresa .dir{font-size:7pt;color:#333;margin:0.5mm 0}" +
                     ".empresa .rif{font-size:8pt;font-weight:700}" +
-                    ".doc-info{display:grid;grid-template-columns:auto 1fr auto;gap:1mm;align-items:center;border:1px solid #333;padding:1.5mm 2mm;margin-bottom:2mm}" +
+                    ".doc-info{top:28mm;height:13mm;display:grid;grid-template-columns:auto 1fr auto;gap:1mm;align-items:center;border:1px solid #333;padding:1.5mm 2mm}" +
                     ".fecha-box{display:grid;grid-template-columns:repeat(3,10mm);gap:0.5mm;text-align:center}" +
                     ".fecha-box div{border:1px solid #999;padding:0.5mm;font-size:8pt}" +
                     ".fecha-box .lbl{font-size:5.5pt;font-weight:700;border:none;padding:0}" +
                     ".fnum{font-size:11pt;font-weight:900;color:#C00}" +
                     ".nctrl{font-size:8pt;font-weight:700}" +
-                    ".cli-box{border:1px solid #333;padding:1.5mm 2mm;margin-bottom:1mm;font-size:8.5pt}" +
+                    ".cli-box{border:1px solid #333;padding:1.5mm 2mm;font-size:8.5pt}" +
                     ".cli-box b{font-size:7pt;color:#555;text-transform:uppercase}" +
-                    ".cli-grid{display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:0.5mm;border:1px solid #333;padding:1.5mm 2mm;margin-bottom:2mm;font-size:7.5pt}" +
+                    ".cli-grid{top:60mm;height:11mm;display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:0.5mm;border:1px solid #333;padding:1.5mm 2mm;font-size:7.5pt}" +
                     ".cli-grid b{font-size:6pt;color:#555;text-transform:uppercase}" +
-                    "table{width:100%;border-collapse:collapse;border:1px solid #333;margin-bottom:2mm}" +
+                    ".items-section{top:72mm;height:152mm}" +
+                    "table{width:100%;border-collapse:collapse;border:1px solid #333}" +
                     "thead{background:#eee}" +
                     "th{font-size:7pt;padding:1.5mm;border:1px solid #333;text-transform:uppercase;font-weight:700}" +
                     "td{padding:1mm 1.5mm;border-bottom:1px solid #ccc;font-size:8.5pt;height:5mm}" +
                     ".c{text-align:center}.r{text-align:right}" +
-                    ".footer-grid{display:grid;grid-template-columns:1fr 1fr;gap:2mm}" +
+                    ".footer-grid{top:224mm;height:36mm;display:grid;grid-template-columns:1fr 1fr;gap:2mm}" +
                     ".fp-box{border:1px solid #333;padding:1.5mm 2mm;font-size:7.5pt}" +
                     ".fp-box b{font-size:7pt;text-transform:uppercase}" +
                     ".chk{display:inline-block;width:3mm;height:3mm;border:1px solid #333;text-align:center;font-size:7pt;line-height:3mm;margin-right:0.5mm;vertical-align:middle}" +
                     ".fp-item{display:inline-block;margin-right:2mm;margin-bottom:0.5mm}" +
                     ".totales-box{border:1px solid #333}" +
                     ".totales-box tr td{padding:1mm 2mm;border-bottom:1px solid #ccc;font-size:8.5pt}" +
-                    ".totales-box tr:last-child td{font-weight:900;font-size:9pt;border-top:2px solid #333;background:#f5f5f5}" +
-                    ".firma-grid{display:grid;grid-template-columns:1fr 1fr;gap:5mm;margin-top:2mm;text-align:center;font-size:7.5pt}" +
+                    ".totales-box tr:last-child td{font-weight:900;font-size:9pt;border-top:2px solid #333}" +
+                    ".firma-grid{top:261mm;height:24mm;display:grid;grid-template-columns:1fr 1fr;gap:5mm;text-align:center;font-size:7.5pt}" +
                     ".firma-line{border-top:1px solid #333;padding-top:1mm;margin-top:6mm}" +
-                    ".no-print{margin-bottom:3mm;padding:2mm 6mm;background:#C00;color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:9pt}" +
-                    "@media print{.no-print{display:none!important}.pp{visibility:hidden}*{border-color:transparent!important;background:none!important}body{margin:0}}" +
+                    ".no-print{position:fixed;top:5mm;left:5mm;z-index:99;padding:2mm 6mm;background:#C00;color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:9pt}" +
+                    "@media print{.no-print{display:none!important}.pp{visibility:hidden}*{border-color:transparent!important;background:none!important}}" +
                     "</style></head><body>" +
                     "<button class='no-print' onclick='window.print()'>Imprimir</button>" +
                     "<div class='page-wrap'>" +
@@ -693,8 +694,8 @@ namespace SistemaGestion.Api.Endpoints
                     "</div>" +
 
                     // Datos cliente linea 1
-                    "<div class='cli-box'><b class='pp'>Nombre o Raz&oacute;n Social:</b> " + H(nomCli) + "</div>" +
-                    "<div class='cli-box'><b class='pp'>Domicilio Fiscal:</b> " + H(dirCompleta) + "</div>" +
+                    "<div class='cli-box' style='top:42mm;height:8mm'><b class='pp'>Nombre o Raz&oacute;n Social:</b> " + H(nomCli) + "</div>" +
+                    "<div class='cli-box' style='top:51mm;height:8mm'><b class='pp'>Domicilio Fiscal:</b> " + H(dirCompleta) + "</div>" +
 
                     // Datos cliente linea 2
                     "<div class='cli-grid'>" +
