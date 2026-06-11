@@ -521,8 +521,8 @@ namespace SistemaGestion.Api.Endpoints
                 int filasVaciasNota = Math.Max(0, 18 - nItems);
                 for (int i = 0; i < filasVaciasNota; i++)
                     filasNota.Append("<tr><td>&nbsp;</td><td></td><td></td><td></td></tr>");
-                // Factura fiscal: ~28 filas visibles (289mm content - ~150mm header/footer = ~139mm / 5mm por fila)
-                int filasVaciasFact = Math.Max(0, 28 - nItems);
+                // Factura fiscal: 15 filas máx (85mm items-section = ~15 filas × 5mm + thead)
+                int filasVaciasFact = Math.Max(0, 15 - nItems);
                 for (int i = 0; i < filasVaciasFact; i++)
                     filasFactura.Append("<tr><td>&nbsp;</td><td></td><td></td><td></td><td></td></tr>");
 
@@ -651,7 +651,7 @@ namespace SistemaGestion.Api.Endpoints
                     ".cli-box b{font-size:7pt;color:#555;text-transform:uppercase}" +
                     ".cli-grid{height:11mm;margin-top:1mm;display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:0.5mm;border:1px solid #333;padding:1.5mm 2mm;font-size:7.5pt;overflow:hidden}" +
                     ".cli-grid b{font-size:6pt;color:#555;text-transform:uppercase}" +
-                    ".items-section{height:152mm;margin-top:1mm;overflow:hidden}" +
+                    ".items-section{height:85mm;margin-top:1mm;overflow:hidden}" +
                     "table{width:100%;border-collapse:collapse;border:1px solid #333}" +
                     "thead{background:#eee}" +
                     "th{font-size:7pt;padding:1.5mm;border:1px solid #333;text-transform:uppercase;font-weight:700}" +
