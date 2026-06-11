@@ -12,6 +12,7 @@ Debug/
 Release/
 x64/
 x86/
+publish-api-temp/
 
 # Rider / VS Code
 .idea/
@@ -32,6 +33,7 @@ packages/
 # OS
 Thumbs.db
 Desktop.ini
+~$*
 
 # Repos anidados / placeholder
 RepositorioNuevo/
@@ -40,17 +42,44 @@ RepositorioNuevo/
 winforms-patterns/
 *.skill
 
-# Documentos Word (revisiones de seguridad, notas internas).
-# Si querés versionar uno específico, agregalo bajo docs/ y excluilo aquí.
+# Documentos Word generados (revisiones, auditorías)
 *.docx
+
+# PDFs generados (manuales se regeneran desde el código)
+Manual-*.pdf
 
 # Variables de entorno — NUNCA deben commitearse (contienen API keys)
 .env
 *.env
 digitalizador/.env
-recursos
-grafiacos/
+
+# Recursos gráficos (archivos grandes, no son código)
+recursos grafiacos/
+
+# Archivos temporales / de un solo uso
 ehp-deploy.zip
+ehp-mensajes-ig-fb-telegram.docx
+
+# Documentos de estado/resumen que se regeneran
+ESTADO-COMPLETO.md
+SECURITY_AUDIT.md
 SISTEMA_INTEGRATION_SUMMARY.md
 
-recursos grafiacos/
+# Scripts de diagnóstico de un solo uso (no necesarios para instalar/ejecutar)
+capturar_ayuda.ps1
+diag_httpclient.ps1
+diagnosticar_https.ps1
+generar_kardex.py
+reparar_db_olimpo.ps1
+verificar_portal.ps1
+
+# Scripts de inicio obsoletos (reemplazados por Scripts/*.cmd)
+iniciar_servidores.bat
+iniciar_servidores.ps1
+
+# Migración legacy (no necesaria para nuevas instalaciones)
+migrar_ElHato2K.bat
+migrar_ElHato2K.py
+
+# Deploy batch obsoleto
+deploy.bat
