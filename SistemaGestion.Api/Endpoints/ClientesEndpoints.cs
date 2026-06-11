@@ -633,39 +633,39 @@ namespace SistemaGestion.Api.Endpoints
                     "<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'>" +
                     "<title>Factura " + H(numF) + "</title><style>" +
                     "@page{size:154mm 305mm;margin:5mm 10mm 10mm}" +
-                    "*{box-sizing:border-box;margin:0;padding:0;font-family:Arial,sans-serif;font-size:7.5pt}" +
+                    "*{box-sizing:border-box;margin:0;padding:0;font-family:Arial,sans-serif;font-size:8.5pt}" +
                     "html,body{height:100%;margin:0}" +
                     "body{width:134mm;margin:0 auto;color:#111}" +
                     ".page-wrap{display:flex;flex-direction:column;height:290mm;overflow:hidden}" +
-                    ".items-section{flex:1;overflow:hidden}" +
+                    ".items-section{height:155mm;overflow:hidden}" +
                     ".empresa{text-align:center;margin-bottom:0;height:30mm}" +
                     ".empresa h1{font-size:12pt;color:#C00;font-weight:900;letter-spacing:1px}" +
-                    ".empresa .dir{font-size:6pt;color:#333;margin:0.5mm 0}" +
-                    ".empresa .rif{font-size:7pt;font-weight:700}" +
+                    ".empresa .dir{font-size:7pt;color:#333;margin:0.5mm 0}" +
+                    ".empresa .rif{font-size:8pt;font-weight:700}" +
                     ".doc-info{display:grid;grid-template-columns:auto 1fr auto;gap:1mm;align-items:center;border:1px solid #333;padding:1.5mm 2mm;margin-bottom:2mm}" +
-                    ".fecha-box{display:grid;grid-template-columns:repeat(3,14mm);gap:1mm;text-align:center}" +
-                    ".fecha-box div{border:1px solid #999;padding:0.5mm;font-size:7pt}" +
-                    ".fecha-box .lbl{font-size:5pt;font-weight:700;border:none;padding:0}" +
+                    ".fecha-box{display:grid;grid-template-columns:repeat(3,10mm);gap:0.5mm;text-align:center}" +
+                    ".fecha-box div{border:1px solid #999;padding:0.5mm;font-size:8pt}" +
+                    ".fecha-box .lbl{font-size:5.5pt;font-weight:700;border:none;padding:0}" +
                     ".fnum{font-size:11pt;font-weight:900;color:#C00}" +
-                    ".nctrl{font-size:7pt;font-weight:700}" +
-                    ".cli-box{border:1px solid #333;padding:1.5mm 2mm;margin-bottom:1mm;font-size:7pt}" +
-                    ".cli-box b{font-size:6pt;color:#555;text-transform:uppercase}" +
-                    ".cli-grid{display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:0.5mm;border:1px solid #333;padding:1.5mm 2mm;margin-bottom:2mm;font-size:6.5pt}" +
-                    ".cli-grid b{font-size:5.5pt;color:#555;text-transform:uppercase}" +
+                    ".nctrl{font-size:8pt;font-weight:700}" +
+                    ".cli-box{border:1px solid #333;padding:1.5mm 2mm;margin-bottom:1mm;font-size:8.5pt}" +
+                    ".cli-box b{font-size:7pt;color:#555;text-transform:uppercase}" +
+                    ".cli-grid{display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:0.5mm;border:1px solid #333;padding:1.5mm 2mm;margin-bottom:2mm;font-size:7.5pt}" +
+                    ".cli-grid b{font-size:6pt;color:#555;text-transform:uppercase}" +
                     "table{width:100%;border-collapse:collapse;border:1px solid #333;margin-bottom:2mm}" +
                     "thead{background:#eee}" +
-                    "th{font-size:6pt;padding:1.5mm;border:1px solid #333;text-transform:uppercase;font-weight:700}" +
-                    "td{padding:1mm 1.5mm;border-bottom:1px solid #ccc;font-size:7pt;height:5mm}" +
+                    "th{font-size:7pt;padding:1.5mm;border:1px solid #333;text-transform:uppercase;font-weight:700}" +
+                    "td{padding:1mm 1.5mm;border-bottom:1px solid #ccc;font-size:8.5pt;height:5mm}" +
                     ".c{text-align:center}.r{text-align:right}" +
                     ".footer-grid{display:grid;grid-template-columns:1fr 1fr;gap:2mm}" +
-                    ".fp-box{border:1px solid #333;padding:1.5mm 2mm;font-size:6.5pt}" +
-                    ".fp-box b{font-size:6pt;text-transform:uppercase}" +
-                    ".chk{display:inline-block;width:3mm;height:3mm;border:1px solid #333;text-align:center;font-size:6pt;line-height:3mm;margin-right:0.5mm;vertical-align:middle}" +
+                    ".fp-box{border:1px solid #333;padding:1.5mm 2mm;font-size:7.5pt}" +
+                    ".fp-box b{font-size:7pt;text-transform:uppercase}" +
+                    ".chk{display:inline-block;width:3mm;height:3mm;border:1px solid #333;text-align:center;font-size:7pt;line-height:3mm;margin-right:0.5mm;vertical-align:middle}" +
                     ".fp-item{display:inline-block;margin-right:2mm;margin-bottom:0.5mm}" +
                     ".totales-box{border:1px solid #333}" +
-                    ".totales-box tr td{padding:1mm 2mm;border-bottom:1px solid #ccc;font-size:7pt}" +
-                    ".totales-box tr:last-child td{font-weight:900;font-size:8pt;border-top:2px solid #333;background:#f5f5f5}" +
-                    ".firma-grid{display:grid;grid-template-columns:1fr 1fr;gap:5mm;margin-top:2mm;text-align:center;font-size:6.5pt}" +
+                    ".totales-box tr td{padding:1mm 2mm;border-bottom:1px solid #ccc;font-size:8.5pt}" +
+                    ".totales-box tr:last-child td{font-weight:900;font-size:9pt;border-top:2px solid #333;background:#f5f5f5}" +
+                    ".firma-grid{display:grid;grid-template-columns:1fr 1fr;gap:5mm;margin-top:2mm;text-align:center;font-size:7.5pt}" +
                     ".firma-line{border-top:1px solid #333;padding-top:1mm;margin-top:6mm}" +
                     ".no-print{margin-bottom:3mm;padding:2mm 6mm;background:#C00;color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:9pt}" +
                     "@media print{.no-print{display:none!important}.pp{visibility:hidden}*{border-color:transparent!important;background:none!important}body{margin:0}}" +
