@@ -385,7 +385,7 @@ namespace SistemaGestion.Api.Endpoints
                     insumos.Add((Db.S(r,0), Db.S(r,1), Db.S(r,2), Db.D(r,3), Db.D(r,4), Db.D(r,5)));
                 r.Close();
 
-                var resultado = new List<object>();
+                var resultado = new List<PronosticoReordenDto>();
                 foreach (var (cod, desc, unidad, stock, min, costo) in insumos)
                 {
                     var cmdC = c.CreateCommand();
@@ -394,7 +394,7 @@ namespace SistemaGestion.Api.Endpoints
                         AND TipoMovimiento='SALIDA' AND FechaHora>=$desde";
                     cmdC.Parameters.AddWithValue("$cod", cod);
                     cmdC.Parameters.AddWithValue("$desde", fechaDesde);
-                    decimal consumoTotal = Db.D(cmdC.ExecuteScalar());
+                    decimal consumoTotal = Convert.ToDecimal(cmdC.ExecuteScalar() ?? 0.0);
                     decimal consumoDiario = dias > 0 ? consumoTotal / dias : 0;
 
                     decimal diasCob = consumoDiario > 0 ? stock / consumoDiario : 9999;
@@ -406,26 +406,22 @@ namespace SistemaGestion.Api.Endpoints
                         WHERE CodigoProducto=$cod AND TipoKardex='MATERIA_PRIMA'
                         AND TipoMovimiento='ENTRADA' ORDER BY IdMovimiento DESC LIMIT 1";
                     cmdP.Parameters.AddWithValue("$cod", cod);
-                    decimal precioUlt = Db.D(cmdP.ExecuteScalar());
+                    decimal precioUlt = Convert.ToDecimal(cmdP.ExecuteScalar() ?? 0.0);
                     if (precioUlt == 0) precioUlt = costo;
 
                     string estado = diasCob <= lead ? "URGENTE"
                         : diasCob <= (lead + 7) ? "PRONTO" : "OK";
 
-                    resultado.Add(new {
-                        codigoInsumo = cod, descripcion = desc, unidad,
-                        stockActual = Math.Round(stock, 2), stockMinimo = Math.Round(min, 2),
-                        consumoPromDiario = Math.Round(consumoDiario, 4),
-                        diasCobertura = Math.Round(diasCob, 1),
-                        fechaAgotamiento = consumoDiario > 0
-                            ? DateTime.Today.AddDays((double)diasCob).ToString("yyyy-MM-dd") : (string?)null,
-                        cantidadSugerida = Math.Round(cantSugerida, 2),
-                        costoEstimado = Math.Round(cantSugerida * precioUlt, 2),
-                        precioUltCompra = precioUlt, estado
-                    });
+                    resultado.Add(new PronosticoReordenDto(
+                        cod, desc, unidad,
+                        Math.Round(stock, 2), Math.Round(min, 2),
+                        Math.Round(consumoDiario, 4), Math.Round(diasCob, 1),
+                        consumoDiario > 0 ? DateTime.Today.AddDays((double)diasCob).ToString("yyyy-MM-dd") : null,
+                        Math.Round(cantSugerida, 2), Math.Round(cantSugerida * precioUlt, 2),
+                        precioUlt, estado));
                 }
 
-                return Results.Ok(resultado.OrderBy(x => ((dynamic)x).diasCobertura));
+                return Results.Ok(resultado.OrderBy(x => x.DiasCobertura));
             }).RequireAuthorization();
 
             // ── GET página imprimible ─────────────────────────────────────
@@ -529,4 +525,12 @@ body{padding:10mm}
         int      DiasCredito,
         string?  Observaciones,
         List<CompraItemRequest> Items);
+
+    public record PronosticoReordenDto(
+        string CodigoInsumo, string Descripcion, string Unidad,
+        decimal StockActual, decimal StockMinimo,
+        decimal ConsumoPromDiario, decimal DiasCobertura,
+        string? FechaAgotamiento,
+        decimal CantidadSugerida, decimal CostoEstimado,
+        decimal PrecioUltCompra, string Estado);
 }
