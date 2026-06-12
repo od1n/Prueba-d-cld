@@ -287,6 +287,15 @@ CargarDatos();
             return (f, lineas);
         }
 
+        /// Busca datos del cliente para inyectar en el PDF
+        private (string rif, string dir, string tel) ObtenerDatosCliente(string codigoCliente)
+        {
+            var cli = DatabaseService.ObtenerClientes()
+                .Find(c => c.Codigo == codigoCliente || c.Descripcion == codigoCliente);
+            if (cli == null) return ("", "", "");
+            return (cli.CiRif ?? "", cli.Direccion ?? "", cli.Telefono ?? "");
+        }
+
         private void ExportarPdf()
         {
             var (f, lineas) = ObtenerFacturaSeleccionada();
@@ -298,8 +307,11 @@ CargarDatos();
             }
             try
             {
-                var pdf = PdfService.GenerarFactura(f, lineas);
-                PdfService.GuardarYAbrir(pdf, "Factura_" + f.NumeroF + ".pdf");
+                var (rif, dir, tel) = ObtenerDatosCliente(f.Codigo);
+                var pdf = PdfService.GenerarFactura(f, lineas,
+                    rifCliente: rif, dirCliente: dir, telCliente: tel);
+                string nombre = f.EsNotaEntrega ? "NotaEntrega_" : "Factura_";
+                PdfService.GuardarYAbrir(pdf, nombre + f.NumeroF + ".pdf");
             }
             catch (Exception ex)
             {
@@ -319,8 +331,11 @@ CargarDatos();
             }
             try
             {
-                var pdf = PdfService.GenerarFactura(f, lineas);
-                PdfService.Imprimir(pdf, "Factura_" + f.NumeroF + ".pdf");
+                var (rif, dir, tel) = ObtenerDatosCliente(f.Codigo);
+                var pdf = PdfService.GenerarFactura(f, lineas,
+                    rifCliente: rif, dirCliente: dir, telCliente: tel);
+                string nombre = f.EsNotaEntrega ? "NotaEntrega_" : "Factura_";
+                PdfService.Imprimir(pdf, nombre + f.NumeroF + ".pdf");
             }
             catch (Exception ex)
             {

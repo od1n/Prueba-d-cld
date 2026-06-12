@@ -179,6 +179,13 @@ namespace SistemaGestion.Api.Endpoints
                         dl.Parameters.AddWithValue("$p",   (double)precio);
                         dl.ExecuteNonQuery();
 
+                        // Leer saldo anterior
+                        var sa = c.CreateCommand(); sa.Transaction = tx;
+                        sa.CommandText = "SELECT COALESCE(Existencia,0) FROM Inventario WHERE Codigo=$c";
+                        sa.Parameters.AddWithValue("$c", cod);
+                        decimal saldoAnt = Convert.ToDecimal(sa.ExecuteScalar() ?? 0.0);
+                        decimal nuevoSaldo = saldoAnt + cant;
+
                         // Sumar al stock
                         var st = c.CreateCommand(); st.Transaction = tx;
                         st.CommandText = @"UPDATE Inventario
@@ -190,16 +197,21 @@ namespace SistemaGestion.Api.Endpoints
                         st.Parameters.AddWithValue("$c",cod);
                         st.ExecuteNonQuery();
 
-                        // Movimiento kardex
+                        // Movimiento Kardex A (MATERIA_PRIMA)
                         var mv = c.CreateCommand(); mv.Transaction = tx;
                         mv.CommandText = @"INSERT INTO MovimientosInventario
-                            (CodigoProducto,FechaHora,TipoMovimiento,Concepto,Cantidad,NuevoSaldo,Usuario)
-                            SELECT $cod,datetime('now','localtime'),'ENTRADA',$conc,$cant,
-                                Existencia,$usr FROM Inventario WHERE Codigo=$cod";
+                            (CodigoProducto,FechaHora,TipoMovimiento,Concepto,Cantidad,
+                             SaldoAnterior,NuevoSaldo,Referencia,Usuario,TipoKardex,CostoUnitario)
+                            VALUES($cod,datetime('now','localtime'),'ENTRADA',$conc,$cant,
+                             $sa,$ns,$ref,$usr,'MATERIA_PRIMA',$cu)";
                         mv.Parameters.AddWithValue("$cod",  cod);
                         mv.Parameters.AddWithValue("$conc", $"Compra {numC}");
                         mv.Parameters.AddWithValue("$cant", (double)cant);
+                        mv.Parameters.AddWithValue("$sa",   (double)saldoAnt);
+                        mv.Parameters.AddWithValue("$ns",   (double)nuevoSaldo);
+                        mv.Parameters.AddWithValue("$ref",  numC);
                         mv.Parameters.AddWithValue("$usr",  usuario);
+                        mv.Parameters.AddWithValue("$cu",   (double)precio);
                         mv.ExecuteNonQuery();
                     }
 
@@ -212,6 +224,208 @@ namespace SistemaGestion.Api.Endpoints
                     tx.Rollback();
                     return Results.Problem(ex.Message);
                 }
+            }).RequireAuthorization();
+
+            // ── PUT actualizar compra ────────────────────────────────────
+            app.MapPut("/api/compras/{id}", (string id, CompraRequest req, HttpContext ctx) =>
+            {
+                if (req.Items == null || req.Items.Count == 0)
+                    return Results.BadRequest(new { error = "La compra debe tener al menos un ítem." });
+
+                using var c = Db.Conn();
+                using var tx = c.BeginTransaction();
+                try
+                {
+                    // Verificar que existe
+                    var chk = c.CreateCommand(); chk.Transaction = tx;
+                    chk.CommandText = "SELECT rowid FROM Compras WHERE CompraN=$n";
+                    chk.Parameters.AddWithValue("$n", id);
+                    var rowObj = chk.ExecuteScalar();
+                    if (rowObj == null)
+                        return Results.NotFound(new { error = $"La compra {id} no existe." });
+                    int rowid = (int)(long)rowObj;
+
+                    // Revertir stock de detalles anteriores
+                    var cmdOld = c.CreateCommand(); cmdOld.Transaction = tx;
+                    cmdOld.CommandText = "SELECT CodigoI, Cantidad FROM DetallesCompra WHERE IdCompra=$id";
+                    cmdOld.Parameters.AddWithValue("$id", rowid);
+                    using var rOld = cmdOld.ExecuteReader();
+                    var anteriores = new List<(string cod, decimal cant)>();
+                    while (rOld.Read())
+                        anteriores.Add((Db.S(rOld, 0), Db.D(rOld, 1)));
+                    rOld.Close();
+                    foreach (var (codA, cantA) in anteriores)
+                    {
+                        var rev = c.CreateCommand(); rev.Transaction = tx;
+                        rev.CommandText = "UPDATE Inventario SET Existencia=Existencia-$q WHERE Codigo=$c";
+                        rev.Parameters.AddWithValue("$q", (double)cantA);
+                        rev.Parameters.AddWithValue("$c", codA);
+                        rev.ExecuteNonQuery();
+                    }
+
+                    // Borrar detalles anteriores
+                    var del = c.CreateCommand(); del.Transaction = tx;
+                    del.CommandText = "DELETE FROM DetallesCompra WHERE IdCompra=$id";
+                    del.Parameters.AddWithValue("$id", rowid);
+                    del.ExecuteNonQuery();
+
+                    // Recalcular totales
+                    decimal subTotal = 0;
+                    var itemsCalc = new List<(string cod, decimal cant, decimal precio)>();
+                    foreach (var it in req.Items)
+                    {
+                        if (string.IsNullOrWhiteSpace(it.Codigo) || it.Cantidad <= 0 || it.PrecioUnit <= 0) continue;
+                        subTotal += it.Cantidad * it.PrecioUnit;
+                        itemsCalc.Add((it.Codigo.Trim(), it.Cantidad, it.PrecioUnit));
+                    }
+                    if (itemsCalc.Count == 0)
+                        return Results.BadRequest(new { error = "Sin ítems válidos." });
+
+                    decimal descMonto = subTotal * (req.Descuento / 100m);
+                    decimal baseIva   = subTotal - descMonto;
+                    decimal ivaMonto  = baseIva * (req.PctIva / 100m);
+                    decimal total     = baseIva + ivaMonto;
+
+                    // Actualizar cabecera
+                    var upd = c.CreateCommand(); upd.Transaction = tx;
+                    upd.CommandText = @"UPDATE Compras SET FechaC=$f,CodigoP=$p,DescuentoC=$desc,
+                        FormaDePago=$fp,AbonoC=$ab,IvaC=$iva,DiasDeCred=$dc,TotalC=$tot,
+                        Observaciones=$obs WHERE CompraN=$n";
+                    upd.Parameters.AddWithValue("$n",   id);
+                    upd.Parameters.AddWithValue("$f",   req.Fecha ?? DateTime.Today.ToString("yyyy-MM-dd"));
+                    upd.Parameters.AddWithValue("$p",   req.CodigoProveedor ?? "");
+                    upd.Parameters.AddWithValue("$desc",(double)req.Descuento);
+                    upd.Parameters.AddWithValue("$fp",  req.FormaDePago ?? "Contado");
+                    upd.Parameters.AddWithValue("$ab",  (double)(req.FormaDePago=="Contado"?total:0));
+                    upd.Parameters.AddWithValue("$iva", (double)ivaMonto);
+                    upd.Parameters.AddWithValue("$dc",  req.DiasCredito);
+                    upd.Parameters.AddWithValue("$tot", (double)total);
+                    upd.Parameters.AddWithValue("$obs", req.Observaciones ?? "");
+                    upd.ExecuteNonQuery();
+
+                    string usuario = ctx.User?.FindFirst(
+                        "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name")?.Value ?? "portal";
+
+                    // Insertar nuevas líneas + stock + Kardex A
+                    foreach (var (cod, cant, precio) in itemsCalc)
+                    {
+                        var dl = c.CreateCommand(); dl.Transaction = tx;
+                        dl.CommandText = @"INSERT INTO DetallesCompra(IdCompra,CodigoI,Cantidad,PrecioC)
+                            VALUES($id,$cod,$cant,$p)";
+                        dl.Parameters.AddWithValue("$id",  rowid);
+                        dl.Parameters.AddWithValue("$cod", cod);
+                        dl.Parameters.AddWithValue("$cant",(double)cant);
+                        dl.Parameters.AddWithValue("$p",   (double)precio);
+                        dl.ExecuteNonQuery();
+
+                        var sa = c.CreateCommand(); sa.Transaction = tx;
+                        sa.CommandText = "SELECT COALESCE(Existencia,0) FROM Inventario WHERE Codigo=$c";
+                        sa.Parameters.AddWithValue("$c", cod);
+                        decimal saldoAnt = Convert.ToDecimal(sa.ExecuteScalar() ?? 0.0);
+                        decimal nuevoSaldo = saldoAnt + cant;
+
+                        var st = c.CreateCommand(); st.Transaction = tx;
+                        st.CommandText = @"UPDATE Inventario
+                            SET Existencia=Existencia+$q, CostoActual=$p,
+                                UltimaActualz=date('now','localtime')
+                            WHERE Codigo=$c";
+                        st.Parameters.AddWithValue("$q",(double)cant);
+                        st.Parameters.AddWithValue("$p",(double)precio);
+                        st.Parameters.AddWithValue("$c",cod);
+                        st.ExecuteNonQuery();
+
+                        var mv = c.CreateCommand(); mv.Transaction = tx;
+                        mv.CommandText = @"INSERT INTO MovimientosInventario
+                            (CodigoProducto,FechaHora,TipoMovimiento,Concepto,Cantidad,
+                             SaldoAnterior,NuevoSaldo,Referencia,Usuario,TipoKardex,CostoUnitario)
+                            VALUES($cod,datetime('now','localtime'),'ENTRADA',$conc,$cant,
+                             $sa,$ns,$ref,$usr,'MATERIA_PRIMA',$cu)";
+                        mv.Parameters.AddWithValue("$cod",  cod);
+                        mv.Parameters.AddWithValue("$conc", $"Compra {id}");
+                        mv.Parameters.AddWithValue("$cant", (double)cant);
+                        mv.Parameters.AddWithValue("$sa",   (double)saldoAnt);
+                        mv.Parameters.AddWithValue("$ns",   (double)nuevoSaldo);
+                        mv.Parameters.AddWithValue("$ref",  id);
+                        mv.Parameters.AddWithValue("$usr",  usuario);
+                        mv.Parameters.AddWithValue("$cu",   (double)precio);
+                        mv.ExecuteNonQuery();
+                    }
+
+                    tx.Commit();
+                    return Results.Ok(new { compraN=id, total, iva=ivaMonto, actualizada=true });
+                }
+                catch (Exception ex)
+                {
+                    tx.Rollback();
+                    return Results.Problem(ex.Message);
+                }
+            }).RequireAuthorization();
+
+            // ── GET pronóstico de reorden ─────────────────────────────────
+            app.MapGet("/api/inventario/pronostico-reorden", (int? diasAnalisis, int? leadTime, int? coberturaMeta) =>
+            {
+                int dias = diasAnalisis ?? 90;
+                int lead = leadTime ?? 7;
+                int meta = coberturaMeta ?? 30;
+                string fechaDesde = DateTime.Today.AddDays(-dias).ToString("yyyy-MM-dd");
+
+                using var c = Db.Conn();
+                // Obtener insumos con movimientos de materia prima
+                var cmd = c.CreateCommand();
+                cmd.CommandText = @"SELECT i.Codigo, i.Descripcion, i.Unidad,
+                    i.Existencia, i.ExistenMin, i.CostoActual
+                    FROM Inventario i WHERE i.Activo=1
+                    AND i.Codigo IN (SELECT DISTINCT CodigoProducto FROM MovimientosInventario
+                        WHERE TipoKardex='MATERIA_PRIMA')
+                    ORDER BY i.Codigo";
+                using var r = cmd.ExecuteReader();
+                var insumos = new List<(string cod, string desc, string unidad,
+                    decimal stock, decimal min, decimal costo)>();
+                while (r.Read())
+                    insumos.Add((Db.S(r,0), Db.S(r,1), Db.S(r,2), Db.D(r,3), Db.D(r,4), Db.D(r,5)));
+                r.Close();
+
+                var resultado = new List<object>();
+                foreach (var (cod, desc, unidad, stock, min, costo) in insumos)
+                {
+                    var cmdC = c.CreateCommand();
+                    cmdC.CommandText = @"SELECT COALESCE(SUM(Cantidad),0) FROM MovimientosInventario
+                        WHERE CodigoProducto=$cod AND TipoKardex='MATERIA_PRIMA'
+                        AND TipoMovimiento='SALIDA' AND FechaHora>=$desde";
+                    cmdC.Parameters.AddWithValue("$cod", cod);
+                    cmdC.Parameters.AddWithValue("$desde", fechaDesde);
+                    decimal consumoTotal = Db.D(cmdC.ExecuteScalar());
+                    decimal consumoDiario = dias > 0 ? consumoTotal / dias : 0;
+
+                    decimal diasCob = consumoDiario > 0 ? stock / consumoDiario : 9999;
+                    decimal necesidad = consumoDiario * (lead + meta);
+                    decimal cantSugerida = necesidad > stock ? necesidad - stock : 0;
+
+                    var cmdP = c.CreateCommand();
+                    cmdP.CommandText = @"SELECT COALESCE(CostoUnitario,0) FROM MovimientosInventario
+                        WHERE CodigoProducto=$cod AND TipoKardex='MATERIA_PRIMA'
+                        AND TipoMovimiento='ENTRADA' ORDER BY IdMovimiento DESC LIMIT 1";
+                    cmdP.Parameters.AddWithValue("$cod", cod);
+                    decimal precioUlt = Db.D(cmdP.ExecuteScalar());
+                    if (precioUlt == 0) precioUlt = costo;
+
+                    string estado = diasCob <= lead ? "URGENTE"
+                        : diasCob <= (lead + 7) ? "PRONTO" : "OK";
+
+                    resultado.Add(new {
+                        codigoInsumo = cod, descripcion = desc, unidad,
+                        stockActual = Math.Round(stock, 2), stockMinimo = Math.Round(min, 2),
+                        consumoPromDiario = Math.Round(consumoDiario, 4),
+                        diasCobertura = Math.Round(diasCob, 1),
+                        fechaAgotamiento = consumoDiario > 0
+                            ? DateTime.Today.AddDays((double)diasCob).ToString("yyyy-MM-dd") : (string?)null,
+                        cantidadSugerida = Math.Round(cantSugerida, 2),
+                        costoEstimado = Math.Round(cantSugerida * precioUlt, 2),
+                        precioUltCompra = precioUlt, estado
+                    });
+                }
+
+                return Results.Ok(resultado.OrderBy(x => ((dynamic)x).diasCobertura));
             }).RequireAuthorization();
 
             // ── GET página imprimible ─────────────────────────────────────

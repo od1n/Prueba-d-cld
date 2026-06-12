@@ -108,13 +108,23 @@ namespace SistemaGestion
                         }
                         else
                         {
-                            // ── Nota de entrega: encabezado simple ──
+                            // ── Nota de entrega: diseño COMPLETO para papel normal ──
+                            // Encabezado empresa
+                            header.Item().AlignCenter().Text(nombreEmpresa)
+                                .FontSize(12).Bold().FontColor("#CC0000");
+                            header.Item().AlignCenter().Text(direccion)
+                                .FontSize(6).FontColor("#333333");
+                            header.Item().AlignCenter().Text("RIF: " + rif + "   Telfs: " + telefono)
+                                .FontSize(7).Bold();
+                            header.Item().Height(3);
+
+                            // Número y fecha
                             header.Item().Border(1).Padding(2).Row(row =>
                             {
                                 row.RelativeItem().Column(col =>
                                 {
-                                    col.Item().Text("NOTA DE ENTREGA").FontSize(7).Bold();
-                                    col.Item().Text("N° " + factura.NumeroF).FontSize(11).Bold();
+                                    col.Item().Text("NOTA DE ENTREGA").FontSize(8).Bold().FontColor("#1E3A8A");
+                                    col.Item().Text("N° " + factura.NumeroF).FontSize(12).Bold().FontColor("#CC0000");
                                 });
                                 row.ConstantItem(60).Column(col =>
                                 {
@@ -123,15 +133,20 @@ namespace SistemaGestion
                                 });
                             });
                             header.Item().Height(1);
+                            // Datos del cliente
                             header.Item().Border(1).Padding(2).Text(t =>
                             {
-                                t.Span("NOMBRE: ").FontSize(7).Bold();
+                                t.Span("CLIENTE: ").FontSize(7).Bold().FontColor("#555555");
                                 t.Span(factura.Codigo).FontSize(8);
                             });
                             header.Item().Border(1).Padding(2).Row(row =>
                             {
-                                row.RelativeItem().Text(t => { t.Span("DIRECCIÓN: ").FontSize(7).Bold(); t.Span(dirCliente).FontSize(8); });
-                                row.ConstantItem(50).Text(t => { t.Span("TELF: ").FontSize(7).Bold(); t.Span(telCliente).FontSize(8); });
+                                row.RelativeItem().Text(t => { t.Span("DIRECCIÓN: ").FontSize(6).Bold().FontColor("#555555"); t.Span(dirCliente).FontSize(7); });
+                            });
+                            header.Item().Border(1).Padding(2).Row(row =>
+                            {
+                                row.RelativeItem().Text(t => { t.Span("RIF: ").FontSize(6).Bold().FontColor("#555555"); t.Span(rifCliente).FontSize(7); });
+                                row.RelativeItem().Text(t => { t.Span("TELF: ").FontSize(6).Bold().FontColor("#555555"); t.Span(telCliente).FontSize(7); });
                             });
                         }
                         header.Item().Height(3);
