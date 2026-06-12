@@ -32,6 +32,9 @@
     <Content Remove="SistemaGestion.Api.Tests\**" />
     <EmbeddedResource Remove="SistemaGestion.Api.Tests\**" />
     <None Remove="SistemaGestion.Api.Tests\**" />
+
+    <Compile Remove="Scripts\InsertarPrueba\**" />
+    <Compile Remove="winforms-patterns\**" />
   </ItemGroup>
 
 </Project>
