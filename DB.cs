@@ -1742,8 +1742,12 @@ namespace SistemaGestion
                 }
 
                 // ── Retroactive fix: ProductosProveedor ──
-                // Crear la tabla si no existe (BDs donde la migración v13 ya pasó
-                // pero la tabla nunca se creó), luego agregar columnas faltantes.
+                // Si existe con esquema viejo (sin CodigoInterno), eliminar y recrear.
+                if (TablaExiste(conn, tx, "ProductosProveedor")
+                    && !ColumnaExiste(conn, tx, "ProductosProveedor", "CodigoInterno"))
+                {
+                    EjecutarSql(conn, tx, "DROP TABLE ProductosProveedor");
+                }
                 EjecutarSql(conn, tx, @"
                     CREATE TABLE IF NOT EXISTS ProductosProveedor (
                         Id               INTEGER PRIMARY KEY AUTOINCREMENT,
