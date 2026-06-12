@@ -153,6 +153,24 @@ namespace SistemaGestion
                                 BC(); // Obs.
                             }
 
+                            // ─ 4 filas vacías extras para productos adicionales
+                            for (int x = 0; x < 4; x++)
+                            {
+                                string xbg = grises[(moldes.Count + x) % 2];
+                                void XC() =>
+                                    tbl.Cell().Background(xbg)
+                                       .BorderBottom(0.3f).BorderColor("#CCCCCC")
+                                       .MinHeight(24).Text("");
+                                XC(); // #
+                                XC(); // Molde
+                                if (mostrarVuelt) XC();
+                                if (esVirgen) { XC(); XC(); }
+                                else            XC();
+                                XC(); // Defect.
+                                XC(); // Total
+                                XC(); // Obs.
+                            }
+
                             // ─ Fila de totales
                             void TC(string t = "")
                             {
