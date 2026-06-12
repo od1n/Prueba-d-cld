@@ -1741,9 +1741,25 @@ namespace SistemaGestion
                     SetSchemaVersion(conn, tx, 25);
                 }
 
-                // ── Retroactive fix: columnas faltantes en ProductosProveedor ──
-                // BDs antiguas pueden tener esta tabla con un esquema incompleto
-                // (sin TipoInsumo, sin IdProveedorPrinc, etc.).
+                // ── Retroactive fix: ProductosProveedor ──
+                // Crear la tabla si no existe (BDs donde la migración v13 ya pasó
+                // pero la tabla nunca se creó), luego agregar columnas faltantes.
+                EjecutarSql(conn, tx, @"
+                    CREATE TABLE IF NOT EXISTS ProductosProveedor (
+                        Id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                        CodigoInterno    TEXT    NOT NULL UNIQUE,
+                        Descripcion      TEXT    NOT NULL,
+                        CodigoProveedor  TEXT,
+                        IdProveedorPrinc INTEGER,
+                        TipoInsumo       TEXT    NOT NULL DEFAULT 'Materia prima',
+                        Unidad           TEXT    NOT NULL DEFAULT 'kg',
+                        PrecioUltCompra  REAL    DEFAULT 0,
+                        PrecioPromedio   REAL    DEFAULT 0,
+                        StockActual      REAL    DEFAULT 0,
+                        StockMinimo      REAL    DEFAULT 0,
+                        Activo           INTEGER DEFAULT 1,
+                        Observaciones    TEXT
+                    );");
                 // AlterTableSafe ignora "duplicate column" — completamente idempotente.
                 if (TablaExiste(conn, tx, "ProductosProveedor"))
                 {
