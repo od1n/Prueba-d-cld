@@ -153,8 +153,9 @@ namespace SistemaGestion
                                 BC(); // Obs.
                             }
 
-                            // ─ 4 filas vacías extras para productos adicionales
-                            for (int x = 0; x < 4; x++)
+                            // ─ Filas vacías extras hasta completar mínimo 10
+                            int filasExtra = Math.Max(0, 10 - moldes.Count);
+                            for (int x = 0; x < filasExtra; x++)
                             {
                                 string xbg = grises[(moldes.Count + x) % 2];
                                 void XC() =>
