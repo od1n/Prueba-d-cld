@@ -258,7 +258,7 @@ namespace SistemaGestion
             }
         }
 
-        private void GuardarConfig(object? sender, EventArgs e)
+        private void GuardarConfig(object sender, EventArgs e)
         {
             try
             {

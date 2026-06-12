@@ -2105,7 +2105,9 @@ namespace SistemaGestion
         }
 
         // Último SQL ejecutado por EjecutarSql — para diagnóstico en catch de MigrarEsquema
+        #pragma warning disable CS8632
         [ThreadStatic] private static string? _ultimoSqlMigracion;
+        #pragma warning restore CS8632
 
         private static void EjecutarSql(SqliteConnection conn, SqliteTransaction tx, string sql)
         {
