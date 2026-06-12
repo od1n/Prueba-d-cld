@@ -10,6 +10,7 @@
     <RootNamespace>SistemaGestion</RootNamespace>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
+    <NoWarn>CA1416</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

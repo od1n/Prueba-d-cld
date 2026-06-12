@@ -5,6 +5,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>SistemaGestion.Api</RootNamespace>
+    <NoWarn>CS1998</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
