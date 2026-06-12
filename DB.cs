@@ -2698,8 +2698,8 @@ namespace SistemaGestion
             using var r = cmd.ExecuteReader();
             while (r.Read())
                 list.Add(new TbMolde { CodigoMold = r.GetString(0), Descripcion = S(r,1),
-                    Fecha = r.IsDBNull(2) ? DateTime.Today : DateTime.Parse(r.GetString(2)),
-                    FechaLastMant = r.IsDBNull(3) ? DateTime.Today : DateTime.Parse(r.GetString(3)),
+                    Fecha = r.IsDBNull(2) || string.IsNullOrWhiteSpace(r.GetString(2)) ? DateTime.Today : DateTime.Parse(r.GetString(2)),
+                    FechaLastMant = r.IsDBNull(3) || string.IsNullOrWhiteSpace(r.GetString(3)) ? DateTime.Today : DateTime.Parse(r.GetString(3)),
                     DescMant = S(r,4), ModeloQfabrica = S(r,5),
                     Observaciones = S(r,6), CantMatXunid = D(r,7),
                     CodigoProducto = r.FieldCount > 8 ? S(r,8) : "" });
