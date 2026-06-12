@@ -64,6 +64,7 @@ namespace SistemaGestion
             tabs.TabPages.Add(TabFlujoCaja());
             tabs.TabPages.Add(TabLibroIVA());
             tabs.TabPages.Add(TabMermas());
+            tabs.TabPages.Add(TabReorden());
             tabs.TabPages.Add(TabComparacion());
             if (Sesion.EsAdmin || Sesion.Rol == "Contabilidad")
                 tabs.TabPages.Add(TabISLR());
@@ -1216,6 +1217,174 @@ Controls.AddRange(new Control[] { tabs, hdr, footer });
                 Color.FromArgb(100, 50, 10), pnl);
             btn.Click += (s, e) => new FrmMermas().ShowDialog();
             tab.Controls.Add(pnl); return tab;
+        }
+
+        // ══════════════════════════════════════════════════════════
+        //  PRONÓSTICO DE REORDEN
+        // ══════════════════════════════════════════════════════════
+        private TabPage TabReorden()
+        {
+            var tab = new TabPage("Reorden MP");
+            var pnl = new Panel { Dock = DockStyle.Fill, BackColor = Color.White };
+
+            var bar = new Panel { Dock = DockStyle.Top, Height = 48,
+                BackColor = Color.FromArgb(248, 235, 220) };
+            bar.Controls.Add(Lbl("Ventana (días):", 8, 14));
+            var nudDias = new NumericUpDown { Location = new Point(120, 10),
+                Size = new Size(60, 26), Minimum = 7, Maximum = 365, Value = 90 };
+            bar.Controls.Add(nudDias);
+            bar.Controls.Add(Lbl("Lead time:", 190, 14));
+            var nudLead = new NumericUpDown { Location = new Point(270, 10),
+                Size = new Size(50, 26), Minimum = 1, Maximum = 90, Value = 7 };
+            bar.Controls.Add(nudLead);
+            bar.Controls.Add(Lbl("Cobertura meta:", 330, 14));
+            var nudMeta = new NumericUpDown { Location = new Point(440, 10),
+                Size = new Size(50, 26), Minimum = 7, Maximum = 180, Value = 30 };
+            bar.Controls.Add(nudMeta);
+
+            var btnCalc = BtnAccion("Calcular", Color.FromArgb(180, 80, 20), new Point(510, 10));
+            var btnPrint = BtnAccion("Imprimir", Color.FromArgb(80, 60, 140), new Point(604, 10));
+            bar.Controls.AddRange(new Control[] { btnCalc, btnPrint });
+
+            var dgv = Grid(Color.FromArgb(180, 80, 20)); dgv.Dock = DockStyle.Fill;
+            List<PronosticoReorden> _datos = new();
+
+            async System.Threading.Tasks.Task CalcularAsync()
+            {
+                _datos = await EjecutarConCarga(
+                    () => DatabaseService.CalcularPronosticoReorden(
+                        (int)nudDias.Value, (int)nudLead.Value, (int)nudMeta.Value),
+                    btnCalc, btnPrint);
+
+                dgv.DataSource = _datos.Select(p => new {
+                    p.CodigoInsumo,
+                    p.Descripcion,
+                    p.Unidad,
+                    Stock    = p.StockActual.ToString("N2"),
+                    Min      = p.StockMinimo.ToString("N2"),
+                    ConsDia  = p.ConsumoPromDiario.ToString("N4"),
+                    DíasCob  = p.DiasCobertura > 9000 ? "∞" : p.DiasCobertura.ToString("N0"),
+                    Agotam   = p.FechaAgotamiento?.ToString("dd/MM/yy") ?? "—",
+                    Sugerido = p.CantidadSugerida.ToString("N2"),
+                    CostoEst = p.CostoEstimado.ToString("C2"),
+                    p.Estado
+                }).ToList();
+
+                dgv.DataBindingComplete += (s2, e2) =>
+                {
+                    foreach (DataGridViewRow row in dgv.Rows)
+                    {
+                        string est = row.Cells["Estado"].Value?.ToString() ?? "";
+                        if (est == "URGENTE")
+                            row.DefaultCellStyle.BackColor = Color.FromArgb(255, 200, 200);
+                        else if (est == "PRONTO")
+                            row.DefaultCellStyle.BackColor = Color.FromArgb(255, 245, 190);
+                    }
+                };
+                dgv.Invalidate();
+            }
+
+            btnCalc.Click += async (s, e) =>
+            {
+                try { await CalcularAsync(); }
+                catch (Exception ex) { MsgErr(ex); }
+            };
+
+            btnPrint.Click += (s, e) => ImprimirPronosticoReorden(_datos);
+
+            pnl.Controls.Add(dgv);
+            pnl.Controls.Add(bar);
+            tab.Controls.Add(pnl);
+            return tab;
+        }
+
+        private void ImprimirPronosticoReorden(List<PronosticoReorden> datos)
+        {
+            if (datos == null || datos.Count == 0)
+            {
+                MessageBox.Show("Calcula primero el pronóstico.", "Imprimir",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            int filasPorPag = 35;
+            int totalPags   = (int)Math.Ceiling(datos.Count / (double)filasPorPag);
+            int pagActual   = 0;
+
+            var pd = new PrintDocument();
+            pd.DefaultPageSettings.Landscape = true;
+            pd.DefaultPageSettings.Margins   = new Margins(30, 30, 40, 40);
+
+            pd.PrintPage += (s, e) =>
+            {
+                var g = e.Graphics;
+                int y = e.MarginBounds.Top;
+                int x = e.MarginBounds.Left;
+                int W = e.MarginBounds.Width;
+
+                var C1 = Color.FromArgb(180, 80, 20);
+                g.FillRectangle(new SolidBrush(C1), new Rectangle(x, y, W, 28));
+                g.DrawString("PRONÓSTICO DE REORDEN — MATERIAS PRIMAS",
+                    new Font("Segoe UI", 12f, FontStyle.Bold), Brushes.White,
+                    new RectangleF(x + 8, y + 5, W, 22));
+                g.DrawString($"Pág {pagActual + 1}/{totalPags}  —  {DateTime.Now:dd/MM/yyyy}",
+                    new Font("Segoe UI", 8f), Brushes.White,
+                    new RectangleF(x + W - 200, y + 8, 200, 16),
+                    new StringFormat { Alignment = StringAlignment.Far });
+                y += 32;
+
+                string[] hdrs = { "Código", "Descripción", "Unid", "Stock", "Cons/Día",
+                                  "Días Cob", "Agotam.", "Sugerido", "Costo Est.", "Estado" };
+                int[] colW    = { 65, 180, 45, 65, 65, 60, 70, 70, 80, 60 };
+
+                g.FillRectangle(new SolidBrush(C1), new Rectangle(x, y, W, 20));
+                int xc = x;
+                var fHdr = new Font("Segoe UI", 7.5f, FontStyle.Bold);
+                for (int i = 0; i < hdrs.Length; i++)
+                {
+                    g.DrawString(hdrs[i], fHdr, Brushes.White,
+                        new RectangleF(xc + 2, y + 3, colW[i] - 4, 16));
+                    xc += colW[i];
+                }
+                y += 22;
+
+                var fDato = new Font("Segoe UI", 7.5f);
+                int inicio = pagActual * filasPorPag;
+                int fin = Math.Min(inicio + filasPorPag, datos.Count);
+
+                for (int r = inicio; r < fin; r++)
+                {
+                    var p = datos[r];
+                    Color bg = p.Estado == "URGENTE" ? Color.FromArgb(255, 210, 210)
+                             : p.Estado == "PRONTO"  ? Color.FromArgb(255, 248, 200)
+                             : (r - inicio) % 2 == 0 ? Color.White
+                             : Color.FromArgb(255, 248, 240);
+
+                    g.FillRectangle(new SolidBrush(bg), new Rectangle(x, y, W, 16));
+                    string[] vals = {
+                        p.CodigoInsumo, p.Descripcion, p.Unidad,
+                        p.StockActual.ToString("N2"), p.ConsumoPromDiario.ToString("N3"),
+                        p.DiasCobertura > 9000 ? "∞" : p.DiasCobertura.ToString("N0"),
+                        p.FechaAgotamiento?.ToString("dd/MM/yy") ?? "—",
+                        p.CantidadSugerida.ToString("N2"),
+                        p.CostoEstimado.ToString("C2"), p.Estado
+                    };
+                    xc = x;
+                    for (int i = 0; i < vals.Length; i++)
+                    {
+                        g.DrawString(vals[i], fDato, Brushes.Black,
+                            new RectangleF(xc + 2, y + 1, colW[i] - 4, 14));
+                        xc += colW[i];
+                    }
+                    y += 16;
+                }
+
+                pagActual++;
+                e.HasMorePages = pagActual < totalPags;
+            };
+
+            using var ppd = new PrintPreviewDialog { Document = pd, WindowState = FormWindowState.Maximized };
+            ppd.ShowDialog(this);
         }
 
         private TabPage TabComparacion()

@@ -3924,14 +3924,27 @@ namespace SistemaGestion
                             ". Existencia: " + saldoAnt +
                             ", solicitado: " + linea.Cantidad);
 
-                    // 4. Insertar movimiento en Kardex
+                    // 4. Leer costo actual del producto para el Kardex
+                    var cmdCosto = conn.CreateCommand();
+                    cmdCosto.Transaction = tx;
+                    cmdCosto.CommandText =
+                        "SELECT COALESCE(CostoActual,0) FROM Inventario WHERE Codigo=$cod";
+                    cmdCosto.Parameters.AddWithValue("$cod", linea.CodigoItem);
+                    decimal costoUnit = 0;
+                    var costoObj = cmdCosto.ExecuteScalar();
+                    if (costoObj != null && costoObj != DBNull.Value)
+                        costoUnit = (decimal)(double)costoObj;
+
+                    // 5. Insertar movimiento en Kardex (PRODUCTO)
                     var cmdKardex = conn.CreateCommand();
                     cmdKardex.Transaction = tx;
                     cmdKardex.CommandText = @"
                         INSERT INTO MovimientosInventario
                             (FechaHora, CodigoProducto, TipoMovimiento, Concepto,
-                             Cantidad, SaldoAnterior, NuevoSaldo, Referencia, Usuario)
-                        VALUES ($fh,$cp,'SALIDA',$co,$ca,$sa,$ns,$ref,$us)";
+                             Cantidad, SaldoAnterior, NuevoSaldo, Referencia, Usuario,
+                             TipoKardex, CostoUnitario)
+                        VALUES ($fh,$cp,'SALIDA',$co,$ca,$sa,$ns,$ref,$us,
+                                'PRODUCTO',$cu)";
                     cmdKardex.Parameters.AddWithValue("$fh",  DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
                     cmdKardex.Parameters.AddWithValue("$cp",  linea.CodigoItem);
                     cmdKardex.Parameters.AddWithValue("$co",  "Venta Factura " + numeroF);
@@ -3940,6 +3953,7 @@ namespace SistemaGestion
                     cmdKardex.Parameters.AddWithValue("$ns",  (double)nuevoSaldo);
                     cmdKardex.Parameters.AddWithValue("$ref", numeroF);
                     cmdKardex.Parameters.AddWithValue("$us",  Sesion.NombreUsuario ?? "Sistema");
+                    cmdKardex.Parameters.AddWithValue("$cu",  (double)costoUnit);
                     cmdKardex.ExecuteNonQuery();
 
                     // 5. Actualizar stock en tabla maestra

@@ -92,13 +92,37 @@ namespace SistemaGestion
             btnN.Click += (s, e) => {
                 using var d = new DlgCompra(null);
                 if (d.ShowDialog() == DialogResult.OK)
-                { DatabaseService.InsertarCompra(d.Resultado); CargarDatos(); }
+                {
+                    try
+                    {
+                        DatabaseService.InsertarCompraConDetallesYKardex(
+                            d.Resultado, d.Lineas);
+                        CargarDatos();
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show("Error al guardar compra:\n" + ex.Message,
+                            "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                }
             };
             btnE.Click += (s, e) => {
                 var cp = GetSel(); if (cp == null) return;
                 using var d = new DlgCompra(cp);
                 if (d.ShowDialog() == DialogResult.OK)
-                { DatabaseService.ActualizarCompra(d.Resultado); CargarDatos(); }
+                {
+                    try
+                    {
+                        DatabaseService.ActualizarCompraConDetallesYKardex(
+                            d.Resultado, d.Lineas);
+                        CargarDatos();
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show("Error al actualizar compra:\n" + ex.Message,
+                            "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                }
             };
             btnD.Click += (s, e) => {
                 var cp = GetSel(); if (cp == null) return;
@@ -199,6 +223,7 @@ namespace SistemaGestion
     public class DlgCompra : FormBase
     {
         public Compra Resultado { get; private set; }
+        public List<DetalleCompra> Lineas { get; private set; } = new();
 
         private TextBox        txtNum, txtFPago, txtTransp, txtObs;
         private ComboBox       cmbProveedor;
@@ -442,6 +467,23 @@ namespace SistemaGestion
             Resultado.TotalC      = numTotal.Value;
             Resultado.Transporte  = txtTransp.Text.Trim();
             Resultado.Observaciones = txtObs.Text.Trim();
+
+            // Recoger líneas de detalle
+            Lineas.Clear();
+            foreach (DataGridViewRow row in dgvDetalles.Rows)
+            {
+                if (row.IsNewRow) continue;
+                string prod = row.Cells["Producto"].Value?.ToString() ?? "";
+                if (string.IsNullOrWhiteSpace(prod)) continue;
+                string codInsumo = prod.Split('—')[0].Trim();
+                decimal.TryParse(row.Cells["Cantidad"].Value?.ToString(), out decimal cant);
+                decimal.TryParse(row.Cells["PrecioC"].Value?.ToString(), out decimal precio);
+                if (cant <= 0) continue;
+                Lineas.Add(new DetalleCompra {
+                    CodigoI = codInsumo, Cantidad = cant, PrecioC = precio
+                });
+            }
+
             DialogResult = DialogResult.OK;
         }
 

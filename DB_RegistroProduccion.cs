@@ -310,11 +310,11 @@ namespace SistemaGestion
                     inv.Parameters.AddWithValue("$cod",  mat.CodigoInsumo);
                     inv.ExecuteNonQuery();
 
-                    // Kardex salida insumo
-                    var mp = ObtenerMoldeProductos(reg.Moldes.FirstOrDefault()?.CodigoMolde ?? "");
+                    // Kardex salida insumo (Kardex A = MATERIA_PRIMA)
                     RegistrarMovimientoTx(c, tx, mat.CodigoInsumo, "SALIDA", mat.Cantidad,
                         $"Produccion {reg.Fecha:dd/MM/yyyy} ({reg.TipoMaterial})",
-                        reg.Fecha.ToString("yyyy-MM-dd"), Sesion.NombreUsuario ?? "Sistema");
+                        reg.Fecha.ToString("yyyy-MM-dd"), Sesion.NombreUsuario ?? "Sistema",
+                        "MATERIA_PRIMA");
                 }
 
                 // 5b. Sumar productos producidos
@@ -498,7 +498,8 @@ namespace SistemaGestion
         private static void RegistrarMovimientoTx(
             SqliteConnection c, SqliteTransaction tx,
             string codigo, string tipo, decimal cantidad,
-            string concepto, string refNum, string usuario)
+            string concepto, string refNum, string usuario,
+            string tipoKardex = "PRODUCTO", decimal costoUnitario = 0)
         {
             try
             {
@@ -510,12 +511,23 @@ namespace SistemaGestion
                 decimal nuevoSaldo = tipo == "ENTRADA"
                     ? saldoAnt + cantidad : saldoAnt - cantidad;
 
+                // Si no se pasó costo, intentar leer CostoActual del inventario
+                if (costoUnitario == 0)
+                {
+                    var cmdC = c.CreateCommand(); cmdC.Transaction = tx;
+                    cmdC.CommandText =
+                        "SELECT COALESCE(CostoActual,0) FROM Inventario WHERE Codigo=$cod";
+                    cmdC.Parameters.AddWithValue("$cod", codigo);
+                    costoUnitario = D(cmdC.ExecuteScalar());
+                }
+
                 var cmdM = c.CreateCommand(); cmdM.Transaction = tx;
                 cmdM.CommandText = @"
                     INSERT INTO MovimientosInventario
                         (CodigoProducto,TipoMovimiento,Cantidad,Concepto,
-                         Referencia,SaldoAnterior,NuevoSaldo,FechaHora,Usuario)
-                    VALUES ($cod,$tipo,$cant,$conc,$ref,$sa,$ns,$fh,$usr)";
+                         Referencia,SaldoAnterior,NuevoSaldo,FechaHora,Usuario,
+                         TipoKardex,CostoUnitario)
+                    VALUES ($cod,$tipo,$cant,$conc,$ref,$sa,$ns,$fh,$usr,$tk,$cu)";
                 cmdM.Parameters.AddWithValue("$cod",  codigo);
                 cmdM.Parameters.AddWithValue("$tipo", tipo);
                 cmdM.Parameters.AddWithValue("$cant", (double)cantidad);
@@ -525,6 +537,8 @@ namespace SistemaGestion
                 cmdM.Parameters.AddWithValue("$ns",   (double)nuevoSaldo);
                 cmdM.Parameters.AddWithValue("$fh",   DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
                 cmdM.Parameters.AddWithValue("$usr",  usuario);
+                cmdM.Parameters.AddWithValue("$tk",   tipoKardex);
+                cmdM.Parameters.AddWithValue("$cu",   (double)costoUnitario);
                 cmdM.ExecuteNonQuery();
             }
             catch { /* No interrumpir si kardex falla */ }
