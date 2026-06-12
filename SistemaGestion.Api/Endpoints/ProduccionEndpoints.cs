@@ -262,7 +262,7 @@ namespace SistemaGestion.Api.Endpoints
                 // Count molds to calculate available space
                 var nMoldes = moldes.Count;
                 // Max blank rows: ensure total fits on one page (max ~20 data rows)
-                var blankRows = Math.Max(2, Math.Min(5, 18 - nMoldes));
+                var blankRows = Math.Max(0, 10 - nMoldes);
 
                 var html = "<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'>" +
                 "<title>Planilla de Producción</title><style>" +
