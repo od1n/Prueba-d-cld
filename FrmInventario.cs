@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Drawing.Printing;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
@@ -36,6 +37,7 @@ namespace SistemaGestion
                 Font = new Font("Segoe UI", 12f, FontStyle.Bold),
                 AutoSize = true, Location = new Point(12, 13) });
 
+            var btnImprimir = Btn("Imprimir",     Color.FromArgb(80, 60, 140));
             var btnNuevo  = Btn("+ Nuevo",      Color.FromArgb(20, 140, 70));
             var btnEditar = Btn("Editar",        Color.FromArgb(60, 100, 180));
             var btnElim   = Btn("Archivar",      Color.FromArgb(140, 80, 20));
@@ -62,11 +64,12 @@ namespace SistemaGestion
                 WrapContents = false, BackColor = Color.Transparent,
                 Padding = new Padding(0, 9, 8, 0)
             };
-            pnlHdrRight.Controls.AddRange(new Control[] { _btnAyuda, btnNuevo, btnEditar, btnElim, btnModoEdicion });
+            pnlHdrRight.Controls.AddRange(new Control[] { _btnAyuda, btnImprimir, btnNuevo, btnEditar, btnElim, btnModoEdicion });
             hdr.Controls.Add(pnlHdrRight);
             // ── ToolTips ─────────────────────────────────────────────────
             var _tip = AyudaService.CrearTooltip();
             AyudaService.Tip(_tip, _btnAyuda, "Abrir la guía de ayuda de este módulo");
+            AyudaService.Tip(_tip, btnImprimir, "Imprimir el listado de inventario actual");
             AyudaService.Tip(_tip, btnNuevo, "Crear un nuevo producto en el catálogo de inventario");
             AyudaService.Tip(_tip, btnEditar, "Modificar los datos del producto seleccionado en la lista");
             AyudaService.Tip(_tip, btnElim, "Archivar el producto — no se elimina, solo se desactiva");
@@ -113,6 +116,7 @@ namespace SistemaGestion
 
             Controls.AddRange(new Control[] { dgv, barSearch, hdr, footer });
 
+            btnImprimir.Click    += (s, e) => ImprimirInventario();
             btnNuevo.Click       += (s, e) => Nuevo();
             btnEditar.Click      += (s, e) => Editar();
             btnElim.Click        += (s, e) => Eliminar();
@@ -397,6 +401,127 @@ namespace SistemaGestion
                 if (ex == 0)       row.DefaultCellStyle.BackColor = Color.FromArgb(255, 210, 210);
                 else if (ex < min) row.DefaultCellStyle.BackColor = Color.FromArgb(255, 245, 190);
             }
+        }
+
+        // ══════════════════════════════════════════════════════════════════
+        //  IMPRIMIR
+        // ══════════════════════════════════════════════════════════════════
+        private void ImprimirInventario()
+        {
+            // Datos visibles (respeta filtro de búsqueda)
+            var q = txtBuscar.Text;
+            var lista = string.IsNullOrWhiteSpace(q) ? _todos
+                : _todos.Where(i => BusquedaHelper.ContieneFlexibleEnAlguno(q,
+                    i.Codigo, i.Descripcion, i.Departamento, i.CodProveedor)).ToList();
+            lista = Ordenar(lista);
+
+            if (lista.Count == 0)
+            {
+                MessageBox.Show("No hay productos para imprimir.", "Imprimir",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            int filasPorPag = 38;
+            int totalPags   = (int)Math.Ceiling(lista.Count / (double)filasPorPag);
+            int pagActual   = 0;
+
+            var pd = new PrintDocument();
+            pd.DefaultPageSettings.Landscape = true;
+            pd.DefaultPageSettings.Margins   = new Margins(30, 30, 40, 40);
+
+            pd.PrintPage += (s, e) =>
+            {
+                var g = e.Graphics;
+                int y = e.MarginBounds.Top;
+                int x = e.MarginBounds.Left;
+                int W = e.MarginBounds.Width;
+
+                var C1 = Color.FromArgb(26, 74, 138);
+
+                // Título
+                g.FillRectangle(new SolidBrush(C1), new Rectangle(x, y, W, 28));
+                g.DrawString("INVENTARIO DE PRODUCTOS",
+                    new Font("Segoe UI", 12f, FontStyle.Bold), Brushes.White,
+                    new RectangleF(x + 8, y + 5, W, 22));
+                g.DrawString($"Pág {pagActual + 1}/{totalPags}  —  {DateTime.Now:dd/MM/yyyy HH:mm}",
+                    new Font("Segoe UI", 8f), Brushes.White,
+                    new RectangleF(x + W - 220, y + 8, 220, 16),
+                    new StringFormat { Alignment = StringAlignment.Far });
+                y += 32;
+
+                if (!string.IsNullOrWhiteSpace(q))
+                {
+                    g.DrawString($"Filtro: \"{q}\"  ({lista.Count} resultados)",
+                        new Font("Segoe UI", 8f, FontStyle.Italic), Brushes.Gray, x, y);
+                    y += 16;
+                }
+
+                // Encabezados
+                string[] hdrs = { "Código", "Descripción", "Depto", "Unidad", "Costo", "Precio", "Exist.", "Mín", "Máx", "Proveedor" };
+                int[] colW    = { 65, 200, 90, 55, 75, 75, 60, 55, 55, 75 };
+
+                g.FillRectangle(new SolidBrush(C1), new Rectangle(x, y, W, 20));
+                int xc = x;
+                var fHdr = new Font("Segoe UI", 7.5f, FontStyle.Bold);
+                for (int i = 0; i < hdrs.Length; i++)
+                {
+                    g.DrawString(hdrs[i], fHdr, Brushes.White,
+                        new RectangleF(xc + 2, y + 3, colW[i] - 4, 16));
+                    xc += colW[i];
+                }
+                y += 22;
+
+                // Filas
+                var fDato  = new Font("Segoe UI", 7.5f);
+                int inicio = pagActual * filasPorPag;
+                int fin    = Math.Min(inicio + filasPorPag, lista.Count);
+
+                for (int r = inicio; r < fin; r++)
+                {
+                    var it = lista[r];
+                    Color bg = (r - inicio) % 2 == 0 ? Color.White : Color.FromArgb(240, 248, 255);
+                    if (it.Existencia == 0)       bg = Color.FromArgb(255, 220, 220);
+                    else if (it.Existencia < it.ExistenMin) bg = Color.FromArgb(255, 248, 200);
+
+                    g.FillRectangle(new SolidBrush(bg), new Rectangle(x, y, W, 16));
+
+                    string[] vals = {
+                        it.Codigo, it.Descripcion, it.Departamento, it.Unidad,
+                        it.CostoActual.ToString("N2"), it.Precio.ToString("N2"),
+                        it.Existencia.ToString("N2"),
+                        it.ExistenMin.ToString("N0"), it.ExistenMax.ToString("N0"),
+                        it.CodProveedor ?? ""
+                    };
+                    xc = x;
+                    for (int i = 0; i < vals.Length; i++)
+                    {
+                        g.DrawString(vals[i], fDato, Brushes.Black,
+                            new RectangleF(xc + 2, y + 1, colW[i] - 4, 14));
+                        xc += colW[i];
+                    }
+                    y += 16;
+                }
+
+                // Resumen en última página
+                if (pagActual == totalPags - 1)
+                {
+                    y += 6;
+                    g.FillRectangle(new SolidBrush(Color.FromArgb(232, 240, 250)),
+                        new Rectangle(x, y, W, 20));
+                    g.DrawString(
+                        $"Total productos: {lista.Count}   |   " +
+                        $"Sin existencia: {lista.Count(p => p.Existencia == 0)}   |   " +
+                        $"Bajo mínimo: {lista.Count(p => p.Existencia > 0 && p.Existencia < p.ExistenMin)}",
+                        new Font("Segoe UI", 8f, FontStyle.Bold), Brushes.Black, x + 6, y + 3);
+                }
+
+                pagActual++;
+                e.HasMorePages = pagActual < totalPags;
+            };
+
+            using var ppd = new PrintPreviewDialog { Document = pd, WindowState = FormWindowState.Maximized };
+            ppd.ShowDialog(this);
         }
 
         // ══════════════════════════════════════════════════════════════════

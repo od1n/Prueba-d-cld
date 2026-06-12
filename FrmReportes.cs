@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Drawing.Printing;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -669,8 +670,9 @@ Controls.AddRange(new Control[] { tabs, hdr, footer });
 
             var bar    = new Panel { Dock = DockStyle.Top, Height = 44,
                 BackColor = Color.FromArgb(228, 242, 232) };
-            var btnPdf = BtnAccion("Exportar PDF", Color.FromArgb(180, 60, 30), new Point(8, 8));
-            bar.Controls.Add(btnPdf);
+            var btnPdf     = BtnAccion("Exportar PDF", Color.FromArgb(180, 60, 30), new Point(8, 8));
+            var btnImprimir = BtnAccion("Imprimir",    Color.FromArgb(80, 60, 140), new Point(102, 8));
+            bar.Controls.AddRange(new Control[] { btnPdf, btnImprimir });
 
             var dgv   = Grid(Color.FromArgb(30, 100, 60)); dgv.Dock = DockStyle.Fill;
             var lista = DatabaseService.ObtenerInventario();
@@ -701,10 +703,115 @@ Controls.AddRange(new Control[] { tabs, hdr, footer });
                 catch (Exception ex) { MsgErr(ex); }
             };
 
+            btnImprimir.Click += (s, e) => ImprimirListaInventario(lista);
+
             pnl.Controls.Add(dgv);
             pnl.Controls.Add(bar);
             tab.Controls.Add(pnl);
             return tab;
+        }
+
+        private void ImprimirListaInventario(List<Inventario> lista)
+        {
+            if (lista == null || lista.Count == 0)
+            {
+                MessageBox.Show("No hay productos para imprimir.", "Imprimir",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            int filasPorPag = 38;
+            int totalPags   = (int)Math.Ceiling(lista.Count / (double)filasPorPag);
+            int pagActual   = 0;
+
+            var pd = new PrintDocument();
+            pd.DefaultPageSettings.Landscape = true;
+            pd.DefaultPageSettings.Margins   = new Margins(30, 30, 40, 40);
+
+            pd.PrintPage += (s, e) =>
+            {
+                var g = e.Graphics;
+                int y = e.MarginBounds.Top;
+                int x = e.MarginBounds.Left;
+                int W = e.MarginBounds.Width;
+
+                var C1 = Color.FromArgb(30, 100, 60);
+
+                // Título
+                g.FillRectangle(new SolidBrush(C1), new Rectangle(x, y, W, 28));
+                g.DrawString("REPORTE DE INVENTARIO",
+                    new Font("Segoe UI", 12f, FontStyle.Bold), Brushes.White,
+                    new RectangleF(x + 8, y + 5, W, 22));
+                g.DrawString($"Pág {pagActual + 1}/{totalPags}  —  {DateTime.Now:dd/MM/yyyy HH:mm}",
+                    new Font("Segoe UI", 8f), Brushes.White,
+                    new RectangleF(x + W - 220, y + 8, 220, 16),
+                    new StringFormat { Alignment = StringAlignment.Far });
+                y += 32;
+
+                // Encabezados
+                string[] hdrs = { "Código", "Descripción", "Depto", "Costo", "Precio", "Exist.", "Mín", "Máx" };
+                int[] colW    = { 70, 230, 100, 85, 85, 65, 60, 60 };
+
+                g.FillRectangle(new SolidBrush(C1), new Rectangle(x, y, W, 20));
+                int xc = x;
+                var fHdr = new Font("Segoe UI", 7.5f, FontStyle.Bold);
+                for (int i = 0; i < hdrs.Length; i++)
+                {
+                    g.DrawString(hdrs[i], fHdr, Brushes.White,
+                        new RectangleF(xc + 2, y + 3, colW[i] - 4, 16));
+                    xc += colW[i];
+                }
+                y += 22;
+
+                // Filas
+                var fDato  = new Font("Segoe UI", 7.5f);
+                int inicio = pagActual * filasPorPag;
+                int fin    = Math.Min(inicio + filasPorPag, lista.Count);
+
+                for (int r = inicio; r < fin; r++)
+                {
+                    var it = lista[r];
+                    Color bg = (r - inicio) % 2 == 0 ? Color.White : Color.FromArgb(232, 248, 238);
+                    if (it.Existencia == 0)       bg = Color.FromArgb(255, 220, 220);
+                    else if (it.Existencia < it.ExistenMin) bg = Color.FromArgb(255, 248, 200);
+
+                    g.FillRectangle(new SolidBrush(bg), new Rectangle(x, y, W, 16));
+
+                    string[] vals = {
+                        it.Codigo, it.Descripcion, it.Departamento,
+                        it.CostoActual.ToString("C2"), it.Precio.ToString("C2"),
+                        it.Existencia.ToString("N2"),
+                        it.ExistenMin.ToString("N0"), it.ExistenMax.ToString("N0")
+                    };
+                    xc = x;
+                    for (int i = 0; i < vals.Length; i++)
+                    {
+                        g.DrawString(vals[i], fDato, Brushes.Black,
+                            new RectangleF(xc + 2, y + 1, colW[i] - 4, 14));
+                        xc += colW[i];
+                    }
+                    y += 16;
+                }
+
+                // Resumen en última página
+                if (pagActual == totalPags - 1)
+                {
+                    y += 6;
+                    g.FillRectangle(new SolidBrush(Color.FromArgb(220, 240, 225)),
+                        new Rectangle(x, y, W, 20));
+                    g.DrawString(
+                        $"Total productos: {lista.Count}   |   " +
+                        $"Sin existencia: {lista.Count(p => p.Existencia == 0)}   |   " +
+                        $"Bajo mínimo: {lista.Count(p => p.Existencia > 0 && p.Existencia < p.ExistenMin)}",
+                        new Font("Segoe UI", 8f, FontStyle.Bold), Brushes.Black, x + 6, y + 3);
+                }
+
+                pagActual++;
+                e.HasMorePages = pagActual < totalPags;
+            };
+
+            using var ppd = new PrintPreviewDialog { Document = pd, WindowState = FormWindowState.Maximized };
+            ppd.ShowDialog(this);
         }
 
         // ══════════════════════════════════════════════════════════
