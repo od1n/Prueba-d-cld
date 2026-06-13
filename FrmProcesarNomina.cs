@@ -324,9 +324,10 @@ namespace SistemaGestion
             Col("RPVH",         "RPVH 1%",   true,  60);
             Col("Faltas$",      "Desc.Falta",true,  80);
             Col("Prestamo",     "Prestamo",  true,  75);
-            Col("TotalDed",     "TOTAL DED", true,  85);
-            Col("NetoUSD",      "NETO USD",  true,  90);
-            Col("NetoBs",       "NETO Bs",   true,  90);
+            Col("TotalDed",     "DED.REF",   true,  75);
+            Col("NetoUSD",      "PAGO USD",  true,  90);
+            Col("NetoBs",       "PAGO Bs",   true,  90);
+            Col("NetoLegal",    "Neto Legal",true,  80);
 
             foreach (var d in _detalles)
             {
@@ -346,9 +347,10 @@ namespace SistemaGestion
                 row.Cells["RPVH"].Value       = d.DeduccionRPVH.ToString("C2");
                 row.Cells["Faltas$"].Value    = d.DescuentoFaltas.ToString("C2");
                 row.Cells["Prestamo"].Value   = d.CuotaPrestamo.ToString("C2");
-                row.Cells["TotalDed"].Value   = d.TotalDeducciones.ToString("C2");
-                row.Cells["NetoUSD"].Value    = d.NetoUSD.ToString("C2");
-                row.Cells["NetoBs"].Value     = d.NetoBs.ToString("N2");
+                row.Cells["TotalDed"].Value   = d.TotalDeduccionesRef.ToString("C2");
+                row.Cells["NetoUSD"].Value    = d.PagoRealUSD.ToString("C2");
+                row.Cells["NetoBs"].Value     = d.PagoRealBs.ToString("N2");
+                row.Cells["NetoLegal"].Value  = d.NetoLegalUSD.ToString("C2");
 
                 // Color por tipo
                 row.DefaultCellStyle.BackColor =
@@ -366,16 +368,16 @@ namespace SistemaGestion
         {
             if (_detalles.Count == 0) { lblTotales.Text = "  Sin datos"; return; }
             decimal totalDev = _detalles.Sum(d => d.TotalDevengado);
-            decimal totalDed = _detalles.Sum(d => d.TotalDeducciones);
-            decimal totalNet = _detalles.Sum(d => d.NetoUSD);
+            decimal totalDedRef = _detalles.Sum(d => d.TotalDeduccionesRef);
+            decimal totalPago = _detalles.Sum(d => d.PagoRealUSD);
             decimal tasa     = _periodoActual?.TasaBCV ?? 1;
 
             lblTotales.Text =
                 "  Empleados: " + _detalles.Count +
                 "   |   Total devengado: $" + totalDev.ToString("N2") +
-                "   |   Total deducciones: $" + totalDed.ToString("N2") +
-                "   |   NETO A PAGAR: $" + totalNet.ToString("N2") +
-                "   = Bs " + (totalNet * tasa).ToString("N2");
+                "   |   PAGO REAL: $" + totalPago.ToString("N2") +
+                "   = Bs " + (totalPago * tasa).ToString("N2") +
+                "   |   Ref. ded.: $" + totalDedRef.ToString("N2");
         }
 
         private void EditarLinea()
@@ -699,7 +701,10 @@ namespace SistemaGestion
         public DetalleNomina Resultado { get; private set; }
 
         private NumericUpDown numDias, numFaltas, numPiezas, numVentas, numOtrosIng, numPrestamo, numOtrasDed;
-        private Label         lblDevSueldo, lblDevProd, lblIVSS, lblRPVH, lblFaltas, lblNeto, lblNetoBs;
+        private Label         lblDevSueldo, lblDevProd, lblIVSS, lblRPVH, lblFaltas, lblNeto, lblNetoBs, lblNetoLegal;
+        private ListBox       lstInasistencias;
+        private Button        btnAddInas, btnDelInas, btnToggleInas;
+        private Label         lblInasDesc;
 
         private readonly Empleado       _emp;
         private readonly PeriodoNomina  _per;
@@ -710,7 +715,8 @@ namespace SistemaGestion
             _emp = emp; _per = per; _original = det;
 
             Text = "Nomina — " + emp.NombreCompleto;
-            Size = new Size(560, 580); StartPosition = FormStartPosition.CenterParent;
+            Size = new Size(560, emp.TipoEmpleado == "Produccion" ? 720 : 580);
+            StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = MinimizeBox = false;
             BackColor = Color.FromArgb(240, 244, 250);
 
@@ -748,41 +754,93 @@ namespace SistemaGestion
             }
 
             L("Dias trabajados:", y); numDias   = N(det.DiasTrabajados, 7); lblDevSueldo = Lbl(""); y += 34;
-            L("Dias inasistencia:", y); numFaltas = N(det.DiasInasistencia, 7); lblFaltas = Lbl(""); y += 34;
 
             if (emp.TipoEmpleado == "Produccion")
-            { L("Piezas producidas:", y); numPiezas = N(det.PiezasProducidas, 99999, 0); lblDevProd = Lbl(""); y += 34; }
+            {
+                // Producción: gestión de inasistencias por día
+                numFaltas = new NumericUpDown { Visible = false }; // hidden, count from DB
+                L("Inasistencias:", y);
+                lblInasDesc = new Label { Location = new Point(210, y + 3), AutoSize = true,
+                    Font = new Font("Segoe UI", 9f, FontStyle.Bold),
+                    ForeColor = Color.FromArgb(180, 80, 20) };
+                Controls.Add(lblInasDesc); y += 24;
+
+                lstInasistencias = new ListBox { Location = new Point(16, y), Size = new Size(380, 72),
+                    Font = new Font("Consolas", 8.5f) };
+                Controls.Add(lstInasistencias); y += 76;
+
+                btnAddInas = new Button { Text = "+ Agregar", Location = new Point(16, y),
+                    Size = new Size(100, 25), FlatStyle = FlatStyle.Flat,
+                    BackColor = Color.FromArgb(26, 74, 138), ForeColor = Color.White,
+                    Font = new Font("Segoe UI", 8f) };
+                btnAddInas.FlatAppearance.BorderSize = 0;
+                btnAddInas.Click += (s, e) => AgregarInasistencia();
+
+                btnToggleInas = new Button { Text = "Justif./Injust.", Location = new Point(122, y),
+                    Size = new Size(110, 25), FlatStyle = FlatStyle.Flat,
+                    BackColor = Color.FromArgb(80, 120, 80), ForeColor = Color.White,
+                    Font = new Font("Segoe UI", 8f) };
+                btnToggleInas.FlatAppearance.BorderSize = 0;
+                btnToggleInas.Click += (s, e) => ToggleInasistencia();
+
+                btnDelInas = new Button { Text = "Eliminar", Location = new Point(238, y),
+                    Size = new Size(80, 25), FlatStyle = FlatStyle.Flat,
+                    BackColor = Color.FromArgb(180, 60, 40), ForeColor = Color.White,
+                    Font = new Font("Segoe UI", 8f) };
+                btnDelInas.FlatAppearance.BorderSize = 0;
+                btnDelInas.Click += (s, e) => EliminarInasistencia();
+
+                Controls.AddRange(new Control[] { btnAddInas, btnToggleInas, btnDelInas });
+                y += 30;
+                lblFaltas = new Label(); // dummy
+                CargarInasistencias();
+
+                L("Piezas producidas:", y); numPiezas = N(det.PiezasProducidas, 99999, 0); lblDevProd = Lbl(""); y += 34;
+            }
             else
-            { numPiezas = new NumericUpDown(); lblDevProd = new Label(); }
+            {
+                L("Dias inasistencia:", y); numFaltas = N(det.DiasInasistencia, 7); lblFaltas = Lbl(""); y += 34;
+                numPiezas = new NumericUpDown(); lblDevProd = new Label();
+            }
 
             if (emp.TipoEmpleado == "Oficina")
             { L("Ventas cerradas:", y); numVentas = N(det.VentasCerradas, 9999, 0); lblDevProd = Lbl(""); y += 34; }
+            else if (emp.TipoEmpleado != "Produccion")
+            { numVentas = new NumericUpDown(); }
             else
             { numVentas = new NumericUpDown(); }
 
             L("Otros ingresos ($):", y); numOtrosIng = N(det.OtrosIngresos, 9999, 2); y += 34;
 
-            // Deducciones calculadas
-            var sepDed = new Label { Text = "Deducciones legales:",
-                Location = new Point(16, y), AutoSize = true,
-                Font = new Font("Segoe UI", 9f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(140, 40, 40) };
-            Controls.Add(sepDed); y += 28;
-
-            L("IVSS 4%:", y);   lblIVSS = Lbl(""); y += 28;
-            L("RPVH 1%:", y);   lblRPVH = Lbl(""); y += 28;
-
             L("Cuota prestamo ($):", y); numPrestamo = N(det.CuotaPrestamo, 9999, 2); y += 34;
             L("Otras deducc. ($):", y);  numOtrasDed = N(det.OtrasDeduccion, 9999, 2); y += 44;
 
-            // Neto en negrita
-            var lblN = new Label { Text = "NETO A PAGAR:", Location = new Point(16, y),
+            // Pago real en negrita
+            var lblN = new Label { Text = "PAGO REAL:", Location = new Point(16, y),
                 AutoSize = true, Font = new Font("Segoe UI", 11f, FontStyle.Bold) };
             lblNeto  = new Label { Location = new Point(210, y), AutoSize = true,
                 Font = new Font("Segoe UI", 13f, FontStyle.Bold), ForeColor = Color.FromArgb(20, 100, 40) };
             lblNetoBs= new Label { Location = new Point(360, y), AutoSize = true,
                 Font = new Font("Segoe UI", 9f), ForeColor = Color.FromArgb(80, 80, 100) };
-            Controls.AddRange(new Control[] { lblN, lblNeto, lblNetoBs }); y += 50;
+            Controls.AddRange(new Control[] { lblN, lblNeto, lblNetoBs }); y += 36;
+
+            // Referencia legal (informativo)
+            var sepRef = new Label { Text = "Referencia legal (informativo):",
+                Location = new Point(16, y), AutoSize = true,
+                Font = new Font("Segoe UI", 8f, FontStyle.Italic),
+                ForeColor = Color.FromArgb(120, 120, 130) };
+            Controls.Add(sepRef); y += 22;
+
+            L("IVSS 4%:", y);   lblIVSS = Lbl(""); y += 24;
+            L("RPVH 1%:", y);   lblRPVH = Lbl(""); y += 24;
+
+            var lblNLtxt = new Label { Text = "Neto legal:", Location = new Point(16, y),
+                AutoSize = true, Font = new Font("Segoe UI", 8.5f, FontStyle.Italic),
+                ForeColor = Color.FromArgb(100, 100, 100) };
+            lblNetoLegal = new Label { Location = new Point(210, y), AutoSize = true,
+                Font = new Font("Segoe UI", 8.5f, FontStyle.Italic),
+                ForeColor = Color.FromArgb(100, 100, 100) };
+            Controls.AddRange(new Control[] { lblNLtxt, lblNetoLegal }); y += 34;
 
             var bOk = new Button { Text = "Guardar", Location = new Point(120, y),
                 Size = new Size(150, 33), BackColor = Color.FromArgb(26, 74, 138),
@@ -816,8 +874,72 @@ namespace SistemaGestion
             if (lblDevProd   != null) lblDevProd.Text   = "= $" + (calc.DevengadoPiezas + calc.DevengadoVentas).ToString("N2");
             if (lblIVSS      != null) lblIVSS.Text      = "- $" + calc.DeduccionIVSS.ToString("N2");
             if (lblRPVH      != null) lblRPVH.Text      = "- $" + calc.DeduccionRPVH.ToString("N2");
-            if (lblNeto      != null) lblNeto.Text      = "$" + calc.NetoUSD.ToString("N2");
-            if (lblNetoBs    != null) lblNetoBs.Text    = "= Bs " + calc.NetoBs.ToString("N2");
+            if (lblNeto      != null) lblNeto.Text      = "$" + calc.PagoRealUSD.ToString("N2");
+            if (lblNetoBs    != null) lblNetoBs.Text    = "= Bs " + calc.PagoRealBs.ToString("N2");
+            if (lblNetoLegal != null) lblNetoLegal.Text = "$" + calc.NetoLegalUSD.ToString("N2");
+        }
+
+        // ── Inasistencias (producción) ──────────────────────────────────────
+        private List<InasistenciaEmpleado> _inasistencias = new();
+
+        private void CargarInasistencias()
+        {
+            _inasistencias = DatabaseService.ObtenerInasistencias(_emp.Id, _per.FechaDesde, _per.FechaHasta);
+            lstInasistencias?.Items.Clear();
+            foreach (var i in _inasistencias)
+            {
+                string just = i.Justificada ? "✓ Just." : "✗ Injust.";
+                lstInasistencias?.Items.Add(
+                    $"{i.Fecha:yyyy-MM-dd}  {just,-10} Bs {i.MontoDescuentoBs:N2}  {i.Observaciones}");
+            }
+            int injust = _inasistencias.Count(i => !i.Justificada);
+            decimal totalBs = _inasistencias.Where(i => !i.Justificada).Sum(i => i.MontoDescuentoBs);
+            decimal tasa = _per.TasaBCV > 0 ? _per.TasaBCV : 1;
+            if (lblInasDesc != null)
+                lblInasDesc.Text = $"{injust} falta(s) = ${Math.Round(totalBs / tasa, 2):N2}";
+            Recalcular();
+        }
+
+        private void AgregarInasistencia()
+        {
+            using var dlg = new Form
+            {
+                Text = "Registrar inasistencia", Size = new Size(320, 160),
+                StartPosition = FormStartPosition.CenterParent,
+                FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, MinimizeBox = false
+            };
+            var lbl = new Label { Text = $"Fecha (período {_per.FechaDesde:yyyy-MM-dd} al {_per.FechaHasta:yyyy-MM-dd}):",
+                Location = new Point(12, 12), AutoSize = true };
+            var dtp = new DateTimePicker { Location = new Point(12, 36), Size = new Size(280, 26),
+                Format = DateTimePickerFormat.Short, Value = DateTime.Today };
+            var bOk = new Button { Text = "Agregar", Location = new Point(80, 80), Size = new Size(90, 30),
+                DialogResult = DialogResult.OK };
+            var bNo = new Button { Text = "Cancelar", Location = new Point(180, 80), Size = new Size(90, 30),
+                DialogResult = DialogResult.Cancel };
+            dlg.Controls.AddRange(new Control[] { lbl, dtp, bOk, bNo });
+            dlg.AcceptButton = bOk;
+            if (dlg.ShowDialog(this) != DialogResult.OK) return;
+            DatabaseService.RegistrarInasistencia(_emp.Id, dtp.Value.Date, false, "", _per.TasaBCV);
+            CargarInasistencias();
+        }
+
+        private void ToggleInasistencia()
+        {
+            int idx = lstInasistencias?.SelectedIndex ?? -1;
+            if (idx < 0 || idx >= _inasistencias.Count) return;
+            var inas = _inasistencias[idx];
+            DatabaseService.ActualizarInasistencia(inas.Id, !inas.Justificada, inas.Observaciones ?? "");
+            CargarInasistencias();
+        }
+
+        private void EliminarInasistencia()
+        {
+            int idx = lstInasistencias?.SelectedIndex ?? -1;
+            if (idx < 0 || idx >= _inasistencias.Count) return;
+            if (MessageBox.Show("¿Eliminar esta inasistencia?", "Confirmar",
+                MessageBoxButtons.YesNo) != DialogResult.Yes) return;
+            DatabaseService.EliminarInasistencia(_inasistencias[idx].Id);
+            CargarInasistencias();
         }
 
         private void Guardar()

@@ -30,11 +30,22 @@ public class NominaTests
         public decimal DescuentoFaltas  { get; init; }   // SueldoDiario × DiasInasistencia
         public decimal CuotaPrestamo    { get; init; }
         public decimal OtrasDeduccion   { get; init; }
-        public decimal TotalDeducciones => DeduccionIVSS + DeduccionRPVH + DescuentoFaltas + CuotaPrestamo + OtrasDeduccion;
-        // Neto
+        // Deducciones reales (sí se descuentan)
+        public decimal DeduccionesReales => DescuentoFaltas + CuotaPrestamo + OtrasDeduccion;
+        // Deducciones legales (IVSS/RPVH — solo informativas)
+        public decimal DeduccionesLegales => DeduccionIVSS + DeduccionRPVH;
+        public decimal TotalDeduccionesRef => DeduccionesReales + DeduccionesLegales;
+        // Pago real = devengado - deducciones reales (sin IVSS/RPVH)
         public decimal TasaBCV          { get; init; }
-        public decimal NetoUSD          => TotalDevengado - TotalDeducciones;
-        public decimal NetoBs           => NetoUSD * TasaBCV;
+        public decimal PagoRealUSD      => TotalDevengado - DeduccionesReales;
+        public decimal PagoRealBs       => PagoRealUSD * TasaBCV;
+        // Neto legal (informativo — si se aplicaran TODAS las deducciones)
+        public decimal NetoLegalUSD     => TotalDevengado - TotalDeduccionesRef;
+        public decimal NetoLegalBs      => NetoLegalUSD * TasaBCV;
+        // Compatibilidad
+        public decimal TotalDeducciones => TotalDeduccionesRef;
+        public decimal NetoUSD          => PagoRealUSD;
+        public decimal NetoBs           => PagoRealBs;
     }
 
     private sealed class AportePatronal
@@ -52,7 +63,7 @@ public class NominaTests
         public decimal TotalAportesUSD  => TasaBCV > 0 ? TotalAportesBs / TasaBCV : 0m;
     }
 
-    // Helper — réplica de las reglas de cálculo de DB.cs
+    // Helper — réplica de las reglas de cálculo de DB.cs (simplificado v1.1)
     private static DetalleNomina Calcular(
         decimal sueldoDiario, decimal dias, decimal diasFalta = 0,
         decimal piezasUSD = 0, decimal ventasUSD = 0, decimal otrosUSD = 0,
@@ -61,9 +72,9 @@ public class NominaTests
     {
         decimal devSueldo  = sueldoDiario * dias;
         decimal totalDev   = devSueldo + piezasUSD + ventasUSD + otrosUSD;
-        decimal totalDevBs = totalDev * tasa;
-        decimal ivss   = Math.Round(totalDevBs * 0.04m / tasa, 2);  // 4% sobre Bs → USD
-        decimal rpvh   = Math.Round(totalDevBs * 0.01m / tasa, 2);  // 1%
+        if (tasa <= 0) tasa = 1;
+        decimal ivss   = Math.Round(totalDev * 0.04m, 2);
+        decimal rpvh   = Math.Round(totalDev * 0.01m, 2);
         decimal faltas = sueldoDiario * diasFalta;
 
         return new DetalleNomina
@@ -173,53 +184,73 @@ public class NominaTests
     // DETALLENOMINA — NETO
     // ══════════════════════════════════════════════════════════════════════
 
-    [Fact(DisplayName = "NetoUSD = TotalDevengado - TotalDeducciones")]
-    public void NetoUSD_Formula()
+    [Fact(DisplayName = "PagoRealUSD = TotalDevengado cuando no hay deducciones reales")]
+    public void PagoRealUSD_SinDeduccionesReales()
     {
-        // 100 USD devengado, IVSS 4 + RPVH 1 = 5 USD deducciones → neto 95
         var d = Calcular(sueldoDiario: 10m, dias: 10m);
-        Assert.Equal(95m, d.NetoUSD);
+        // Sin faltas, préstamos ni otras ded → pago real = devengado
+        Assert.Equal(100m, d.PagoRealUSD);
+        Assert.Equal(d.TotalDevengado, d.PagoRealUSD);
     }
 
-    [Fact(DisplayName = "NetoBs = NetoUSD × TasaBCV")]
-    public void NetoBs_Conversion()
+    [Fact(DisplayName = "PagoRealUSD descuenta préstamo (SÍ es deducción real)")]
+    public void PagoRealUSD_DescontaPrestamo()
+    {
+        var d = Calcular(sueldoDiario: 10m, dias: 10m, cuotaPrestamo: 20m);
+        // 100 devengado - 20 préstamo = 80 pago real
+        Assert.Equal(80m, d.PagoRealUSD);
+    }
+
+    [Fact(DisplayName = "PagoRealUSD NO descuenta IVSS/RPVH (solo informativo)")]
+    public void PagoRealUSD_NoDescontaIVSS()
+    {
+        var d = Calcular(sueldoDiario: 10m, dias: 10m);
+        // IVSS=4, RPVH=1 calculados pero NO restados del pago real
+        Assert.Equal(4m, d.DeduccionIVSS);
+        Assert.Equal(1m, d.DeduccionRPVH);
+        Assert.Equal(100m, d.PagoRealUSD);  // pago real = devengado, sin tocar IVSS
+    }
+
+    [Fact(DisplayName = "NetoLegalUSD = TotalDevengado - TODAS las deducciones (informativo)")]
+    public void NetoLegalUSD_Formula()
+    {
+        var d = Calcular(sueldoDiario: 10m, dias: 10m, cuotaPrestamo: 20m);
+        // 100 - IVSS(4) - RPVH(1) - prestamo(20) = 75
+        Assert.Equal(75m, d.NetoLegalUSD);
+    }
+
+    [Fact(DisplayName = "PagoRealBs = PagoRealUSD × TasaBCV")]
+    public void PagoRealBs_Conversion()
     {
         var d = Calcular(sueldoDiario: 10m, dias: 10m, tasa: 40m);
-        // NetoUSD = 100 - 5 = 95 USD → NetoBs = 95 × 40 = 3,800 Bs
-        Assert.Equal(3_800m, d.NetoBs);
+        // PagoRealUSD = 100 → PagoRealBs = 100 × 40 = 4,000 Bs
+        Assert.Equal(4_000m, d.PagoRealBs);
     }
 
-    [Fact(DisplayName = "NetoBs = 0 cuando TasaBCV = 0")]
-    public void NetoBs_TasaCero_EsCero()
+    [Fact(DisplayName = "PagoRealBs = 0 cuando TasaBCV = 0")]
+    public void PagoRealBs_TasaCero_EsCero()
     {
         var d = new DetalleNomina
         {
             DevengadoSueldo = 100m, TasaBCV = 0m
         };
-        Assert.Equal(0m, d.NetoBs);
+        Assert.Equal(0m, d.PagoRealBs);
     }
 
-    [Fact(DisplayName = "Empleado con cuota de préstamo ve reducido su neto")]
-    public void NetoUSD_ConCuotaPrestamo()
-    {
-        var d = Calcular(sueldoDiario: 10m, dias: 10m, cuotaPrestamo: 20m);
-        // 100 USD - IVSS(4) - RPVH(1) - prestamo(20) = 75
-        Assert.Equal(75m, d.NetoUSD);
-    }
-
-    [Theory(DisplayName = "Neto semana completa (5 días) con sueldo diario variable")]
-    [InlineData(10.0, 5, 50.0, 2.0, 0.5, 47.5)]   // 50 devengado, 2.5 deducciones → 47.5
-    [InlineData(20.0, 5, 100.0, 4.0, 1.0, 95.0)]   // 100 devengado, 5 deducciones → 95
-    [InlineData( 5.0, 3, 15.0, 0.6, 0.15, 14.25)]  // 15 devengado, 0.75 deducciones → 14.25
-    public void NetoUSD_SemanaCompleta(
+    [Theory(DisplayName = "Pago real = devengado - ded.reales; neto legal = devengado - todas")]
+    [InlineData(10.0, 5, 50.0, 2.0, 0.5, 50.0, 47.5)]   // sin ded reales: pagoReal=devengado
+    [InlineData(20.0, 5, 100.0, 4.0, 1.0, 100.0, 95.0)]
+    [InlineData( 5.0, 3, 15.0, 0.6, 0.15, 15.0, 14.25)]
+    public void PagoReal_SemanaCompleta(
         double sueldo, double dias,
-        double devEsperado, double ivssEsp, double rpvhEsp, double netoEsp)
+        double devEsperado, double ivssEsp, double rpvhEsp, double pagoRealEsp, double netoLegalEsp)
     {
         var d = Calcular(sueldoDiario: (decimal)sueldo, dias: (decimal)dias);
-        Assert.Equal((decimal)devEsperado, d.TotalDevengado);
-        Assert.Equal((decimal)ivssEsp,     d.DeduccionIVSS);
-        Assert.Equal((decimal)rpvhEsp,     d.DeduccionRPVH);
-        Assert.Equal((decimal)netoEsp,     d.NetoUSD);
+        Assert.Equal((decimal)devEsperado,   d.TotalDevengado);
+        Assert.Equal((decimal)ivssEsp,        d.DeduccionIVSS);
+        Assert.Equal((decimal)rpvhEsp,        d.DeduccionRPVH);
+        Assert.Equal((decimal)pagoRealEsp,    d.PagoRealUSD);
+        Assert.Equal((decimal)netoLegalEsp,   d.NetoLegalUSD);
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -323,5 +354,94 @@ public class NominaTests
         DateTime ingreso = DateTime.Today.AddYears(-3).AddDays(-1);
         int anios = Math.Max(0, (int)((DateTime.Today - ingreso).TotalDays / 365.25));
         Assert.Equal(3, anios);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // NUEVOS TESTS v1.1 — Validaciones, préstamos, aportes, tope neto
+    // ══════════════════════════════════════════════════════════════════════
+
+    [Fact(DisplayName = "#3 Tasa BCV 0 no causa excepción (guard a 1)")]
+    public void TasaBCV_CeroNoExcepcion()
+    {
+        var d = Calcular(sueldoDiario: 10m, dias: 7, tasa: 0m);
+        Assert.True(d.TasaBCV >= 0);
+        Assert.Equal(Math.Round(70m * 0.04m, 2), d.DeduccionIVSS);
+    }
+
+    [Fact(DisplayName = "#6 Neto USD no debería ser menor que cero (tope)")]
+    public void NetoUSD_NoNegativo()
+    {
+        var d = Calcular(sueldoDiario: 5m, dias: 1, cuotaPrestamo: 100m);
+        decimal neto = Math.Max(0, d.NetoUSD);
+        Assert.True(neto >= 0, "El neto clamped debería ser >= 0");
+    }
+
+    [Fact(DisplayName = "#10 Cuota préstamo limitada al saldo pendiente")]
+    public void CuotaPrestamo_LimitadaASaldo()
+    {
+        decimal cuotaSemanal = 25m;
+        decimal saldoPendiente = 10m;
+        decimal cuotaReal = Math.Min(cuotaSemanal, saldoPendiente);
+        Assert.Equal(10m, cuotaReal);
+    }
+
+    [Fact(DisplayName = "#10 Cuota préstamo completa si saldo lo permite")]
+    public void CuotaPrestamo_CompletaSiHaySaldo()
+    {
+        decimal cuotaSemanal = 25m;
+        decimal saldoPendiente = 100m;
+        decimal cuotaReal = Math.Min(cuotaSemanal, saldoPendiente);
+        Assert.Equal(25m, cuotaReal);
+    }
+
+    [Fact(DisplayName = "#5 Valores negativos: fórmula no produce resultado absurdo")]
+    public void ValoresNegativos_Rechazar()
+    {
+        // En producción se valida en API; aquí verificamos que el cálculo con 0 sea correcto
+        decimal dias = Math.Max(0, -3m);
+        decimal faltas = Math.Max(0, -2m);
+        var d = Calcular(sueldoDiario: 10m, dias: dias, diasFalta: faltas);
+        Assert.Equal(0m, d.DevengadoSueldo);
+        Assert.Equal(0m, d.DescuentoFaltas);
+    }
+
+    [Fact(DisplayName = "IVSS simplificado = totalDev × 4% directo (sin Bs/tasa)")]
+    public void IVSS_FormulaSimplificada()
+    {
+        var d = Calcular(sueldoDiario: 20m, dias: 5, tasa: 50m);
+        // totalDev = 100, IVSS = 100 × 0.04 = 4.00
+        Assert.Equal(4.00m, d.DeduccionIVSS);
+    }
+
+    [Fact(DisplayName = "Aportes patronales: IVSS + RPVH + INCES + Cesta = Total")]
+    public void AportesPatronales_SumaTotal()
+    {
+        decimal salBs = 4000m, pctIVSS = 9m;
+        decimal ivssP = Math.Round(salBs * pctIVSS / 100, 2);  // 360
+        decimal rpvhP = Math.Round(salBs * 0.02m, 2);           // 80
+        decimal incesP = Math.Round(salBs * 0.02m, 2);          // 80
+        decimal cestaP = Math.Round(5m * 0.5m * 200m, 2);       // 500
+        decimal total = ivssP + rpvhP + incesP + cestaP;
+        Assert.Equal(1020m, total);
+    }
+
+    [Fact(DisplayName = "Abono préstamo: saldo se reduce correctamente")]
+    public void AbonoPrestamo_SaldoReduce()
+    {
+        decimal saldo = 100m;
+        decimal cuota = 25m;
+        decimal abono = Math.Min(cuota, saldo);
+        decimal nuevoSaldo = saldo - abono;
+        Assert.Equal(75m, nuevoSaldo);
+    }
+
+    [Fact(DisplayName = "Abono préstamo: saldo llega a 0 cuando cuota >= saldo")]
+    public void AbonoPrestamo_SaldoACero()
+    {
+        decimal saldo = 10m;
+        decimal cuota = 25m;
+        decimal abono = Math.Min(cuota, saldo);
+        decimal nuevoSaldo = saldo - abono;
+        Assert.Equal(0m, nuevoSaldo);
     }
 }

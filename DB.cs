@@ -467,11 +467,23 @@ namespace SistemaGestion
         public decimal  DescuentoFaltas  { get; set; }
         public decimal  CuotaPrestamo    { get; set; }
         public decimal  OtrasDeduccion   { get; set; }
-        public decimal  TotalDeducciones => DeduccionIVSS + DeduccionRPVH + DescuentoFaltas + CuotaPrestamo + OtrasDeduccion;
-        // Neto
-        public decimal  NetoUSD          => TotalDevengado - TotalDeducciones;
+        // Deducciones reales (sí se descuentan del pago)
+        public decimal  DeduccionesReales => DescuentoFaltas + CuotaPrestamo + OtrasDeduccion;
+        // Deducciones legales (IVSS/RPVH — solo informativas, NO se descuentan)
+        public decimal  DeduccionesLegales => DeduccionIVSS + DeduccionRPVH;
+        // Total referencial (todas las deducciones, para cálculo legal)
+        public decimal  TotalDeduccionesRef => DeduccionesReales + DeduccionesLegales;
+        // Pago real = devengado - deducciones reales (sin IVSS/RPVH)
+        public decimal  PagoRealUSD      => TotalDevengado - DeduccionesReales;
         public decimal  TasaBCV          { get; set; }
-        public decimal  NetoBs           => NetoUSD * TasaBCV;
+        public decimal  PagoRealBs       => PagoRealUSD * TasaBCV;
+        // Neto legal (informativo — si se aplicaran TODAS las deducciones incluyendo IVSS/RPVH)
+        public decimal  NetoLegalUSD     => TotalDevengado - TotalDeduccionesRef;
+        public decimal  NetoLegalBs      => NetoLegalUSD * TasaBCV;
+        // Compatibilidad
+        public decimal  TotalDeducciones => TotalDeduccionesRef;
+        public decimal  NetoUSD          => PagoRealUSD;
+        public decimal  NetoBs           => PagoRealBs;
         public string   Observaciones    { get; set; }
     }
 
@@ -495,14 +507,29 @@ namespace SistemaGestion
         public string   NombreEmpleado   { get; set; }
         public int      Anio             { get; set; }
         public string   TipoBeneficio    { get; set; }  // Utilidades / Vacaciones / Prestaciones
-        // Calculo
+        // Cálculo legal LOTTT
         public decimal  DiasCorresponden { get; set; }
         public decimal  SalarioDiarioUSD { get; set; }
-        public decimal  MontoUSD         { get; set; }
+        public decimal  MontoUSD         { get; set; }  // monto legal calculado
         public decimal  TasaBCV          { get; set; }
         public decimal  MontoBs          => MontoUSD * TasaBCV;
+        // Monto real (decisión gerencia)
+        public decimal  MontoGerenciaUSD { get; set; }  // lo que realmente paga la empresa
+        public decimal  MontoGerenciaBs  => MontoGerenciaUSD * TasaBCV;
         public DateTime FechaPago        { get; set; }
         public string   Estado           { get; set; }  // Pendiente / Pagado
+        public string   Observaciones    { get; set; }
+    }
+
+    public class InasistenciaEmpleado
+    {
+        public int      Id               { get; set; }
+        public int      IdEmpleado       { get; set; }
+        public string   NombreEmpleado   { get; set; }
+        public string   TipoEmpleado     { get; set; }
+        public DateTime Fecha            { get; set; }
+        public bool     Justificada      { get; set; }
+        public decimal  MontoDescuentoBs { get; set; }  // bono producción del día (Bs) o sueldo diario * tasa
         public string   Observaciones    { get; set; }
     }
 
@@ -828,6 +855,7 @@ namespace SistemaGestion
                 DiasCorresponden REAL    DEFAULT 0,
                 SalarioDiarioUSD REAL    DEFAULT 0,
                 MontoUSD         REAL    DEFAULT 0,
+                MontoGerenciaUSD REAL    DEFAULT 0,
                 TasaBCV          REAL    DEFAULT 1,
                 FechaPago        TEXT,
                 Estado           TEXT    NOT NULL DEFAULT 'Pendiente',
@@ -1238,7 +1266,7 @@ namespace SistemaGestion
         // Nunca se modifica una migracion existente: si hay un error se agrega
         // una nueva migracion que lo corrija.
         // Version actual del esquema en codigo: 7
-        public  const int SCHEMA_VERSION = 25;  // v25: CantDefectuosas en DetalleProduccionMolde
+        public  const int SCHEMA_VERSION = 26;  // v26: InasistenciasEmpleado
 
         private static void MigrarEsquema(SqliteConnection conn)
         {
@@ -1356,7 +1384,8 @@ namespace SistemaGestion
                             IdEmpleado INTEGER NOT NULL, NombreEmpleado TEXT,
                             Anio INTEGER NOT NULL, TipoBeneficio TEXT NOT NULL,
                             DiasCorresponden REAL DEFAULT 0, SalarioDiarioUSD REAL DEFAULT 0,
-                            MontoUSD REAL DEFAULT 0, TasaBCV REAL DEFAULT 1,
+                            MontoUSD REAL DEFAULT 0, MontoGerenciaUSD REAL DEFAULT 0,
+                            TasaBCV REAL DEFAULT 1,
                             FechaPago TEXT, Estado TEXT NOT NULL DEFAULT 'Pendiente',
                             Observaciones TEXT
                         )");
@@ -1793,6 +1822,35 @@ namespace SistemaGestion
                         "CREATE INDEX IF NOT EXISTS idx_pp_prov ON ProductosProveedor(IdProveedorPrinc);");
                 }
 
+
+                // Retroactive: MontoGerenciaUSD en BeneficiosAnuales
+                if (TablaExiste(conn, tx, "BeneficiosAnuales"))
+                {
+                    AlterTableSafe(conn, tx,
+                        "ALTER TABLE BeneficiosAnuales ADD COLUMN MontoGerenciaUSD REAL DEFAULT 0");
+                }
+
+                // ── v26: InasistenciasEmpleado ─────────────────────────────────
+                if (versionActual < 26)
+                {
+                    EjecutarSql(conn, tx, @"
+                        CREATE TABLE IF NOT EXISTS InasistenciasEmpleado (
+                            Id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                            IdEmpleado       INTEGER NOT NULL,
+                            NombreEmpleado   TEXT,
+                            TipoEmpleado     TEXT,
+                            Fecha            TEXT    NOT NULL,
+                            Justificada      INTEGER NOT NULL DEFAULT 0,
+                            MontoDescuentoBs REAL    DEFAULT 0,
+                            Observaciones    TEXT,
+                            FOREIGN KEY(IdEmpleado) REFERENCES Empleados(Id)
+                        );
+                        CREATE INDEX IF NOT EXISTS idx_inas_emp ON InasistenciasEmpleado(IdEmpleado);
+                        CREATE INDEX IF NOT EXISTS idx_inas_fecha ON InasistenciasEmpleado(Fecha);
+                        CREATE UNIQUE INDEX IF NOT EXISTS idx_inas_emp_fecha ON InasistenciasEmpleado(IdEmpleado, Fecha);
+                    ");
+                    SetSchemaVersion(conn, tx, 26);
+                }
 
                 tx.Commit();
                 RegistrarAuditoria("MIGRACION_OK", "Sistema",
@@ -4878,13 +4936,19 @@ namespace SistemaGestion
             decimal devVentas = tasa > 0 ? Math.Round(devVentasBs / tasa, 4) : 0;
             decimal totalDev   = devSueldo + devPiezas + devVentas + otrosIngresos;
 
-            // Deducciones legales (se calculan sobre el total devengado convertido a Bs)
-            decimal totalDevBs = totalDev * tasa;
-            decimal ivss   = Math.Round(totalDevBs * 0.04m / tasa, 2);  // resultado en USD
-            decimal rpvh   = Math.Round(totalDevBs * 0.01m / tasa, 2);
+            // Deducciones legales (4% IVSS y 1% RPVH sobre devengado, en USD)
+            if (tasa <= 0) tasa = 1;
+            decimal ivss   = Math.Round(totalDev * 0.04m, 2);
+            decimal rpvh   = Math.Round(totalDev * 0.01m, 2);
 
-            // Descuento por inasistencias (proporcional al sueldo diario)
-            decimal descFaltas = emp.SueldoDiarioUSD * diasInasistencia;
+            // Descuento por inasistencias:
+            // - Producción: suma del bono real de cada día de falta injustificada
+            // - Otros tipos: sueldo diario × días de falta
+            decimal descFaltas;
+            if (emp.TipEmpleadoEs("Produccion"))
+                descFaltas = CalcularDescuentoFaltas(emp.Id, periodo.FechaDesde, periodo.FechaHasta, tasa);
+            else
+                descFaltas = emp.SueldoDiarioUSD * diasInasistencia;
 
             return new DetalleNomina
             {
@@ -4908,6 +4972,151 @@ namespace SistemaGestion
                 OtrasDeduccion   = otrasDeduccion,
                 TasaBCV          = tasa
             };
+        }
+
+        // ── Inasistencias ──────────────────────────────────────────────────
+        /// <summary>
+        /// Calcula el descuento total por faltas injustificadas de un empleado
+        /// de producción en un rango de fechas. Suma el bono real de cada día
+        /// faltado (no justificado) y lo convierte a USD.
+        /// </summary>
+        public static decimal CalcularDescuentoFaltas(
+            int idEmpleado, DateTime desde, DateTime hasta, decimal tasa)
+        {
+            if (tasa <= 0) tasa = 1;
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = @"SELECT Fecha, MontoDescuentoBs FROM InasistenciasEmpleado
+                WHERE IdEmpleado=$id AND Justificada=0
+                  AND Fecha >= $d AND Fecha <= $h";
+            cmd.Parameters.AddWithValue("$id", idEmpleado);
+            cmd.Parameters.AddWithValue("$d", desde.ToString("yyyy-MM-dd"));
+            cmd.Parameters.AddWithValue("$h", hasta.ToString("yyyy-MM-dd"));
+            decimal totalBs = 0;
+            using var r = cmd.ExecuteReader();
+            while (r.Read()) totalBs += D(r, 1);
+            return Math.Round(totalBs / tasa, 2);
+        }
+
+        /// <summary>
+        /// Cuenta las faltas injustificadas de un empleado en un rango de fechas.
+        /// </summary>
+        public static int ContarFaltasInjustificadas(
+            int idEmpleado, DateTime desde, DateTime hasta)
+        {
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = @"SELECT COUNT(*) FROM InasistenciasEmpleado
+                WHERE IdEmpleado=$id AND Justificada=0
+                  AND Fecha >= $d AND Fecha <= $h";
+            cmd.Parameters.AddWithValue("$id", idEmpleado);
+            cmd.Parameters.AddWithValue("$d", desde.ToString("yyyy-MM-dd"));
+            cmd.Parameters.AddWithValue("$h", hasta.ToString("yyyy-MM-dd"));
+            return (int)(long)(cmd.ExecuteScalar() ?? 0L);
+        }
+
+        public static List<InasistenciaEmpleado> ObtenerInasistencias(
+            int? idEmpleado = null, DateTime? desde = null, DateTime? hasta = null)
+        {
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            var where = new List<string>();
+            if (idEmpleado.HasValue) { where.Add("i.IdEmpleado=$id"); cmd.Parameters.AddWithValue("$id", idEmpleado.Value); }
+            if (desde.HasValue)     { where.Add("i.Fecha>=$d");       cmd.Parameters.AddWithValue("$d", desde.Value.ToString("yyyy-MM-dd")); }
+            if (hasta.HasValue)     { where.Add("i.Fecha<=$h");       cmd.Parameters.AddWithValue("$h", hasta.Value.ToString("yyyy-MM-dd")); }
+            string w = where.Count > 0 ? " WHERE " + string.Join(" AND ", where) : "";
+            cmd.CommandText = $"SELECT i.Id,i.IdEmpleado,i.NombreEmpleado,i.TipoEmpleado,i.Fecha,i.Justificada,i.MontoDescuentoBs,i.Observaciones FROM InasistenciasEmpleado i{w} ORDER BY i.Fecha DESC";
+            var list = new List<InasistenciaEmpleado>();
+            using var r = cmd.ExecuteReader();
+            while (r.Read())
+                list.Add(new InasistenciaEmpleado {
+                    Id               = I(r,0),
+                    IdEmpleado       = I(r,1),
+                    NombreEmpleado   = S(r,2),
+                    TipoEmpleado     = S(r,3),
+                    Fecha            = DateTime.TryParse(S(r,4), out var f) ? f : DateTime.MinValue,
+                    Justificada      = I(r,5) != 0,
+                    MontoDescuentoBs = D(r,6),
+                    Observaciones    = S(r,7)
+                });
+            return list;
+        }
+
+        /// <summary>
+        /// Registra una inasistencia. Auto-calcula MontoDescuentoBs:
+        /// - Producción: bono del día específico (CalcularBonoProduccion con desde=hasta=fecha)
+        /// - Otros: SueldoDiarioUSD * TasaBCV del día (o tasa proporcionada)
+        /// </summary>
+        public static int RegistrarInasistencia(
+            int idEmpleado, DateTime fecha, bool justificada,
+            string observaciones = "", decimal? tasaOverride = null)
+        {
+            using var c = Conn();
+            // Obtener datos del empleado
+            var qe = c.CreateCommand();
+            qe.CommandText = "SELECT Nombre||' '||Apellido, TipoEmpleado, SueldoDiarioUSD FROM Empleados WHERE Id=$id";
+            qe.Parameters.AddWithValue("$id", idEmpleado);
+            string nombre = "", tipo = ""; decimal sueldoDiario = 0;
+            using (var re = qe.ExecuteReader())
+            {
+                if (!re.Read()) return -1;
+                nombre = S(re,0); tipo = S(re,1); sueldoDiario = D(re,2);
+            }
+            // Calcular monto del día
+            decimal montoBs = 0;
+            if (tipo == "Produccion")
+            {
+                montoBs = CalcularBonoProduccion(idEmpleado, fecha, fecha);
+            }
+            else
+            {
+                // Para otros tipos: sueldo diario en USD * tasa = monto en Bs
+                decimal tasa = tasaOverride ?? 1;
+                if (tasa <= 0) tasa = 1;
+                montoBs = sueldoDiario * tasa;
+            }
+            var cmd = c.CreateCommand();
+            cmd.CommandText = @"INSERT INTO InasistenciasEmpleado
+                (IdEmpleado,NombreEmpleado,TipoEmpleado,Fecha,Justificada,MontoDescuentoBs,Observaciones)
+                VALUES($id,$ne,$te,$f,$j,$m,$o)
+                ON CONFLICT(IdEmpleado,Fecha) DO UPDATE SET
+                    Justificada=excluded.Justificada,
+                    MontoDescuentoBs=excluded.MontoDescuentoBs,
+                    Observaciones=excluded.Observaciones";
+            cmd.Parameters.AddWithValue("$id", idEmpleado);
+            cmd.Parameters.AddWithValue("$ne", nombre);
+            cmd.Parameters.AddWithValue("$te", tipo);
+            cmd.Parameters.AddWithValue("$f",  fecha.ToString("yyyy-MM-dd"));
+            cmd.Parameters.AddWithValue("$j",  justificada ? 1 : 0);
+            cmd.Parameters.AddWithValue("$m",  (double)montoBs);
+            cmd.Parameters.AddWithValue("$o",  observaciones ?? "");
+            cmd.ExecuteNonQuery();
+            // Devolver el Id
+            var qid = c.CreateCommand();
+            qid.CommandText = "SELECT Id FROM InasistenciasEmpleado WHERE IdEmpleado=$id AND Fecha=$f";
+            qid.Parameters.AddWithValue("$id", idEmpleado);
+            qid.Parameters.AddWithValue("$f",  fecha.ToString("yyyy-MM-dd"));
+            return (int)(long)(qid.ExecuteScalar() ?? -1L);
+        }
+
+        public static bool ActualizarInasistencia(int id, bool justificada, string observaciones)
+        {
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = "UPDATE InasistenciasEmpleado SET Justificada=$j, Observaciones=$o WHERE Id=$id";
+            cmd.Parameters.AddWithValue("$id", id);
+            cmd.Parameters.AddWithValue("$j",  justificada ? 1 : 0);
+            cmd.Parameters.AddWithValue("$o",  observaciones ?? "");
+            return cmd.ExecuteNonQuery() > 0;
+        }
+
+        public static bool EliminarInasistencia(int id)
+        {
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = "DELETE FROM InasistenciasEmpleado WHERE Id=$id";
+            cmd.Parameters.AddWithValue("$id", id);
+            return cmd.ExecuteNonQuery() > 0;
         }
 
         // ── Prestamos ──────────────────────────────────────────────────────
@@ -4994,9 +5203,10 @@ namespace SistemaGestion
                     NombreEmpleado   = S(r,2), Anio = r.GetInt32(3),
                     TipoBeneficio    = S(r,4), DiasCorresponden = D(r,5),
                     SalarioDiarioUSD = D(r,6), MontoUSD = D(r,7),
-                    TasaBCV          = D(r,8),
-                    FechaPago        = r.IsDBNull(9) ? DateTime.Today : DateTime.Parse(r.GetString(9)),
-                    Estado = S(r,10), Observaciones = S(r,11)
+                    MontoGerenciaUSD = D(r,8),
+                    TasaBCV          = D(r,9),
+                    FechaPago        = r.IsDBNull(10) ? DateTime.Today : DateTime.Parse(r.GetString(10)),
+                    Estado = S(r,11), Observaciones = S(r,12)
                 });
             return list;
         }
@@ -5007,8 +5217,8 @@ namespace SistemaGestion
             var cmd = c.CreateCommand();
             cmd.CommandText = @"INSERT INTO BeneficiosAnuales
                 (IdEmpleado,NombreEmpleado,Anio,TipoBeneficio,DiasCorresponden,
-                 SalarioDiarioUSD,MontoUSD,TasaBCV,FechaPago,Estado,Observaciones)
-                VALUES($ie,$ne,$an,$tb,$dc,$sd,$mo,$tc,$fp,$es,$ob)";
+                 SalarioDiarioUSD,MontoUSD,MontoGerenciaUSD,TasaBCV,FechaPago,Estado,Observaciones)
+                VALUES($ie,$ne,$an,$tb,$dc,$sd,$mo,$mg,$tc,$fp,$es,$ob)";
             cmd.Parameters.AddWithValue("$ie", b.IdEmpleado);
             cmd.Parameters.AddWithValue("$ne", b.NombreEmpleado ?? "");
             cmd.Parameters.AddWithValue("$an", b.Anio);
@@ -5016,6 +5226,7 @@ namespace SistemaGestion
             cmd.Parameters.AddWithValue("$dc", (double)b.DiasCorresponden);
             cmd.Parameters.AddWithValue("$sd", (double)b.SalarioDiarioUSD);
             cmd.Parameters.AddWithValue("$mo", (double)b.MontoUSD);
+            cmd.Parameters.AddWithValue("$mg", (double)b.MontoGerenciaUSD);
             cmd.Parameters.AddWithValue("$tc", (double)b.TasaBCV);
             cmd.Parameters.AddWithValue("$fp", b.FechaPago.ToString("yyyy-MM-dd"));
             cmd.Parameters.AddWithValue("$es", b.Estado ?? "Pendiente");

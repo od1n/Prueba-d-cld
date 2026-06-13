@@ -9,8 +9,10 @@ let empleadoEditar = null;  // empleado en formulario
 
 // ── Tabs ──────────────────────────────────────────────────────────────────
 const TABS = [
-    { id: 'periodos',  label: '📅 Períodos'  },
-    { id: 'empleados', label: '👤 Empleados' },
+    { id: 'periodos',   label: '📅 Períodos'   },
+    { id: 'empleados',  label: '👤 Empleados'  },
+    { id: 'aportes',    label: '🏛 Aportes'    },
+    { id: 'beneficios', label: '📋 Beneficios' },
 ];
 let tabActiva = 'periodos';
 
@@ -52,8 +54,10 @@ async function render() {
 }
 
 async function renderTab() {
-    if (tabActiva === 'periodos')  await renderTabPeriodos();
-    else                            await renderTabEmpleados();
+    if (tabActiva === 'periodos')        await renderTabPeriodos();
+    else if (tabActiva === 'empleados')  await renderTabEmpleados();
+    else if (tabActiva === 'aportes')    await renderTabAportes();
+    else if (tabActiva === 'beneficios') await renderTabBeneficios();
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -174,7 +178,7 @@ async function abrirPeriodo(periodo) {
 function renderDetallesPeriodo(p, detalles) {
     const drawer = document.getElementById('drawerNom');
     const cerrado = p.estado === 'Cerrado';
-    const totalNeto = detalles.reduce((s,d)=>s+(d.netoUSD||0),0);
+    const totalPagoReal = detalles.reduce((s,d)=>s+(d.pagoRealUSD ?? d.netoUSD ?? 0),0);
 
     drawer.innerHTML = `
     <div class="modal-handle"></div>
@@ -190,10 +194,10 @@ function renderDetallesPeriodo(p, detalles) {
     <div class="kpi-grid" style="gap:8px;margin-bottom:12px">
       <div class="kpi"><div class="kpi-label">Empleados</div>
         <div class="kpi-value">${detalles.length}</div></div>
-      <div class="kpi"><div class="kpi-label">Neto total USD</div>
-        <div class="kpi-value text-cyan">${formatUSD(totalNeto)}</div></div>
-      <div class="kpi"><div class="kpi-label">Neto Bs</div>
-        <div class="kpi-value">${formatNum(totalNeto*p.tasa,0)}</div></div>
+      <div class="kpi"><div class="kpi-label">Pago total USD</div>
+        <div class="kpi-value text-cyan">${formatUSD(totalPagoReal)}</div></div>
+      <div class="kpi"><div class="kpi-label">Pago total Bs</div>
+        <div class="kpi-value">${formatNum(totalPagoReal*p.tasa,0)}</div></div>
     </div>
 
     <!-- Acciones -->
@@ -228,8 +232,8 @@ function renderDetallesPeriodo(p, detalles) {
           </div>
         </div>
         <div style="text-align:right;flex-shrink:0">
-          <div class="mono" style="color:var(--cyan)">${formatUSD(d.netoUSD||0)}</div>
-          <div class="text-dim" style="font-size:8.5pt">${formatNum((d.netoUSD||0)*(p.tasa||1),0)} Bs</div>
+          <div class="mono" style="color:var(--cyan)">${formatUSD(d.pagoRealUSD ?? d.netoUSD ?? 0)}</div>
+          <div class="text-dim" style="font-size:8.5pt">${formatNum((d.pagoRealUSD ?? d.netoUSD ?? 0)*(p.tasa||1),0)} Bs</div>
         </div>
       </button>`).join('')}
     </div>`}
@@ -275,8 +279,14 @@ async function confirmarCerrar(id) {
 }
 
 // ── Editar línea de detalle ────────────────────────────────────────────────
+let _detEditing = null;  // detalle actualmente en edición (para inasistencias)
+let _perEditing = null;  // período actual en edición
+
 function editarDetalle(det, periodo) {
+    _detEditing = det;
+    _perEditing = periodo;
     const cerrado = periodo.estado === 'Cerrado';
+    const esProd  = det.tipo === 'Produccion';
     const drawer  = document.getElementById('drawerNom');
     drawer.innerHTML = `
     <div class="modal-handle"></div>
@@ -289,12 +299,23 @@ function editarDetalle(det, periodo) {
         <input id="dDias" type="number" class="input-field" value="${det.diasTrabajados||0}" min="0" step="0.5"
           ${cerrado?'disabled':''} oninput="recalcDetalle()">
       </div>
-      <div class="form-group">
+      ${esProd ? `<div class="form-group">
+        <label class="form-label">Inasistencias</label>
+        <div class="input-field" style="background:var(--fondo-card);cursor:default" id="dInasCount">—</div>
+        <input type="hidden" id="dInas" value="${det.diasInasistencia||0}">
+      </div>` : `<div class="form-group">
         <label class="form-label">Inasistencias</label>
         <input id="dInas" type="number" class="input-field" value="${det.diasInasistencia||0}" min="0" step="0.5"
           ${cerrado?'disabled':''} oninput="recalcDetalle()">
-      </div>
+      </div>`}
     </div>
+    ${esProd ? `<div id="secInasistencias" class="mb-8" style="border:1px solid var(--borde);border-radius:8px;padding:8px">
+      <div class="flex-between mb-4">
+        <span class="form-label" style="margin:0">Faltas registradas</span>
+        ${!cerrado?`<button class="btn btn-sm" style="font-size:9pt" onclick="agregarInasistencia()">＋ Agregar</button>`:''}
+      </div>
+      <div id="listaInasistencias"><div class="text-dim text-sm">Cargando…</div></div>
+    </div>`:''}
     <div class="form-grid-2 mb-8">
       <div class="form-group">
         <label class="form-label">Sueldo diario (USD)</label>
@@ -355,70 +376,147 @@ function editarDetalle(det, periodo) {
       ${!cerrado?`<button class="btn btn-primary btn-full" onclick="guardarDetalle(${det.id})">Guardar cambios</button>`:''}
       <button class="btn btn-ghost btn-full" onclick="abrirPeriodo(periodoActivo)">‹ Volver al período</button>
     </div>`;
+    // Cargar inasistencias para empleados de producción
+    if (esProd) cargarInasistencias(det.idEmpleado, periodo);
 }
 
 function recalcDetalle() {
-    const dias   = parseFloat(document.getElementById('dDias')?.value) || 0;
-    const inas   = parseFloat(document.getElementById('dInas')?.value) || 0;
-    const sd     = parseFloat(document.getElementById('dSDiario')?.value) || 0;
-    const devP   = parseFloat(document.getElementById('dDevP')?.value) || 0;
-    const devV   = parseFloat(document.getElementById('dDevV')?.value) || 0;
-    const otros  = parseFloat(document.getElementById('dOtrosI')?.value) || 0;
-    const prest  = parseFloat(document.getElementById('dPrest')?.value) || 0;
-    const otrasD = parseFloat(document.getElementById('dOtrasD')?.value) || 0;
-    const tasa   = parseFloat(document.getElementById('dTasa')?.value) || 1;
+    const clamp = id => Math.max(0, parseFloat(document.getElementById(id)?.value) || 0);
+    const dias   = clamp('dDias');
+    const inas   = clamp('dInas');
+    const sd     = clamp('dSDiario');
+    const devP   = clamp('dDevP');
+    const devV   = clamp('dDevV');
+    const otros  = clamp('dOtrosI');
+    const prest  = clamp('dPrest');
+    const otrasD = clamp('dOtrasD');
+    const tasa   = Math.max(0.01, parseFloat(document.getElementById('dTasa')?.value) || 1);
 
-    const devS    = sd * dias;
-    const totDev  = devS + devP + devV + otros;
-    const totBs   = totDev * tasa;
-    const ivss    = Math.round(totBs * 0.04 / tasa * 100) / 100;
-    const rpvh    = Math.round(totBs * 0.01 / tasa * 100) / 100;
-    const faltas  = sd * inas;
-    const totDed  = ivss + rpvh + faltas + prest + otrasD;
-    const neto    = totDev - totDed;
+    const devS     = sd * dias;
+    const totDev   = devS + devP + devV + otros;
+    // Producción: usa el descuento pre-calculado por el servidor (guardado en _descFaltasProd)
+    const esProd   = _detEditing?.tipo === 'Produccion';
+    const faltas   = esProd ? (_descFaltasProd || 0) : (sd * inas);
+    const dedReal  = faltas + prest + otrasD;
+    const pagoReal = Math.max(0, totDev - dedReal);
 
     const div = document.getElementById('resCalc');
     if (div) div.innerHTML = renderResCalcValues({
         devSueldo:devS, devPiezas:devP, devVentas:devV, otrosIngresos:otros,
-        totalDevengado:totDev, ivss, rpvh, faltas, prestamo:prest, otrasDeduccion:otrasD,
-        totalDeducciones:totDed, netoUSD:neto, tasa, netoBs:neto*tasa
+        totalDevengado:totDev, faltas, prestamo:prest, otrasDeduccion:otrasD,
+        pagoRealUSD:pagoReal, tasa
     });
 }
 
 function renderResCalc(d) { return renderResCalcValues(d); }
 
 function renderResCalcValues(d) {
+    const pagoReal = d.pagoRealUSD ?? d.netoUSD ?? 0;
+    const tasa = d.tasa || 1;
+    const hayDed = (d.faltas||0) > 0 || (d.prestamo||0) > 0 || (d.otrasDeduccion||0) > 0;
     return `
     <div class="flex-between mb-4 text-sm">
-      <span>Dev. Sueldo</span><span class="mono">${formatUSD(d.devSueldo||0)}</span>
+      <span>Sueldo</span><span class="mono">${formatUSD(d.devSueldo||0)}</span>
     </div>
     ${(d.devPiezas||0)>0?`<div class="flex-between mb-4 text-sm">
-      <span>Dev. Piezas</span><span class="mono">${formatUSD(d.devPiezas)}</span></div>`:''}
+      <span>Bono producción</span><span class="mono">${formatUSD(d.devPiezas)}</span></div>`:''}
     ${(d.devVentas||0)>0?`<div class="flex-between mb-4 text-sm">
-      <span>Dev. Ventas</span><span class="mono">${formatUSD(d.devVentas)}</span></div>`:''}
+      <span>Bono ventas</span><span class="mono">${formatUSD(d.devVentas)}</span></div>`:''}
     ${(d.otrosIngresos||0)>0?`<div class="flex-between mb-4 text-sm">
       <span>Otros ingresos</span><span class="mono">${formatUSD(d.otrosIngresos)}</span></div>`:''}
-    <div class="flex-between mb-4 text-sm bold">
+    ${hayDed?`
+    <div class="flex-between mb-4 text-sm" style="border-top:1px solid var(--borde);padding-top:4px">
       <span>Total devengado</span><span class="mono">${formatUSD(d.totalDevengado||0)}</span>
     </div>
-    <div class="flex-between mb-4 text-sm" style="color:var(--naranja)">
-      <span>IVSS 4%</span><span class="mono">-${formatUSD(d.ivss||0)}</span>
-    </div>
-    <div class="flex-between mb-4 text-sm" style="color:var(--naranja)">
-      <span>RPVH 1%</span><span class="mono">-${formatUSD(d.rpvh||0)}</span>
-    </div>
     ${(d.faltas||0)>0?`<div class="flex-between mb-4 text-sm" style="color:var(--naranja)">
-      <span>Desc. faltas</span><span class="mono">-${formatUSD(d.faltas)}</span></div>`:''}
+      <span>Desc. inasistencias</span><span class="mono">-${formatUSD(d.faltas)}</span></div>`:''}
     ${(d.prestamo||0)>0?`<div class="flex-between mb-4 text-sm" style="color:var(--naranja)">
       <span>Cuota préstamo</span><span class="mono">-${formatUSD(d.prestamo)}</span></div>`:''}
     ${(d.otrasDeduccion||0)>0?`<div class="flex-between mb-4 text-sm" style="color:var(--naranja)">
       <span>Otras deducciones</span><span class="mono">-${formatUSD(d.otrasDeduccion)}</span></div>`:''}
+    `:''}
     <div class="flex-between bold" style="border-top:1px solid var(--borde);padding-top:6px">
-      <span>NETO USD</span><span class="mono text-cyan" style="font-size:13pt">${formatUSD(d.netoUSD||0)}</span>
+      <span>TOTAL A PAGAR USD</span><span class="mono text-cyan" style="font-size:13pt">${formatUSD(pagoReal)}</span>
     </div>
     <div class="flex-between text-dim" style="font-size:9pt">
-      <span>Neto Bs</span><span class="mono">${formatNum((d.netoUSD||0)*(d.tasa||1),2)}</span>
+      <span>Total Bs</span><span class="mono">${formatNum(pagoReal*tasa,2)}</span>
     </div>`;
+}
+
+// ── Inasistencias (producción) ─────────────────────────────────────────────
+let _descFaltasProd = 0;  // monto en USD calculado por inasistencias
+
+async function cargarInasistencias(idEmpleado, periodo) {
+    const div = document.getElementById('listaInasistencias');
+    if (!div) return;
+    try {
+        const list = await apiGet(`/api/nomina/inasistencias?empleado=${idEmpleado}&desde=${periodo.desde}&hasta=${periodo.hasta}`);
+        const tasa = parseFloat(document.getElementById('dTasa')?.value) || periodo.tasa || 1;
+        const cerrado = periodo.estado === 'Cerrado';
+        // Calcular descuento total (solo injustificadas)
+        const injust = list.filter(i => !i.justificada);
+        const totalBs = injust.reduce((s,i) => s + (i.montoDescuentoBs||0), 0);
+        _descFaltasProd = tasa > 0 ? Math.round(totalBs / tasa * 100) / 100 : 0;
+        // Actualizar contador
+        const countEl = document.getElementById('dInasCount');
+        if (countEl) countEl.textContent = `${injust.length} falta${injust.length!==1?'s':''} (${formatUSD(_descFaltasProd)})`;
+        // Actualizar hidden
+        const hiddenInas = document.getElementById('dInas');
+        if (hiddenInas) hiddenInas.value = injust.length;
+
+        if (list.length === 0) {
+            div.innerHTML = '<div class="text-dim text-sm">Sin inasistencias registradas</div>';
+        } else {
+            div.innerHTML = list.map(i => `
+              <div class="flex-between" style="padding:4px 0;border-bottom:1px solid var(--borde);font-size:9pt">
+                <div>
+                  <span class="mono">${i.fecha}</span>
+                  <span style="color:${i.justificada?'var(--verde)':'var(--naranja)'}">
+                    ${i.justificada?'✓ Justificada':'✗ No justificada'}</span>
+                  <span class="text-dim"> · Bs ${formatNum(i.montoDescuentoBs,2)}</span>
+                </div>
+                ${!cerrado?`<div style="display:flex;gap:4px">
+                  <button class="btn btn-sm" style="font-size:8pt;padding:2px 6px"
+                    onclick="toggleInasistencia(${i.id},${!i.justificada})">${i.justificada?'Injust.':'Justif.'}</button>
+                  <button class="btn btn-sm" style="font-size:8pt;padding:2px 6px;color:var(--naranja)"
+                    onclick="eliminarInasistencia(${i.id})">✕</button>
+                </div>`:''}
+              </div>`).join('');
+        }
+        recalcDetalle();
+    } catch(err) {
+        div.innerHTML = `<div class="text-dim text-sm">Error: ${err.message}</div>`;
+    }
+}
+
+async function agregarInasistencia() {
+    if (!_detEditing || !_perEditing) return;
+    const fecha = prompt(`Fecha de inasistencia (YYYY-MM-DD)\nPeríodo: ${_perEditing.desde} al ${_perEditing.hasta}`);
+    if (!fecha || !/^\d{4}-\d{2}-\d{2}$/.test(fecha)) { if (fecha) alert('Formato inválido. Use YYYY-MM-DD'); return; }
+    const tasa = parseFloat(document.getElementById('dTasa')?.value) || _perEditing.tasa || 1;
+    try {
+        await apiPost('/api/nomina/inasistencias', {
+            idEmpleado: _detEditing.idEmpleado,
+            fecha, justificada: false,
+            observaciones: '', tasaBCV: tasa
+        });
+        await cargarInasistencias(_detEditing.idEmpleado, _perEditing);
+    } catch(err) { alert('Error: ' + err.message); }
+}
+
+async function toggleInasistencia(id, justificada) {
+    try {
+        await apiPost(`/api/nomina/inasistencias/${id}`, { justificada, observaciones: '' }, 'PUT');
+        if (_detEditing && _perEditing) await cargarInasistencias(_detEditing.idEmpleado, _perEditing);
+    } catch(err) { alert('Error: ' + err.message); }
+}
+
+async function eliminarInasistencia(id) {
+    if (!confirm('¿Eliminar esta inasistencia?')) return;
+    try {
+        await apiPost(`/api/nomina/inasistencias/${id}`, {}, 'DELETE');
+        if (_detEditing && _perEditing) await cargarInasistencias(_detEditing.idEmpleado, _perEditing);
+    } catch(err) { alert('Error: ' + err.message); }
 }
 
 async function guardarDetalle(id) {
@@ -630,5 +728,259 @@ function getLunes(d) {
 }
 
 // apiPost con método extendido ya está en app.js (soporta PUT/DELETE)
+
+// ══════════════════════════════════════════════════════════════════════════
+//  TAB APORTES PATRONALES (#4)
+// ══════════════════════════════════════════════════════════════════════════
+async function renderTabAportes() {
+    const div = document.getElementById('tabContent');
+    div.innerHTML = `<div style="padding:16px">
+      <h3 style="color:var(--texto);margin:0 0 8px">Aportes Patronales</h3>
+      <p style="color:var(--texto-sec);font-size:13px;margin-bottom:12px">
+        Seleccione un período cerrado para ver sus aportes patronales calculados.
+      </p>
+      <div id="aportesSelPeriodo"></div>
+      <div id="aportesContenido"></div>
+    </div>`;
+
+    try {
+        const periodos = await apiGet('/api/nomina/periodos') || [];
+        const cerrados = periodos.filter(p => p.estado === 'Cerrado');
+        const selDiv = document.getElementById('aportesSelPeriodo');
+        if (cerrados.length === 0) {
+            selDiv.innerHTML = '<p style="color:var(--texto-sec)">No hay períodos cerrados con aportes calculados.</p>';
+            return;
+        }
+        selDiv.innerHTML = `<select id="selAportePeriodo" class="input-field" style="max-width:320px;margin-bottom:12px">
+            <option value="">— Seleccionar período —</option>
+            ${cerrados.map(p => `<option value="${p.id}">${p.desde} al ${p.hasta} (Tasa ${(p.tasa||0).toFixed(2)})</option>`).join('')}
+        </select>`;
+        document.getElementById('selAportePeriodo').addEventListener('change', async function() {
+            const id = this.value;
+            if (!id) { document.getElementById('aportesContenido').innerHTML = ''; return; }
+            await cargarAportes(id);
+        });
+    } catch(err) { div.innerHTML = `<p style="color:red">Error: ${err.message}</p>`; }
+}
+
+async function cargarAportes(idPeriodo) {
+    const cont = document.getElementById('aportesContenido');
+    cont.innerHTML = '<div class="loading-msg"><div class="spinner"></div></div>';
+    try {
+        const data = await apiGet(`/api/nomina/periodos/${idPeriodo}/aportes`);
+        const lista = data.aportes || [];
+        if (lista.length === 0) {
+            cont.innerHTML = '<p style="color:var(--texto-sec)">Sin aportes calculados para este período.</p>';
+            return;
+        }
+        const fmt = n => (n||0).toFixed(2);
+        cont.innerHTML = `
+        <div style="overflow-x:auto">
+          <table class="data-table" style="font-size:12px;width:100%">
+            <thead><tr>
+              <th>Empleado</th><th style="text-align:right">Salario Bs</th>
+              <th style="text-align:right">IVSS %</th><th style="text-align:right">IVSS Bs</th>
+              <th style="text-align:right">RPVH Bs</th><th style="text-align:right">INCES Bs</th>
+              <th style="text-align:right">Cesta Bs</th><th style="text-align:right">Total Bs</th>
+              <th style="text-align:right">Total USD</th>
+            </tr></thead>
+            <tbody>
+              ${lista.map(a => `<tr>
+                <td>${a.nombre}</td><td style="text-align:right">${fmt(a.salarioBs)}</td>
+                <td style="text-align:right">${fmt(a.pctIVSS)}%</td><td style="text-align:right">${fmt(a.ivss)}</td>
+                <td style="text-align:right">${fmt(a.rpvh)}</td><td style="text-align:right">${fmt(a.inces)}</td>
+                <td style="text-align:right">${fmt(a.cesta)}</td>
+                <td style="text-align:right;font-weight:600">${fmt(a.totalBs)}</td>
+                <td style="text-align:right;font-weight:600">${fmt(a.totalUSD)}</td>
+              </tr>`).join('')}
+            </tbody>
+            <tfoot><tr style="font-weight:700;border-top:2px solid var(--borde)">
+              <td>TOTAL</td><td colspan="6"></td>
+              <td style="text-align:right">${fmt(data.totalAportesBs)}</td>
+              <td style="text-align:right">${fmt(lista.reduce((s,a)=>s+(a.totalUSD||0),0))}</td>
+            </tr></tfoot>
+          </table>
+        </div>`;
+    } catch(err) { cont.innerHTML = `<p style="color:red">Error: ${err.message}</p>`; }
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+//  TAB BENEFICIOS LOTTT
+// ══════════════════════════════════════════════════════════════════════════
+async function renderTabBeneficios() {
+    const cont = document.getElementById('tabContent');
+    cont.innerHTML = `
+    <div style="padding:12px 0">
+      <div class="flex-between mb-12">
+        <h3 style="margin:0">Beneficios LOTTT</h3>
+        <button class="btn btn-sm btn-primary" onclick="abrirCalcBeneficio()">⚙ Calcular</button>
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+        <select id="selBenAnio" class="input" style="width:120px" onchange="cargarBeneficios()">
+          ${[...Array(5)].map((_,i)=>{const a=new Date().getFullYear()-i; return `<option value="${a}">${a}</option>`;}).join('')}
+        </select>
+      </div>
+      <div id="listaBeneficios"><div class="text-dim text-sm" style="text-align:center;padding:16px 0">Cargando...</div></div>
+    </div>`;
+    await cargarBeneficios();
+}
+
+async function cargarBeneficios() {
+    const anio = document.getElementById('selBenAnio')?.value || new Date().getFullYear();
+    const div = document.getElementById('listaBeneficios');
+    try {
+        const data = await apiGet(`/api/nomina/beneficios?anio=${anio}`) || [];
+        if (!data.length) { div.innerHTML = `<div class="text-dim text-sm" style="text-align:center;padding:16px 0">Sin beneficios registrados para ${anio}.</div>`; return; }
+
+        // Agrupar por empleado
+        const byEmp = {};
+        data.forEach(b => {
+            if (!byEmp[b.idEmpleado]) byEmp[b.idEmpleado] = { nombre: b.nombre, items: [] };
+            byEmp[b.idEmpleado].items.push(b);
+        });
+
+        div.innerHTML = Object.values(byEmp).map(emp => `
+        <div class="card" style="margin-bottom:10px">
+          <div class="card-header" style="font-weight:600;padding:8px 12px;background:var(--fondo-card);border-bottom:1px solid var(--borde)">
+            ${esh(emp.nombre)}
+          </div>
+          <table style="width:100%;font-size:9pt">
+            <thead><tr>
+              <th style="text-align:left;padding:6px 8px">Tipo</th>
+              <th style="text-align:right;padding:6px 4px">Días</th>
+              <th style="text-align:right;padding:6px 4px">Monto Legal</th>
+              <th style="text-align:right;padding:6px 4px">Monto Gerencia</th>
+              <th style="text-align:right;padding:6px 4px">Diferencia</th>
+              <th style="text-align:center;padding:6px 4px">Estado</th>
+              <th style="text-align:center;padding:6px 4px"></th>
+            </tr></thead>
+            <tbody>
+              ${emp.items.map(b => {
+                const dif = (b.montoGerenciaUSD||0) - (b.montoLegalUSD||0);
+                const difColor = dif >= 0 ? 'var(--verde,green)' : 'var(--naranja,orange)';
+                return `<tr>
+                  <td style="padding:4px 8px">${esh(b.tipoBeneficio)}</td>
+                  <td style="text-align:right;padding:4px">${formatNum(b.diasCorresponden,0)}</td>
+                  <td style="text-align:right;padding:4px">${formatUSD(b.montoLegalUSD||0)}</td>
+                  <td style="text-align:right;padding:4px;font-weight:600">${formatUSD(b.montoGerenciaUSD||0)}</td>
+                  <td style="text-align:right;padding:4px;color:${difColor}">${dif>=0?'+':''}${formatUSD(dif)}</td>
+                  <td style="text-align:center;padding:4px"><span class="tag ${b.estado==='Pagado'?'tag-dim':'tag-verde'}">${esh(b.estado)}</span></td>
+                  <td style="text-align:center;padding:4px">
+                    <button class="btn btn-sm btn-ghost" style="padding:2px 6px" onclick="editarMontoGerencia(${b.id},${b.montoGerenciaUSD||0},'${esh(b.observaciones||'')}')">✏</button>
+                  </td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>`).join('');
+    } catch(err) { div.innerHTML = `<p style="color:red">Error: ${err.message}</p>`; }
+}
+
+async function abrirCalcBeneficio() {
+    const drawer = document.getElementById('drawerNom');
+    openModal('modalNom');
+    // Cargar empleados para el select
+    try {
+        const emps = await apiGet('/api/nomina/empleados?soloActivos=true') || [];
+        drawer.innerHTML = `<div class="modal-handle"></div>
+        <div class="modal-title">Calcular Beneficios LOTTT</div>
+        <div class="form-group"><label>Empleado</label>
+          <select id="benEmp" class="input">${emps.map(e=>`<option value="${e.id}">${esh(e.nombreCompleto)}</option>`).join('')}</select>
+        </div>
+        <div class="form-group"><label>Año</label>
+          <input id="benAnio" type="number" class="input" value="${new Date().getFullYear()}" min="2020" max="2030">
+        </div>
+        <div class="form-group"><label>Tasa BCV</label>
+          <input id="benTasa" type="number" class="input" value="36.5" step="0.01" min="0.01">
+        </div>
+        <button class="btn btn-primary btn-full" onclick="ejecutarCalcBeneficio()">Calcular</button>
+        <div id="resCalcBen" style="margin-top:12px"></div>`;
+    } catch(err) { drawer.innerHTML = `<div class="alert-banner">Error: ${err.message}</div>`; }
+}
+
+async function ejecutarCalcBeneficio() {
+    const idEmp = parseInt(document.getElementById('benEmp')?.value);
+    const anio  = parseInt(document.getElementById('benAnio')?.value);
+    const tasa  = parseFloat(document.getElementById('benTasa')?.value) || 36.5;
+    const div   = document.getElementById('resCalcBen');
+
+    try {
+        const data = await apiPost('/api/nomina/beneficios/calcular',
+            {idEmpleado:idEmp, anio, tasaBCV:tasa});
+        if (!data) { div.innerHTML = `<div class="alert-banner">Error al calcular</div>`; return; }
+
+        div.innerHTML = `
+        <div class="card" style="padding:12px">
+          <div class="text-sm text-dim mb-8">${esh(data.empleado)} · ${data.aniosServicio} años de servicio · Sal. diario: ${formatUSD(data.salarioDiarioUSD)}</div>
+          ${data.beneficios.map(b => `
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--borde)">
+            <div>
+              <div style="font-weight:600">${esh(b.tipo)}</div>
+              <div class="text-dim text-sm">${esh(b.obs)} · ${formatNum(b.dias,0)} días</div>
+            </div>
+            <div style="text-align:right">
+              <div class="text-sm text-dim">Legal: ${formatUSD(b.montoLegalUSD)}</div>
+              <input type="number" class="input" style="width:100px;text-align:right;font-weight:600"
+                value="${b.montoLegalUSD.toFixed(2)}" step="0.01" min="0"
+                id="benMG_${b.tipo.replace(/\s/g,'_')}">
+              <div class="text-sm text-dim">Monto gerencia</div>
+            </div>
+          </div>`).join('')}
+          <button class="btn btn-primary btn-full" style="margin-top:12px" onclick="guardarBeneficios(${idEmp},'${esh(data.empleado)}',${anio},${tasa})">
+            Registrar beneficios
+          </button>
+        </div>`;
+    } catch(err) { div.innerHTML = `<p style="color:red">${err.message}</p>`; }
+}
+
+async function guardarBeneficios(idEmp, nombre, anio, tasa) {
+    const tipos = ['Utilidades','Vacaciones','Bono_Vacacional','Prestaciones_Sociales'];
+    const tiposReales = ['Utilidades','Vacaciones','Bono Vacacional','Prestaciones Sociales'];
+    try {
+        // Leer cálculo de nuevo para obtener los montos legales
+        const calcData = await apiPost('/api/nomina/beneficios/calcular',
+            {idEmpleado:idEmp, anio, tasaBCV:tasa});
+
+        for (let i = 0; i < tipos.length; i++) {
+            const inp = document.getElementById('benMG_' + tipos[i]);
+            const montoGerencia = parseFloat(inp?.value) || 0;
+            const ben = calcData.beneficios[i];
+            await apiPost('/api/nomina/beneficios', {
+                idEmpleado: idEmp, nombreEmpleado: nombre, anio,
+                tipoBeneficio: tiposReales[i], diasCorresponden: ben.dias,
+                salarioDiarioUSD: calcData.salarioDiarioUSD,
+                montoLegalUSD: ben.montoLegalUSD, montoGerenciaUSD: montoGerencia,
+                tasaBCV: tasa, observaciones: ben.obs
+            });
+        }
+        closeModal('modalNom');
+        await cargarBeneficios();
+    } catch(err) { alert('Error: ' + err.message); }
+}
+
+async function editarMontoGerencia(id, montoActual, obs) {
+    const drawer = document.getElementById('drawerNom');
+    openModal('modalNom');
+    drawer.innerHTML = `<div class="modal-handle"></div>
+    <div class="modal-title">Editar monto gerencia</div>
+    <div class="form-group"><label>Monto gerencia (USD)</label>
+      <input id="editMG" type="number" class="input" value="${montoActual}" step="0.01" min="0">
+    </div>
+    <div class="form-group"><label>Observaciones</label>
+      <input id="editMGObs" type="text" class="input" value="${obs}">
+    </div>
+    <button class="btn btn-primary btn-full" onclick="guardarMontoGerencia(${id})">Guardar</button>`;
+}
+
+async function guardarMontoGerencia(id) {
+    const monto = parseFloat(document.getElementById('editMG')?.value) || 0;
+    const obs   = document.getElementById('editMGObs')?.value || '';
+    try {
+        await apiPost(`/api/nomina/beneficios/${id}`,
+            { montoGerenciaUSD: monto, observaciones: obs }, 'PUT');
+        closeModal('modalNom');
+        await cargarBeneficios();
+    } catch(err) { alert('Error: ' + err.message); }
+}
 
 render();

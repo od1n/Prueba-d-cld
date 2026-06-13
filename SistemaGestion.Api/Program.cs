@@ -279,6 +279,9 @@ try
     // Asegurar tabla de configuración del portal (backend OCR, etc.).
     Db.EnsureConfiguracionPortal();
 
+    // Asegurar tabla de inasistencias.
+    Db.EnsureInasistencias();
+
     // Limpieza inicial de sesiones expiradas hace > 24h.
     var limpiadas = SistemaGestion.Api.Auth.SesionesActivas.LimpiarExpiradas();
     if (limpiadas > 0)

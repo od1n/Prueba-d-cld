@@ -302,7 +302,7 @@ int filasVaciasNota = Math.Max(0, 18 - nItems);  // Nota: max 18 filas
 | HTTP 401 en `/imprimir` | No hay sesión activa | Login primero en `https://localhost:5443` |
 | InsertarPrueba "BD no encontrada" en SERVO | No tiene la ruta de red en su lista | Usar `crear-datos-prueba.ps1` (via API) en su lugar |
 | `Stop-Service SistemaGestionApi` falla | No está instalado como servicio | Cerrar ventana manualmente y re-ejecutar script .cmd |
-| MSB3027 "file locked" en publish | API corriendo bloquea el DLL | Detener la API antes de publicar |
+| MSB3027 "file locked" en publish | App o API corriendo bloquea el DLL | Cerrar la app WinForms y/o detener la API antes de publicar |
 
 ---
 

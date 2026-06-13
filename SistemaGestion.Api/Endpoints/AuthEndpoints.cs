@@ -215,6 +215,25 @@ namespace SistemaGestion.Api.Endpoints
             }
             catch { }
         }
+
+        /// <summary>Overload que abre su propia conexión (no requiere una existente).</summary>
+        internal static void RegistrarAuditoria(HttpContext ctx, string accion, string detalle)
+        {
+            try
+            {
+                using var c = Db.Conn();
+                var usuario = ctx.User?.FindFirst("nombre")?.Value ?? "API";
+                var cmd = c.CreateCommand();
+                cmd.CommandText = @"INSERT INTO LogAuditoria (FechaHora,Usuario,Accion,Tabla,Detalle)
+                    VALUES ($fh,$u,$ac,'',$de)";
+                cmd.Parameters.AddWithValue("$fh", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+                cmd.Parameters.AddWithValue("$u",  usuario);
+                cmd.Parameters.AddWithValue("$ac", accion);
+                cmd.Parameters.AddWithValue("$de", detalle);
+                cmd.ExecuteNonQuery();
+            }
+            catch { }
+        }
     }
 
     public record LoginRequest(string Usuario, string Contrasena);

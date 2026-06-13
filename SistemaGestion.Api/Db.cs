@@ -2,6 +2,18 @@ using Microsoft.Data.Sqlite;
 
 namespace SistemaGestion.Api
 {
+    public class InasistenciaEmpleado
+    {
+        public int      Id               { get; set; }
+        public int      IdEmpleado       { get; set; }
+        public string   NombreEmpleado   { get; set; } = "";
+        public string   TipoEmpleado     { get; set; } = "";
+        public DateTime Fecha            { get; set; }
+        public bool     Justificada      { get; set; }
+        public decimal  MontoDescuentoBs { get; set; }
+        public string   Observaciones    { get; set; } = "";
+    }
+
     /// <summary>
     /// Conexión directa a la BD SQLite del sistema de escritorio.
     /// La API lee/escribe la misma BD sin depender del proyecto WinForms.
@@ -234,5 +246,180 @@ namespace SistemaGestion.Api
         /// <summary>Lee un INTEGER que puede ser Int64 (COUNT, SUM, MAX, etc.).</summary>
         public static int I2(SqliteDataReader r, int i) =>
             r.IsDBNull(i) ? 0 : (int)r.GetInt64(i);
+
+        // ── Inasistencias ──────────────────────────────────────────────────
+
+        public static List<InasistenciaEmpleado> ObtenerInasistencias(
+            int? idEmpleado = null, DateTime? desde = null, DateTime? hasta = null)
+        {
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            var where = new List<string>();
+            if (idEmpleado.HasValue) { where.Add("IdEmpleado=$id"); cmd.Parameters.AddWithValue("$id", idEmpleado.Value); }
+            if (desde.HasValue)     { where.Add("Fecha>=$d");       cmd.Parameters.AddWithValue("$d", desde.Value.ToString("yyyy-MM-dd")); }
+            if (hasta.HasValue)     { where.Add("Fecha<=$h");       cmd.Parameters.AddWithValue("$h", hasta.Value.ToString("yyyy-MM-dd")); }
+            string w = where.Count > 0 ? " WHERE " + string.Join(" AND ", where) : "";
+            cmd.CommandText = $"SELECT Id,IdEmpleado,NombreEmpleado,TipoEmpleado,Fecha,Justificada,MontoDescuentoBs,Observaciones FROM InasistenciasEmpleado{w} ORDER BY Fecha DESC";
+            var list = new List<InasistenciaEmpleado>();
+            using var r = cmd.ExecuteReader();
+            while (r.Read())
+                list.Add(new InasistenciaEmpleado {
+                    Id               = I(r,0),
+                    IdEmpleado       = I(r,1),
+                    NombreEmpleado   = S(r,2),
+                    TipoEmpleado     = S(r,3),
+                    Fecha            = DateTime.TryParse(S(r,4), out var f) ? f : DateTime.MinValue,
+                    Justificada      = I(r,5) != 0,
+                    MontoDescuentoBs = D(r,6),
+                    Observaciones    = S(r,7)
+                });
+            return list;
+        }
+
+        public static int RegistrarInasistencia(
+            int idEmpleado, DateTime fecha, bool justificada,
+            string observaciones = "", decimal? tasaOverride = null)
+        {
+            using var c = Conn();
+            // Obtener datos del empleado
+            var qe = c.CreateCommand();
+            qe.CommandText = "SELECT Nombre||' '||Apellido, TipoEmpleado, SueldoDiarioUSD FROM Empleados WHERE Id=$id";
+            qe.Parameters.AddWithValue("$id", idEmpleado);
+            string nombre = "", tipo = ""; decimal sueldoDiario = 0;
+            using (var re = qe.ExecuteReader())
+            {
+                if (!re.Read()) return -1;
+                nombre = S(re,0); tipo = S(re,1); sueldoDiario = D(re,2);
+            }
+            // Calcular monto del día
+            decimal montoBs = 0;
+            if (tipo == "Produccion")
+            {
+                montoBs = CalcularBonoProduccionDia(c, idEmpleado, fecha);
+            }
+            else
+            {
+                decimal tasa = tasaOverride ?? 1;
+                if (tasa <= 0) tasa = 1;
+                montoBs = sueldoDiario * tasa;
+            }
+            var cmd = c.CreateCommand();
+            cmd.CommandText = @"INSERT INTO InasistenciasEmpleado
+                (IdEmpleado,NombreEmpleado,TipoEmpleado,Fecha,Justificada,MontoDescuentoBs,Observaciones)
+                VALUES($id,$ne,$te,$f,$j,$m,$o)
+                ON CONFLICT(IdEmpleado,Fecha) DO UPDATE SET
+                    Justificada=excluded.Justificada,
+                    MontoDescuentoBs=excluded.MontoDescuentoBs,
+                    Observaciones=excluded.Observaciones";
+            cmd.Parameters.AddWithValue("$id", idEmpleado);
+            cmd.Parameters.AddWithValue("$ne", nombre);
+            cmd.Parameters.AddWithValue("$te", tipo);
+            cmd.Parameters.AddWithValue("$f",  fecha.ToString("yyyy-MM-dd"));
+            cmd.Parameters.AddWithValue("$j",  justificada ? 1 : 0);
+            cmd.Parameters.AddWithValue("$m",  (double)montoBs);
+            cmd.Parameters.AddWithValue("$o",  observaciones ?? "");
+            cmd.ExecuteNonQuery();
+            var qid = c.CreateCommand();
+            qid.CommandText = "SELECT Id FROM InasistenciasEmpleado WHERE IdEmpleado=$id AND Fecha=$f";
+            qid.Parameters.AddWithValue("$id", idEmpleado);
+            qid.Parameters.AddWithValue("$f",  fecha.ToString("yyyy-MM-dd"));
+            return (int)(long)(qid.ExecuteScalar() ?? -1L);
+        }
+
+        public static bool ActualizarInasistencia(int id, bool justificada, string observaciones)
+        {
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = "UPDATE InasistenciasEmpleado SET Justificada=$j, Observaciones=$o WHERE Id=$id";
+            cmd.Parameters.AddWithValue("$id", id);
+            cmd.Parameters.AddWithValue("$j",  justificada ? 1 : 0);
+            cmd.Parameters.AddWithValue("$o",  observaciones ?? "");
+            return cmd.ExecuteNonQuery() > 0;
+        }
+
+        public static bool EliminarInasistencia(int id)
+        {
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = "DELETE FROM InasistenciasEmpleado WHERE Id=$id";
+            cmd.Parameters.AddWithValue("$id", id);
+            return cmd.ExecuteNonQuery() > 0;
+        }
+
+        public static decimal CalcularDescuentoFaltas(
+            int idEmpleado, DateTime desde, DateTime hasta, decimal tasa)
+        {
+            if (tasa <= 0) tasa = 1;
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = @"SELECT COALESCE(SUM(MontoDescuentoBs),0) FROM InasistenciasEmpleado
+                WHERE IdEmpleado=$id AND Justificada=0 AND Fecha >= $d AND Fecha <= $h";
+            cmd.Parameters.AddWithValue("$id", idEmpleado);
+            cmd.Parameters.AddWithValue("$d", desde.ToString("yyyy-MM-dd"));
+            cmd.Parameters.AddWithValue("$h", hasta.ToString("yyyy-MM-dd"));
+            decimal totalBs = (decimal)(double)(cmd.ExecuteScalar() ?? 0.0);
+            return Math.Round(totalBs / tasa, 2);
+        }
+
+        public static int ContarFaltasInjustificadas(
+            int idEmpleado, DateTime desde, DateTime hasta)
+        {
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = @"SELECT COUNT(*) FROM InasistenciasEmpleado
+                WHERE IdEmpleado=$id AND Justificada=0 AND Fecha >= $d AND Fecha <= $h";
+            cmd.Parameters.AddWithValue("$id", idEmpleado);
+            cmd.Parameters.AddWithValue("$d", desde.ToString("yyyy-MM-dd"));
+            cmd.Parameters.AddWithValue("$h", hasta.ToString("yyyy-MM-dd"));
+            return (int)(long)(cmd.ExecuteScalar() ?? 0L);
+        }
+
+        /// <summary>Calcula el bono de producción de un día específico para un empleado.</summary>
+        private static decimal CalcularBonoProduccionDia(SqliteConnection c, int idEmpleado, DateTime fecha)
+        {
+            var cmd = c.CreateCommand();
+            cmd.CommandText = @"
+                SELECT COALESCE(SUM(d.Cantidad * t.TarifaBs),0)
+                FROM DetalleProduccionMolde d
+                JOIN RegistroProduccionDia r ON r.Id = d.IdRegistro
+                JOIN TarifasBonoProduccion t
+                  ON t.CodigoProducto = d.CodigoProducto
+                 AND t.IdEmpleado     = $id
+                 AND r.Fecha >= t.FechaDesde
+                 AND (t.FechaHasta IS NULL OR r.Fecha <= t.FechaHasta)
+                WHERE r.Fecha = $f";
+            cmd.Parameters.AddWithValue("$id", idEmpleado);
+            cmd.Parameters.AddWithValue("$f",  fecha.ToString("yyyy-MM-dd"));
+            try { return (decimal)(double)(cmd.ExecuteScalar() ?? 0.0); }
+            catch { return 0; }
+        }
+
+        /// <summary>Asegura que la tabla InasistenciasEmpleado exista.</summary>
+        public static void EnsureInasistencias()
+        {
+            try
+            {
+                using var c = Conn();
+                using var cmd = c.CreateCommand();
+                cmd.CommandText = @"
+                    CREATE TABLE IF NOT EXISTS InasistenciasEmpleado (
+                        Id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                        IdEmpleado       INTEGER NOT NULL,
+                        NombreEmpleado   TEXT,
+                        TipoEmpleado     TEXT,
+                        Fecha            TEXT    NOT NULL,
+                        Justificada      INTEGER NOT NULL DEFAULT 0,
+                        MontoDescuentoBs REAL    DEFAULT 0,
+                        Observaciones    TEXT,
+                        FOREIGN KEY(IdEmpleado) REFERENCES Empleados(Id)
+                    );
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_inas_emp_fecha ON InasistenciasEmpleado(IdEmpleado, Fecha);";
+                cmd.ExecuteNonQuery();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[API] WARN EnsureInasistencias: {ex.Message}");
+            }
+        }
     }
 }
