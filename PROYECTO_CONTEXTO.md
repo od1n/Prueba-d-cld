@@ -41,14 +41,14 @@ Credenciales: admin / admin1234
 - **Script inicio**: `C:\Users\PC\AppData\Local\SistemaGestion\repo\Scripts\iniciar-servicios-olimpo.cmd`
 
 ### SERVO (oficina — usuario) — conecta a OLIMPO por red
-- **Repo**: `C:\SistemaGestion\repo`
-- **Publish API**: `C:\SistemaGestion\publish\Api`
+- **Repo**: `C:\SistemaGestion` (raíz, NO subcarpeta repo)
+- **Publish API**: `C:\Users\naos\AppData\Local\SistemaGestion\publish\Api`
 - **BD**: `\\192.168.68.132\SistemaGestion\sistema_gestion.db` (red, misma BD de OLIMPO)
 - **Digitalizador**: usa el de OLIMPO via `http://192.168.68.132:8080`
-- **Env vars**: `C:\SistemaGestion\publish\Api\sg-env.cmd`
-- **Funciones**: solo API web, impresión de facturas sobre formularios preimpresos
-- **Script inicio**: `C:\SistemaGestion\repo\Scripts\iniciar-servicios-servo.cmd`
-- **Impresora**: EPSON L1250 (soporta tamaños de papel personalizados en SERVO)
+- **Funciones**: SOLO API web (NO WinForms). Impresión de facturas sobre formularios preimpresos
+- **Script inicio**: `C:\SistemaGestion\Scripts\iniciar-servicios-servo.cmd`
+- **Impresora**: EPSON L1250 (soporta tamaños de papel personalizados)
+- **IMPORTANTE**: NO crear subcarpetas repo/ ni Prueba-d-cld-develop/ dentro de C:\SistemaGestion — causan duplicación de archivos .cs y errores de compilación
 
 ---
 
@@ -61,24 +61,27 @@ git add <archivos>
 git commit -m "descripción"
 git push origin develop
 
-# 2. En OLIMPO — pull, publish, reiniciar
+# 2. En OLIMPO — pull, publish WinForms + API por separado
 cd C:\Users\PC\AppData\Local\SistemaGestion\repo
 git pull origin develop
-dotnet publish SistemaGestion.Api\SistemaGestion.Api.csproj --configuration Release --output C:\Users\PC\AppData\Local\SistemaGestion\publish\Api
+dotnet publish SistemaGestion.csproj -c Release -o C:\Users\PC\AppData\Local\SistemaGestion\publish\App --self-contained
+cd SistemaGestion.Api
+dotnet publish SistemaGestion.Api.csproj -c Release -o C:\Users\PC\AppData\Local\SistemaGestion\publish\Api --self-contained
 # Reiniciar: cerrar ventana de la API y ejecutar:
 C:\Users\PC\AppData\Local\SistemaGestion\repo\Scripts\iniciar-servicios-olimpo.cmd
 
-# 3. En SERVO — pull, publish, reiniciar
-cd C:\SistemaGestion\repo
+# 3. En SERVO — pull, publish SOLO API (NO WinForms)
+cd C:\SistemaGestion
 git pull origin develop
-dotnet publish SistemaGestion.Api\SistemaGestion.Api.csproj --configuration Release --output C:\SistemaGestion\publish\Api
-# Reiniciar: cerrar ventana de la API y ejecutar:
-C:\SistemaGestion\repo\Scripts\iniciar-servicios-servo.cmd
+cd SistemaGestion.Api
+dotnet publish SistemaGestion.Api.csproj -c Release -o C:\Users\naos\AppData\Local\SistemaGestion\publish\Api --self-contained
 ```
 
-**Nota importante**: usar `--output` (no `-o`) en dotnet publish — PowerShell interpreta `-o` como parámetro propio.
+**IMPORTANTE**: publicar CADA proyecto por separado (no la solución). `dotnet publish` a nivel de .sln con `--output` mezcla salidas y causa errores.
 
-**Nota**: el servicio Windows `SistemaGestionApi` NO está instalado actualmente. La API se ejecuta manualmente via los scripts `.cmd`. Si se necesita como servicio, usar `instalar-sistema.ps1 -ComoServicio`.
+**IMPORTANTE**: en SERVO NUNCA publicar WinForms — solo la API. SERVO no tiene app de escritorio.
+
+**Nota**: el servicio Windows `SistemaGestionApi` NO está instalado actualmente. La API se ejecuta manualmente via los scripts `.cmd`.
 
 ---
 
@@ -181,14 +184,20 @@ Prueba d cld/
 - Clase CSS `pp` (pre-printed): `visibility:hidden` en `@media print` — estos elementos se ven en pantalla pero NO se imprimen
 - `@media print{.pp{visibility:hidden}*{border-color:transparent!important;background:none!important}}`
 
-### Dos formatos de impresión:
+### Dos formatos de impresión vía API (portal web — formularios preimpresos):
 1. **Factura Fiscal** (con IVA): 154mm × 305mm, recuadro interior 135mm ancho
    - `@page{size:154mm 305mm;margin:8mm 10mm}`
    - Elementos `pp`: logo empresa, dirección, N° factura, N° control, labels de campos, encabezados de tabla, forma de pago labels, firmas
    - Elementos que SÍ imprimen: fecha, nombre cliente, RIF, dirección, teléfono, items (cant/cod/desc/precio/total), totales numéricos, checkmarks de forma de pago
-2. **Nota de Entrega** (sin IVA): 140mm × 210mm, contenido 128mm
+2. **Nota de Entrega** (sin IVA) vía API: 140mm × 210mm
    - `@page{size:140mm 210mm;margin:6mm}`
    - Misma lógica pp/datos
+
+### Impresión desde WinForms (QuestPDF):
+- **Factura Fiscal**: tamaño carta, diseño completo con empresa, tabla coloreada, totales desglosados
+- **Nota de Entrega**: 140×210mm, diseño COMPLETO en papel normal (no preimpreso). Incluye encabezado empresa (EL HATO PASCHER C.A., RIF, dirección, teléfonos), datos del cliente (RIF, dirección, teléfono), tabla de productos con colores, totales. Archivo: `PdfService.cs` método `GenerarFactura()`.
+- **Inventario**: impresión paginada desde FrmInventario y Reportes > Inventario (PrintDocument + PrintPreviewDialog)
+- **Pronóstico de reorden**: impresión desde Reportes > Reorden MP
 
 ### Filas vacías para llenar tabla:
 ```csharp
@@ -204,40 +213,49 @@ int filasVaciasNota = Math.Max(0, 18 - nItems);  // Nota: max 18 filas
 
 ---
 
-## 7. Estado actual del desarrollo
+## 7. Estado actual del desarrollo (v1.1 — Junio 2026)
 
 ### Funcionando
-- App de escritorio completa en OLIMPO
-- API web con todos los módulos (dashboard, facturación, clientes, inventario, kardex, producción, nómina, egresos, compras, reportes)
+- App de escritorio completa en OLIMPO (WinForms)
+- API web con todos los módulos en OLIMPO y SERVO
 - Portal web SPA funcional
 - Auth JWT + bcrypt + rate limiting + headers de seguridad
 - Digitalizador OCR (Python + Claude Vision)
 - Tests automatizados
-- Deploy automatizado en OLIMPO y SERVO
-- Impresión: templates generan HTML correcto, elementos preimpresos ocultos con `pp`
+- Deploy en las 3 máquinas
+- Impresión desde WinForms (QuestPDF) y portal web (HTML + CSS @media print)
 
-### EN CURSO — Impresión sobre formularios preimpresos
-**Estado**: los templates generan el HTML correcto con `visibility:hidden` para elementos preimpresos. En SERVO los tamaños de papel personalizados SÍ aparecen en Chrome.
+### Kardex dual (NUEVO v1.1)
+- **Kardex A** (MATERIA_PRIMA): se alimenta automáticamente de compras (ENTRADA) y producción (SALIDA de insumos)
+- **Kardex B** (PRODUCTO): se alimenta automáticamente de producción (ENTRADA de productos) y ventas (SALIDA)
+- Archivos clave: `DB_Compras.cs`, `DB_RegistroProduccion.cs`, `DB.cs` (GuardarDetallesYKardex)
+- Campos: TipoKardex, CostoUnitario, SaldoAnterior, NuevoSaldo en tabla MovimientosInventario
+- NO requiere carga manual — todo se registra desde compras, producción y ventas
 
-**Problema pendiente**: la factura fiscal se imprime "muy larga" — el contenido no cuadra verticalmente con el formulario preimpreso de 154mm × 305mm. 
+### Pronóstico de reorden (NUEVO v1.1)
+- Archivo: `DB_PronosticoReorden.cs`
+- UI: FrmReportes > tab "Reorden MP"
+- Calcula consumo promedio diario, días de cobertura, cantidad sugerida de compra
+- Estados: URGENTE (rojo), PRONTO (amarillo), OK (verde)
+- API: `GET /api/inventario/pronostico-reorden?diasAnalisis=90&leadTime=7&coberturaMeta=30`
 
-**Configuración de impresión verificada**:
-- Tamaño de papel: Factura Fiscal (154×305mm) — NO es Carta
-- Escala: 100%
-- Márgenes: por defecto
+### API ComprasEndpoints actualizada (v1.1)
+- `POST /api/compras`: guarda detalles + stock + Kardex A (MATERIA_PRIMA) con CostoUnitario
+- `PUT /api/compras/{id}`: NUEVO — revierte stock anterior, re-inserta con Kardex
+- `GET /api/inventario/pronostico-reorden`: NUEVO — pronóstico de reorden
 
-**Posibles causas a investigar**:
-- Las 28 filas vacías de relleno (height:5mm cada una = 140mm) más flex:1 podrían estar forzando la tabla más alta de lo necesario
-- Los márgenes de `@page` (8mm arriba/abajo, 10mm lados) podrían no coincidir con los márgenes físicos del formulario preimpreso
-- La altura del encabezado empresa (div.empresa con `pp`) ocupa espacio via `visibility:hidden` — si el formulario preimpreso tiene un encabezado de distinto alto, todo se desplaza
-- La posición vertical exacta de cada sección (fecha, cliente, items, totales) necesita calibrarse contra el formulario físico real
+### Nota de Entrega (actualizada v1.1)
+- Desde WinForms: diseño COMPLETO en papel normal 140×210mm (QuestPDF), con encabezado empresa y datos del cliente
+- Desde portal web: sigue usando lógica pp/datos sobre formulario preimpreso
 
-**Próximo paso**: medir en el formulario preimpreso la posición exacta (en mm desde el borde superior) de cada zona (fecha, datos cliente, inicio tabla items, inicio totales/firmas) y ajustar el CSS para que coincida.
+### Manuales actualizados a v1.1
+- `Manual-App-Escritorio-SistemaGestion.pdf` (24 páginas): +3 secciones (Kardex, Reorden, Impresión)
+- `Manual-Tecnico-SistemaGestion.pdf` (25 páginas): +3 secciones (Kardex dual, Pronóstico, API actualizada)
 
 ### Pendiente futuro
 - Registrar la API como servicio de Windows (actualmente se ejecuta manual)
-- Fine-tuning de posiciones de impresión contra formularios preimpresos reales
-- Nota de entrega: misma calibración que factura fiscal
+- Fine-tuning de impresión de factura fiscal sobre formularios preimpresos (calibrar posiciones)
+- Costo Promedio Ponderado (CPP) completo en Kardex
 
 ---
 
@@ -257,14 +275,20 @@ int filasVaciasNota = Math.Max(0, 18 - nItems);  // Nota: max 18 filas
 
 | Tarea | Archivo |
 |---|---|
-| Templates de impresión | `SistemaGestion.Api/Endpoints/ClientesEndpoints.cs` (líneas ~555-743) |
-| Endpoints de facturación | `SistemaGestion.Api/Endpoints/ClientesEndpoints.cs` |
+| Templates impresión (portal web) | `SistemaGestion.Api/Endpoints/ClientesEndpoints.cs` |
+| Impresión WinForms (QuestPDF) | `PdfService.cs` (GenerarFactura, Imprimir) |
+| Compras + Kardex A (WinForms) | `DB_Compras.cs` (InsertarCompraConDetallesYKardex, etc.) |
+| Compras + Kardex A (API) | `SistemaGestion.Api/Endpoints/ComprasEndpoints.cs` |
+| Producción + Kardex A/B | `DB_RegistroProduccion.cs` (RegistrarMovimientoTx) |
+| Ventas + Kardex B | `DB.cs` (GuardarDetallesYKardex) |
+| Pronóstico de reorden | `DB_PronosticoReorden.cs` + `FrmReportes.cs` (tab Reorden MP) |
+| Inventario UI | `FrmInventario.cs` (incluye botón Imprimir) |
+| Endpoints facturación | `SistemaGestion.Api/Endpoints/ClientesEndpoints.cs` |
 | Frontend facturas | `SistemaGestion.Api/wwwroot/js/pages/facturas.js` |
 | Auth/login | `SistemaGestion.Api/Endpoints/AuthEndpoints.cs` + `Auth/TokenService.cs` |
 | Config API | `SistemaGestion.Api/Program.cs` |
-| BD schema | `SistemaGestion.Api/Db.cs` (API) o `DB.cs` (WinForms) |
+| BD schema + migraciones | `DB.cs` (WinForms, MigrarEsquema) / `Db.cs` (API) |
 | Variables de entorno | `Scripts/sg-env-olimpo.cmd` / `Scripts/sg-env-servo.cmd` |
-| Datos de prueba | `Scripts/crear-datos-prueba.ps1` |
 
 ---
 
@@ -287,5 +311,20 @@ int filasVaciasNota = Math.Max(0, 18 - nItems);  // Nota: max 18 filas
 - **RIF**: J-30571871-7
 - **Dirección**: Ctra. Villa de Cura - San Francisco de Asís, Local N° S/N, Sector Los Colorados - Villa de Cura - Estado Aragua
 - **Teléfonos**: 0244 386.10.13 - 386.33.04
-- **Formulario preimpreso Factura Fiscal**: 154mm × 305mm (recuadro interior 135mm ancho)
-- **Formulario preimpreso Nota de Entrega**: 140mm × 210mm (contenido 128mm ancho)
+- **Formulario preimpreso Factura Fiscal**: 154mm × 305mm (recuadro interior 135mm ancho) — usado en portal web
+- **Nota de Entrega**: 140mm × 210mm — en WinForms se imprime diseño completo en papel normal (no preimpreso)
+
+---
+
+## 12. Reglas para el asistente
+
+- Español neutro (NUNCA argentino)
+- Comandos PowerShell SIEMPRE con ruta completa entre comillas si tiene espacios
+- Publicar CADA proyecto .csproj por separado, NUNCA la solución con --output
+- SERVO solo corre API, NUNCA publicar WinForms ahí
+- Buscar la solución óptima, NO estar de acuerdo con el usuario por defecto
+- Evaluar bien antes de dar múltiples soluciones: dar UNA, la mejor
+- Si la conversación se alarga y se pierde información, AVISAR
+- Verificar rutas y estructura antes de dar comandos — no asumir
+- Repo OLIMPO: `C:\Users\PC\AppData\Local\SistemaGestion\repo`
+- Repo SERVO: `C:\SistemaGestion` (raíz directa, sin subcarpetas adicionales)
