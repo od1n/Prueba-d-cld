@@ -454,7 +454,7 @@ async function guardarFactura() {
         fecha: document.getElementById('fFecha')?.value || null,
         codigoCliente: cli,
         formaDePago: fp,
-        pctIva: parseFloat(document.getElementById('fIva')?.value) || 16,
+        pctIva: document.getElementById('fIva')?.value !== '' ? parseFloat(document.getElementById('fIva').value) : 16,
         descuento: parseFloat(document.getElementById('fDesc')?.value) || 0,
         diasCredito: diasCredito,
         observaciones: document.getElementById('fObs')?.value?.trim() || '',
