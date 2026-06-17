@@ -600,7 +600,8 @@ namespace SistemaGestion.Api.Endpoints
                 if (tipoDoc == "NotaEntrega")
                 {
                     // ═══════════════════════════════════════════════════════
-                    //  NOTA DE ENTREGA — Media carta (~14×21cm)
+                    //  NOTA DE ENTREGA — Diseño COMPLETO para papel normal
+                    //  140×210mm — NO usa formato preimpreso
                     // ═══════════════════════════════════════════════════════
                     html =
                     "<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'>" +
@@ -610,60 +611,66 @@ namespace SistemaGestion.Api.Endpoints
                     "html,body{height:100%;margin:0}" +
                     "body{width:128mm;margin:0 auto;color:#111}" +
                     ".page-wrap{display:flex;flex-direction:column;min-height:198mm}" +
-                    ".items-section{flex:1;display:flex;flex-direction:column}" +
-                    ".items-section table{flex:1}" +
-                    ".hdr{border:1px solid #333;margin-bottom:2mm}" +
-                    ".hdr-top{display:grid;grid-template-columns:40mm 1fr 40mm;border-bottom:1px solid #333}" +
-                    ".hdr-top>div{padding:2mm;border-right:1px solid #333}" +
-                    ".hdr-top>div:last-child{border-right:none}" +
-                    ".lbl{font-size:7pt;color:#555;text-transform:uppercase}" +
-                    ".val{font-size:9pt;font-weight:700}" +
-                    ".fecha-grid{display:grid;grid-template-columns:1fr 1fr;gap:1mm;text-align:center}" +
-                    ".fecha-grid div{border:1px solid #999;padding:1mm;font-size:8pt}" +
+                    ".empresa{text-align:center;margin-bottom:2mm}" +
+                    ".empresa h1{font-size:11pt;font-weight:900;color:#C00;margin-bottom:0.5mm}" +
+                    ".empresa .dir{font-size:6pt;color:#333}" +
+                    ".empresa .rif{font-size:7pt;font-weight:700}" +
+                    ".doc-info{border:1px solid #333;padding:2mm;margin-bottom:1mm;display:grid;grid-template-columns:1fr auto}" +
+                    ".doc-titulo{font-size:8pt;font-weight:700;color:#1E3A8A}" +
+                    ".doc-num{font-size:12pt;font-weight:900;color:#C00}" +
+                    ".doc-fecha{font-size:9pt;text-align:right}" +
                     ".cli{border:1px solid #333;padding:1.5mm 2mm;font-size:8pt;margin-bottom:1mm}" +
                     ".cli b{font-size:7pt;color:#555}" +
+                    ".items-section{flex:1;display:flex;flex-direction:column}" +
+                    ".items-section table{flex:1}" +
                     "table{width:100%;border-collapse:collapse;border:1px solid #333;margin-bottom:2mm}" +
                     "thead{background:#eee}" +
                     "th{font-size:7pt;padding:1.5mm 2mm;border:1px solid #333;text-transform:uppercase}" +
                     "td{padding:1.5mm 2mm;border-bottom:1px solid #ccc;font-size:8pt;height:5mm}" +
                     ".c{text-align:center}.r{text-align:right}" +
-                    ".pie{display:grid;grid-template-columns:1fr 1fr;gap:2mm;font-size:8pt}" +
+                    ".pie{display:grid;grid-template-columns:1fr 1fr;gap:2mm;font-size:8pt;margin-top:2mm}" +
                     ".pie-izq{border-top:1px solid #333;padding-top:2mm;text-align:center;font-size:7pt}" +
                     ".totales{border:1px solid #333}" +
                     ".totales tr td{padding:1mm 2mm;border-bottom:1px solid #ccc;font-size:8pt}" +
                     ".totales tr:last-child td{font-weight:700;border-top:2px solid #333}" +
-                    ".no-print{margin-bottom:4mm;padding:2mm 6mm;background:#333;color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:9pt}" +
-                    "@media print{.no-print{display:none!important}.pp{visibility:hidden}*{border-color:transparent!important;background:none!important}body{margin:0}}" +
+                    ".no-print{margin-bottom:4mm;padding:2mm 6mm;background:#C00;color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:9pt}" +
+                    "@media print{.no-print{display:none!important}}" +
                     "</style></head><body>" +
                     "<button class='no-print' onclick='window.print()'>Imprimir</button>" +
                     "<div class='page-wrap'>" +
 
-                    // Encabezado
-                    "<div class='hdr'><div class='hdr-top'>" +
-                    "<div style='text-align:center'><span class='lbl pp'>Factura</span><br><span class='val'>N° " + H(numF) + "</span></div>" +
-                    "<div></div>" +
-                    "<div><span class='lbl pp'>Fecha</span><div class='fecha-grid'><div>" + H(fechaDia) + "</div><div>" + H(fechaMes) + "</div></div>" +
-                    "<span class='lbl pp'>R.I.F.:</span> " + H(rifCli) + "</div>" +
-                    "</div></div>" +
+                    // Encabezado empresa (se imprime completo)
+                    "<div class='empresa'>" +
+                    "<h1>EL HATO PASCHER C.A.</h1>" +
+                    "<div class='dir'>Ctra. Villa de Cura - San Francisco de As&iacute;s, Local N&deg; S/N, Sector Los Colorados - Villa de Cura - Estado Aragua</div>" +
+                    "<div class='rif'>RIF: J-30571871-7 &nbsp;&nbsp; Telfs: 0244 386.10.13 - 386.33.04</div>" +
+                    "</div>" +
 
-                    // Datos cliente
-                    "<div class='cli'><b class='pp'>NOMBRE:</b> " + H(nomCli) + "</div>" +
-                    "<div class='cli'><b class='pp'>DIRECCIÓN:</b> " + H(dirCompleta) + "</div>" +
-                    "<div class='cli' style='text-align:right'><b class='pp'>TELF:</b> " + H(telCli) + "</div>" +
+                    // Número y fecha
+                    "<div class='doc-info'>" +
+                    "<div><span class='doc-titulo'>NOTA DE ENTREGA</span><br>" +
+                    "<span class='doc-num'>N&deg; " + H(numF) + "</span></div>" +
+                    "<div class='doc-fecha'><b style='font-size:6pt'>FECHA</b><br>" + H(fechaDia) + "/" + H(fechaMes) + "/" + H(fechaAno) + "</div>" +
+                    "</div>" +
 
-                    // Tabla items (flex:1 para llenar la página)
+                    // Datos cliente (todo visible)
+                    "<div class='cli'><b>CLIENTE:</b> " + H(nomCli) + "</div>" +
+                    "<div class='cli'><b>RIF:</b> " + H(rifCli) + " &nbsp;&nbsp; <b>DIRECCI&Oacute;N:</b> " + H(dirCompleta) + "</div>" +
+                    "<div class='cli'><b>TEL&Eacute;FONO:</b> " + H(telCli) + " &nbsp;&nbsp; <b>COND. PAGO:</b> " + H(condPago) + "</div>" +
+
+                    // Tabla items
                     "<div class='items-section'>" +
-                    "<table><thead class='pp'><tr><th style='width:12mm'>Cant.</th><th>Descripción</th><th style='width:22mm'>P. Unit.</th><th style='width:22mm'>Total</th></tr></thead>" +
+                    "<table><thead><tr><th style='width:12mm'>Cant.</th><th>Descripci&oacute;n</th><th style='width:22mm'>P. Unit.</th><th style='width:22mm'>Total</th></tr></thead>" +
                     "<tbody>" + filasNota + "</tbody></table>" +
                     "</div>" +
 
-                    // Pie: firma + totales (siempre al fondo)
+                    // Pie: firma + totales
                     "<div class='pie'>" +
-                    "<div class='pie-izq pp'><div style='margin-top:8mm'>FIRMA</div><div style='font-size:6pt;color:#888'>Esta factura va sin tachadura ni enmendaduras</div></div>" +
+                    "<div class='pie-izq'><div style='margin-top:8mm'>Firma y Sello</div></div>" +
                     "<table class='totales'>" +
-                    "<tr><td class='r pp'>SUB-TOTAL</td><td class='r'>" + baseImponible.ToString("N2") + "</td></tr>" +
-                    (desc > 0 ? "<tr><td class='r pp'>DESCUENTO</td><td class='r'>-" + montoDesc.ToString("N2") + "</td></tr>" : "<tr><td class='r pp'>DESCUENTO</td><td class='r'></td></tr>") +
-                    "<tr><td class='r pp'>TOTAL Bs F.</td><td class='r'>" + (totalBs > 0 ? totalBs.ToString("N2") : total.ToString("N2")) + "</td></tr>" +
+                    "<tr><td class='r'>SUB-TOTAL</td><td class='r'>" + baseImponible.ToString("N2") + "</td></tr>" +
+                    (desc > 0 ? "<tr><td class='r'>DESCUENTO</td><td class='r'>-" + montoDesc.ToString("N2") + "</td></tr>" : "") +
+                    "<tr><td class='r'><b>TOTAL</b></td><td class='r'><b>" + total.ToString("N2") + "</b></td></tr>" +
                     "</table></div>" +
                     "</div>" + // cierre page-wrap
                     "</body></html>";
