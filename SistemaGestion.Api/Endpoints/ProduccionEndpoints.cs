@@ -250,19 +250,8 @@ namespace SistemaGestion.Api.Endpoints
 
             app.MapGet("/api/produccion/planilla", async (HttpContext ctx) =>
             {
-                // Load mold catalog for headers
-                using var c = Db.Conn();
-                var cmd = c.CreateCommand();
-                cmd.CommandText = "SELECT CodigoMold, Descripcion FROM TbMoldes ORDER BY CodigoMold";
-                var moldes = new List<(string cod, string desc)>();
-                using var r = cmd.ExecuteReader();
-                while (r.Read()) moldes.Add((Db.S(r,0), Db.S(r,1)));
-
-                var hoy = DateTime.Today.ToString("dd/MM/yyyy");
-                // Count molds to calculate available space
-                var nMoldes = moldes.Count;
-                // Max blank rows: ensure total fits on one page (max ~20 data rows)
-                var blankRows = Math.Max(0, 10 - nMoldes);
+                // 12 filas vacías — el operario escribe los moldes en uso ese día
+                const int filasMolde = 12;
 
                 var html = "<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'>" +
                 "<title>Planilla de Producción</title><style>" +
@@ -278,7 +267,7 @@ namespace SistemaGestion.Api.Endpoints
                 "table{width:100%;border-collapse:collapse;margin-bottom:2mm}" +
                 "th,td{border:1px solid #333;padding:1mm 2mm;text-align:center}" +
                 "th{background:#eee;font-size:6.5pt;text-transform:uppercase}" +
-                "td{height:5.5mm;font-size:7.5pt}" +
+                "td{height:7mm;font-size:7.5pt}" +
                 ".noprint{margin-bottom:3mm;padding:2mm 8mm;background:#333;color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:10pt}" +
                 "@media print{.noprint{display:none!important}html,body{width:100%;height:100%;}}" +
                 "</style></head><body>" +
@@ -293,17 +282,13 @@ namespace SistemaGestion.Api.Endpoints
                 "<div><label>TURNO:</label> __________</div>" +
                 "<div><label>MATERIAL:</label> ☐ Virgen ☐ Reciclado</div>" +
                 "</div>" +
-                "<table><thead><tr><th style='width:28mm'>MOLDE</th><th>1ª CALIDAD</th><th>2ª CALIDAD</th><th>RECICLADO</th><th style='color:red'>DEFECTUOSAS</th><th>TOTAL</th></tr></thead><tbody>";
+                "<table><thead><tr><th style='width:5mm'>#</th><th style='width:28mm'>MOLDE</th><th>1ª CALIDAD</th><th>2ª CALIDAD</th><th>RECICLADO</th><th style='color:red'>DEFECTUOSAS</th><th>TOTAL</th></tr></thead><tbody>";
 
-                // One row per mold from catalog
-                foreach (var (cod, desc) in moldes)
-                    html += $"<tr><td style='text-align:left;font-size:7pt'>{System.Web.HttpUtility.HtmlEncode(cod)} - {System.Web.HttpUtility.HtmlEncode(desc)}</td><td></td><td></td><td></td><td></td><td></td></tr>";
+                // 12 filas vacías — el operario escribe los moldes en producción ese día
+                for (int i = 1; i <= filasMolde; i++)
+                    html += $"<tr><td style='color:#aaa'>{i}</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>";
 
-                // Blank rows (dynamic based on mold count)
-                for (int i = 0; i < blankRows; i++)
-                    html += "<tr><td></td><td></td><td></td><td></td><td></td><td></td></tr>";
-
-                html += "<tr style='font-weight:700;background:#f5f5f5'><td>TOTALES</td><td></td><td></td><td></td><td></td><td></td></tr>" +
+                html += "<tr style='font-weight:700;background:#f5f5f5'><td></td><td>TOTALES</td><td></td><td></td><td></td><td></td><td></td></tr>" +
                 "</tbody></table>" +
                 "<table><thead><tr><th style='width:28mm'>MATERIAL / INSUMO</th><th>KG UTILIZADOS</th><th>LOTE</th><th>OBSERVACIONES</th></tr></thead><tbody>";
 

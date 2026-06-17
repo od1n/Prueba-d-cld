@@ -148,8 +148,8 @@ namespace SistemaGestion
                                    .Padding(3).AlignCenter().Text(t).Bold();
                             }
 
+                            TC();        // # vacío
                             TC("TOTAL");
-                            TC();
                             if (mostrarVuelt) TC();
                             if (esVirgen) { TC(); TC(); }
                             else            TC();
