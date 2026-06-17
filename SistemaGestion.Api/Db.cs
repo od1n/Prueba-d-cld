@@ -276,11 +276,23 @@ namespace SistemaGestion.Api
             return list;
         }
 
+        /// <summary>Cache de bono de producción por día (API).</summary>
+        private static readonly Dictionary<(int,string), decimal> _cacheBonoDia = new();
+        public static void LimpiarCacheBono() => _cacheBonoDia.Clear();
+
         public static int RegistrarInasistencia(
             int idEmpleado, DateTime fecha, bool justificada,
             string observaciones = "", decimal? tasaOverride = null)
         {
             using var c = Conn();
+
+            // Validar que la fecha caiga dentro de algún período de nómina
+            var qp = c.CreateCommand();
+            qp.CommandText = "SELECT COUNT(*) FROM PeriodosNomina WHERE $f >= FechaDesde AND $f <= FechaHasta";
+            qp.Parameters.AddWithValue("$f", fecha.ToString("yyyy-MM-dd"));
+            var periodoCount = (long)(qp.ExecuteScalar() ?? 0L);
+            if (periodoCount == 0) return -2; // Fecha fuera de todo período
+
             // Obtener datos del empleado
             var qe = c.CreateCommand();
             qe.CommandText = "SELECT Nombre||' '||Apellido, TipoEmpleado, SueldoDiarioUSD FROM Empleados WHERE Id=$id";
@@ -291,11 +303,16 @@ namespace SistemaGestion.Api
                 if (!re.Read()) return -1;
                 nombre = S(re,0); tipo = S(re,1); sueldoDiario = D(re,2);
             }
-            // Calcular monto del día
+            // Calcular monto del día (con cache)
             decimal montoBs = 0;
             if (tipo == "Produccion")
             {
-                montoBs = CalcularBonoProduccionDia(c, idEmpleado, fecha);
+                var cacheKey = (idEmpleado, fecha.ToString("yyyy-MM-dd"));
+                if (!_cacheBonoDia.TryGetValue(cacheKey, out montoBs))
+                {
+                    montoBs = CalcularBonoProduccionDia(c, idEmpleado, fecha);
+                    _cacheBonoDia[cacheKey] = montoBs;
+                }
             }
             else
             {
@@ -419,6 +436,67 @@ namespace SistemaGestion.Api
             catch (Exception ex)
             {
                 Console.WriteLine($"[API] WARN EnsureInasistencias: {ex.Message}");
+            }
+        }
+
+        // ════════════════════════════════════════════════════════════════
+        //  ConfiguracionSistema — lectura y escritura de parámetros
+        // ════════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// Lee un valor de ConfiguracionSistema. Devuelve defaultVal si no existe.
+        /// </summary>
+        public static string ObtenerConfig(string clave, string defaultVal = "")
+        {
+            try
+            {
+                using var c   = Conn();
+                using var cmd = c.CreateCommand();
+                cmd.CommandText = "SELECT Valor FROM ConfiguracionSistema WHERE Clave = $k LIMIT 1";
+                cmd.Parameters.AddWithValue("$k", clave);
+                var val = cmd.ExecuteScalar();
+                return val is string s ? s : defaultVal;
+            }
+            catch { return defaultVal; }
+        }
+
+        /// <summary>
+        /// Escribe (upsert) un valor en ConfiguracionSistema.
+        /// </summary>
+        public static void GuardarConfig(string clave, string valor)
+        {
+            using var c   = Conn();
+            using var cmd = c.CreateCommand();
+            cmd.CommandText = @"
+                INSERT INTO ConfiguracionSistema (Clave, Valor) VALUES ($k, $v)
+                ON CONFLICT(Clave) DO UPDATE SET Valor = $v";
+            cmd.Parameters.AddWithValue("$k", clave);
+            cmd.Parameters.AddWithValue("$v", valor ?? "");
+            cmd.ExecuteNonQuery();
+        }
+
+        /// <summary>
+        /// Siembra los valores legales predeterminados si todavía no existen.
+        /// No sobreescribe cambios hechos por el usuario.
+        /// </summary>
+        public static void EnsureConfigLegal()
+        {
+            void Seed(string k, string v) { if (ObtenerConfig(k, "") == "") GuardarConfig(k, v); }
+            try
+            {
+                Seed("IVA_Porcentaje",     "16");
+                Seed("IVSS_Empleado",      "4");
+                Seed("RPVH_Empleado",      "1");
+                Seed("IVSS_Patronal",      "9");
+                Seed("RPVH_Patronal",      "2");
+                Seed("INCES_Patronal",     "2");
+                Seed("UT_Bs",              "0");
+                Seed("SalarioMinimo_Bs",   "0");
+                Seed("DiasCredito_Default","30");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[API] WARN EnsureConfigLegal: {ex.Message}");
             }
         }
     }

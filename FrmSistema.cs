@@ -139,6 +139,8 @@ namespace SistemaGestion
                             () => new FrmUsuarios().ShowDialog(),       ref y, xLbl);
                 BotonAcceso("📷  Gestión de cámaras", Color.FromArgb(150, 60, 60),
                             () => new FrmCamarasAdmin().ShowDialog(),   ref y, xLbl);
+                BotonAcceso("⚖  Parámetros Legales", Color.FromArgb(60, 100, 50),
+                            () => new FrmConfigLegal().ShowDialog(),    ref y, xLbl);
             }
 
             y += 8;

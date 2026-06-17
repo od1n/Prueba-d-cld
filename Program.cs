@@ -91,6 +91,7 @@ namespace SistemaGestion
             // ── 3. Inicializar base de datos ───────────────────────────────
             DatabaseService.Inicializar();
             DatabaseService.SeedAdminSiNoExiste();
+            DatabaseService.EnsureConfigLegal();
 
             // ── 4. Login ───────────────────────────────────────────────────
             using var login = new FrmLogin();

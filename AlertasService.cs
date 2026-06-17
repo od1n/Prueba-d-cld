@@ -9,15 +9,16 @@ namespace SistemaGestion
     /// </summary>
     public class AlertasData
     {
-        public List<Inventario>   StockBajo   { get; set; } = new();
-        public List<CuentaCobrar> CxCVencidas { get; set; } = new();
-        public List<ProgramaMant> MantVencido { get; set; } = new();
+        public List<Inventario>   StockBajo         { get; set; } = new();
+        public List<CuentaCobrar> CxCVencidas       { get; set; } = new();
+        public List<CuentaCobrar> CxCProximasVencer { get; set; } = new();
+        public List<ProgramaMant> MantVencido       { get; set; } = new();
 
         public bool TieneAlertas =>
-            StockBajo.Count > 0 || CxCVencidas.Count > 0 || MantVencido.Count > 0;
+            StockBajo.Count > 0 || CxCVencidas.Count > 0 || CxCProximasVencer.Count > 0 || MantVencido.Count > 0;
 
         public int TotalAlertas =>
-            StockBajo.Count + CxCVencidas.Count + MantVencido.Count;
+            StockBajo.Count + CxCVencidas.Count + CxCProximasVencer.Count + MantVencido.Count;
 
         /// <summary>
         /// True si hay al menos una alerta que no fue silenciada hoy.
@@ -36,9 +37,10 @@ namespace SistemaGestion
                     foreach (var l in System.IO.File.ReadAllLines(ruta))
                         if (!string.IsNullOrWhiteSpace(l)) silenciadas.Add(l.Trim());
 
-                if (StockBajo.Count   > 0 && !silenciadas.Contains("stock_bajo"))    return true;
-                if (CxCVencidas.Count > 0 && !silenciadas.Contains("cxc_vencidas"))  return true;
-                if (MantVencido.Count > 0 && !silenciadas.Contains("mantenimiento")) return true;
+                if (StockBajo.Count         > 0 && !silenciadas.Contains("stock_bajo"))        return true;
+                if (CxCVencidas.Count       > 0 && !silenciadas.Contains("cxc_vencidas"))      return true;
+                if (CxCProximasVencer.Count > 0 && !silenciadas.Contains("cxc_por_vencer"))    return true;
+                if (MantVencido.Count       > 0 && !silenciadas.Contains("mantenimiento"))     return true;
                 return false;
             }
         }
@@ -125,7 +127,42 @@ namespace SistemaGestion
             }
 
             // ------------------------------------------------------------------
-            // 3. PROGRAMAS DE MANTENIMIENTO VENCIDOS O URGENTES
+            // 3. CUENTAS POR COBRAR PRÓXIMAS A VENCER (dentro de 3 días)
+            // ------------------------------------------------------------------
+            string en3dias = DateTime.Today.AddDays(3).ToString("yyyy-MM-dd");
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = @"
+                    SELECT Id, Cliente, Concepto, Monto, Pagado,
+                           FechaEmision, FechaVence, Estado
+                    FROM CuentasCobrar
+                    WHERE Estado NOT IN ('Pagada','Saldada')
+                      AND FechaVence >= $hoy
+                      AND FechaVence <= $en3
+                      AND (Monto - Pagado) > 0
+                    ORDER BY FechaVence ASC";
+                cmd.Parameters.AddWithValue("$hoy", hoy);
+                cmd.Parameters.AddWithValue("$en3", en3dias);
+
+                using var r = cmd.ExecuteReader();
+                while (r.Read())
+                {
+                    data.CxCProximasVencer.Add(new CuentaCobrar
+                    {
+                        Id           = Convert.ToInt32(r["Id"]),
+                        Cliente      = r["Cliente"]?.ToString() ?? "",
+                        Concepto     = r["Concepto"]?.ToString() ?? "",
+                        Monto        = Convert.ToDecimal(r["Monto"]),
+                        Pagado       = Convert.ToDecimal(r["Pagado"]),
+                        FechaEmision = Convert.ToDateTime(r["FechaEmision"]),
+                        FechaVence   = Convert.ToDateTime(r["FechaVence"]),
+                        Estado       = r["Estado"]?.ToString() ?? ""
+                    });
+                }
+            }
+
+            // ------------------------------------------------------------------
+            // 4. PROGRAMAS DE MANTENIMIENTO VENCIDOS O URGENTES
             //    DiasRestantes = (UltimoMant + FrecuenciaDias) - Hoy
             //    Vencido: DiasRestantes < 0
             //    Urgente: DiasRestantes entre 0 y 7

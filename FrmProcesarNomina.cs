@@ -919,7 +919,13 @@ namespace SistemaGestion
             dlg.Controls.AddRange(new Control[] { lbl, dtp, bOk, bNo });
             dlg.AcceptButton = bOk;
             if (dlg.ShowDialog(this) != DialogResult.OK) return;
-            DatabaseService.RegistrarInasistencia(_emp.Id, dtp.Value.Date, false, "", _per.TasaBCV);
+            var resultado = DatabaseService.RegistrarInasistencia(_emp.Id, dtp.Value.Date, false, "", _per.TasaBCV);
+            if (resultado == -2)
+            {
+                MessageBox.Show("La fecha seleccionada no pertenece a ningún período de nómina registrado.",
+                    "Fecha inválida", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
             CargarInasistencias();
         }
 

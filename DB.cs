@@ -2998,6 +2998,33 @@ namespace SistemaGestion
             Exec(c, "DELETE FROM CuentasCobrar WHERE Id=$id", ("$id", id));
         }
 
+        /// <summary>Verifica si un cliente tiene CxC vencidas (morosidad).</summary>
+        public static (bool tieneMora, decimal montoVencido, int cuentasVencidas) VerificarMorosidadCliente(string codigoCliente)
+        {
+            if (string.IsNullOrWhiteSpace(codigoCliente))
+                return (false, 0, 0);
+
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = @"
+                SELECT COUNT(*), COALESCE(SUM(Monto - Pagado), 0)
+                FROM CuentasCobrar
+                WHERE Cliente LIKE $cod
+                  AND Estado NOT IN ('Pagada','Saldada')
+                  AND FechaVence < $hoy
+                  AND (Monto - Pagado) > 0";
+            cmd.Parameters.AddWithValue("$cod", $"%{codigoCliente}%");
+            cmd.Parameters.AddWithValue("$hoy", DateTime.Today.ToString("yyyy-MM-dd"));
+            using var r = cmd.ExecuteReader();
+            if (r.Read())
+            {
+                int cuentas = r.IsDBNull(0) ? 0 : Convert.ToInt32(r[0]);
+                decimal monto = r.IsDBNull(1) ? 0m : Convert.ToDecimal(r[1]);
+                return (cuentas > 0, monto, cuentas);
+            }
+            return (false, 0, 0);
+        }
+
         // ════════ PRODUCTOS / PRECIOS ═════════════════════════════════════════
         public static List<ProductoPrecio> ObtenerProductos()
         {
@@ -4936,10 +4963,12 @@ namespace SistemaGestion
             decimal devVentas = tasa > 0 ? Math.Round(devVentasBs / tasa, 4) : 0;
             decimal totalDev   = devSueldo + devPiezas + devVentas + otrosIngresos;
 
-            // Deducciones legales (4% IVSS y 1% RPVH sobre devengado, en USD)
+            // Deducciones legales (IVSS y RPVH sobre devengado, en USD — porcentajes configurables)
             if (tasa <= 0) tasa = 1;
-            decimal ivss   = Math.Round(totalDev * 0.04m, 2);
-            decimal rpvh   = Math.Round(totalDev * 0.01m, 2);
+            decimal pctIVSS = decimal.TryParse(ObtenerConfig("IVSS_Empleado", "4"), out var _pi) ? _pi : 4m;
+            decimal pctRPVH = decimal.TryParse(ObtenerConfig("RPVH_Empleado", "1"), out var _pr) ? _pr : 1m;
+            decimal ivss   = Math.Round(totalDev * pctIVSS / 100m, 2);
+            decimal rpvh   = Math.Round(totalDev * pctRPVH / 100m, 2);
 
             // Descuento por inasistencias:
             // - Producción: suma del bono real de cada día de falta injustificada
@@ -5047,10 +5076,28 @@ namespace SistemaGestion
         /// - Producción: bono del día específico (CalcularBonoProduccion con desde=hasta=fecha)
         /// - Otros: SueldoDiarioUSD * TasaBCV del día (o tasa proporcionada)
         /// </summary>
+        /// <summary>Cache de bono de producción para evitar consultas repetidas al registrar N faltas del mismo día.</summary>
+        private static readonly Dictionary<(int,string), decimal> _cacheBonoDia = new();
+        private static void LimpiarCacheBono() => _cacheBonoDia.Clear();
+
         public static int RegistrarInasistencia(
             int idEmpleado, DateTime fecha, bool justificada,
             string observaciones = "", decimal? tasaOverride = null)
         {
+            // Validar que la fecha caiga dentro de algún período abierto
+            var periodos = ObtenerPeriodos();
+            var periodoActivo = periodos.Find(p =>
+                p.Estado == "Abierto" && fecha >= p.FechaDesde && fecha <= p.FechaHasta);
+            if (periodoActivo == null)
+            {
+                // Permitir si hay un período cerrado que la contenga (corrección retroactiva),
+                // pero rechazar si no hay ningún período que cubra esa fecha
+                var cualquierPeriodo = periodos.Find(p =>
+                    fecha >= p.FechaDesde && fecha <= p.FechaHasta);
+                if (cualquierPeriodo == null)
+                    return -2; // Código especial: fecha fuera de todo período
+            }
+
             using var c = Conn();
             // Obtener datos del empleado
             var qe = c.CreateCommand();
@@ -5062,11 +5109,16 @@ namespace SistemaGestion
                 if (!re.Read()) return -1;
                 nombre = S(re,0); tipo = S(re,1); sueldoDiario = D(re,2);
             }
-            // Calcular monto del día
+            // Calcular monto del día (con cache para registros múltiples del mismo día)
             decimal montoBs = 0;
             if (tipo == "Produccion")
             {
-                montoBs = CalcularBonoProduccion(idEmpleado, fecha, fecha);
+                var cacheKey = (idEmpleado, fecha.ToString("yyyy-MM-dd"));
+                if (!_cacheBonoDia.TryGetValue(cacheKey, out montoBs))
+                {
+                    montoBs = CalcularBonoProduccion(idEmpleado, fecha, fecha);
+                    _cacheBonoDia[cacheKey] = montoBs;
+                }
             }
             else
             {
@@ -5325,9 +5377,15 @@ namespace SistemaGestion
         /// </summary>
         public static List<AportePatronal> CalcularAportesPatronales(
             int idPeriodo,
-            decimal pctIVSSPatron = 9.0m,
-            decimal valorUTBs = 0m)
+            decimal pctIVSSPatron = -1m,
+            decimal valorUTBs = -1m)
         {
+            // Usar valores de configuración cuando no se proporcionan explícitamente
+            if (pctIVSSPatron < 0)
+                pctIVSSPatron = decimal.TryParse(ObtenerConfig("IVSS_Patronal", "9"), out var _ip) ? _ip : 9m;
+            if (valorUTBs < 0)
+                valorUTBs = decimal.TryParse(ObtenerConfig("UT_Bs", "0"), out var _ut) ? _ut : 0m;
+
             var detalles = ObtenerDetallesNomina(idPeriodo);
             var periodo  = ObtenerPeriodos().Find(p => p.Id == idPeriodo);
             if (periodo == null || detalles.Count == 0)

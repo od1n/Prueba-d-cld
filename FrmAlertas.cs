@@ -65,9 +65,10 @@ namespace SistemaGestion
             CargarSilenciadas().Contains(clave);
 
         // Claves de cada categoria
-        private const string CLAVE_STOCK = "stock_bajo";
-        private const string CLAVE_CXC   = "cxc_vencidas";
-        private const string CLAVE_MANT  = "mantenimiento";
+        private const string CLAVE_STOCK     = "stock_bajo";
+        private const string CLAVE_CXC       = "cxc_vencidas";
+        private const string CLAVE_CXC_PROX  = "cxc_por_vencer";
+        private const string CLAVE_MANT      = "mantenimiento";
 
         // ── Constructor ─────────────────────────────────────────────────
 
@@ -221,7 +222,8 @@ namespace SistemaGestion
             {
                 0 => CLAVE_STOCK,
                 1 => CLAVE_CXC,
-                2 => CLAVE_MANT,
+                2 => CLAVE_CXC_PROX,
+                3 => CLAVE_MANT,
                 _ => null
             };
             if (clave == null) return;
@@ -255,7 +257,7 @@ namespace SistemaGestion
                 if (ctrl is Panel p && p.Height == 48) { p.Invalidate(); break; }
 
             // Si todos estan silenciados, cerrar
-            if (EstaSilenciada(CLAVE_STOCK) && EstaSilenciada(CLAVE_CXC) && EstaSilenciada(CLAVE_MANT))
+            if (EstaSilenciada(CLAVE_STOCK) && EstaSilenciada(CLAVE_CXC) && EstaSilenciada(CLAVE_CXC_PROX) && EstaSilenciada(CLAVE_MANT))
             {
                 MessageBox.Show("Todas las alertas han sido ignoradas por hoy.",
                     "Listo", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -275,9 +277,10 @@ namespace SistemaGestion
 
             var badges = new (string Texto, int Cantidad, Color Color, string Clave)[]
             {
-                ("Stock Bajo",    _data.StockBajo.Count,   Color.FromArgb(192, 57, 43),  CLAVE_STOCK),
-                ("CxC Vencidas",  _data.CxCVencidas.Count, Color.FromArgb(230, 126, 34), CLAVE_CXC),
-                ("Mantenimiento", _data.MantVencido.Count, Color.FromArgb(142, 68, 173), CLAVE_MANT),
+                ("Stock Bajo",      _data.StockBajo.Count,         Color.FromArgb(192, 57, 43),  CLAVE_STOCK),
+                ("CxC Vencidas",    _data.CxCVencidas.Count,       Color.FromArgb(230, 126, 34), CLAVE_CXC),
+                ("CxC Por Vencer",  _data.CxCProximasVencer.Count, Color.FromArgb(52, 152, 219), CLAVE_CXC_PROX),
+                ("Mantenimiento",   _data.MantVencido.Count,       Color.FromArgb(142, 68, 173), CLAVE_MANT),
             };
 
             int x = 10;
@@ -327,6 +330,12 @@ namespace SistemaGestion
             tabCxC.Controls.Add(CrearGridCxC());
             tabControl.TabPages.Add(tabCxC);
 
+            var tabCxCProx = new TabPage($"CxC Por Vencer  ({_data.CxCProximasVencer.Count})")
+                { BackColor = EstaSilenciada(CLAVE_CXC_PROX) ? Color.FromArgb(240,245,240) : Color.FromArgb(245,247,250) };
+            if (EstaSilenciada(CLAVE_CXC_PROX)) tabCxCProx.Text += " ✓";
+            tabCxCProx.Controls.Add(CrearGridCxCProx());
+            tabControl.TabPages.Add(tabCxCProx);
+
             var tabMant = new TabPage($"Mantenimiento  ({_data.MantVencido.Count})")
                 { BackColor = EstaSilenciada(CLAVE_MANT) ? Color.FromArgb(240,245,240) : Color.FromArgb(245,247,250) };
             if (EstaSilenciada(CLAVE_MANT)) tabMant.Text += " ✓";
@@ -337,8 +346,10 @@ namespace SistemaGestion
             int maxIdx = 0, maxVal = EstaSilenciada(CLAVE_STOCK) ? -1 : _data.StockBajo.Count;
             if (!EstaSilenciada(CLAVE_CXC) && _data.CxCVencidas.Count > maxVal)
             { maxVal = _data.CxCVencidas.Count; maxIdx = 1; }
+            if (!EstaSilenciada(CLAVE_CXC_PROX) && _data.CxCProximasVencer.Count > maxVal)
+            { maxVal = _data.CxCProximasVencer.Count; maxIdx = 2; }
             if (!EstaSilenciada(CLAVE_MANT) && _data.MantVencido.Count > maxVal)
-                maxIdx = 2;
+                maxIdx = 3;
             tabControl.SelectedIndex = maxIdx;
         }
 
@@ -400,6 +411,36 @@ namespace SistemaGestion
                     ? Color.FromArgb(255, 210, 210) : Color.FromArgb(255, 243, 220);
             }
             if (_data.CxCVencidas.Count == 0) AgregarLabelVacio(dgv, "✓  Sin cuentas por cobrar vencidas", Color.FromArgb(39, 174, 96));
+            return dgv;
+        }
+
+        private Control CrearGridCxCProx()
+        {
+            var dgv = CrearDGV();
+            dgv.Columns.Add(new DataGridViewTextBoxColumn { Name = "colCliente",  HeaderText = "Cliente",          FillWeight = 30 });
+            dgv.Columns.Add(new DataGridViewTextBoxColumn { Name = "colConcepto", HeaderText = "Concepto",         FillWeight = 25 });
+            dgv.Columns.Add(new DataGridViewTextBoxColumn { Name = "colSaldo",    HeaderText = "Saldo (USD)",      FillWeight = 15,
+                DefaultCellStyle = new DataGridViewCellStyle { Alignment = DataGridViewContentAlignment.MiddleRight } });
+            dgv.Columns.Add(new DataGridViewTextBoxColumn { Name = "colVence",    HeaderText = "Vence",            FillWeight = 15 });
+            dgv.Columns.Add(new DataGridViewTextBoxColumn { Name = "colDias",     HeaderText = "Dias Restantes",   FillWeight = 15,
+                DefaultCellStyle = new DataGridViewCellStyle { Alignment = DataGridViewContentAlignment.MiddleRight } });
+
+            if (EstaSilenciada(CLAVE_CXC_PROX)) { MostrarMensajeSilenciada(dgv, "Alerta de CxC por vencer ignorada hoy"); return dgv; }
+
+            foreach (var item in _data.CxCProximasVencer.OrderBy(x => x.FechaVence))
+            {
+                int dias = (item.FechaVence - DateTime.Today).Days;
+                int row = dgv.Rows.Add();
+                dgv.Rows[row].Cells["colCliente"].Value  = item.Cliente;
+                dgv.Rows[row].Cells["colConcepto"].Value = item.Concepto;
+                dgv.Rows[row].Cells["colSaldo"].Value    = $"$ {(item.Monto - item.Pagado):N2}";
+                dgv.Rows[row].Cells["colVence"].Value    = item.FechaVence.ToString("dd/MM/yyyy");
+                dgv.Rows[row].Cells["colDias"].Value     = dias.ToString();
+                dgv.Rows[row].DefaultCellStyle.BackColor = dias == 0
+                    ? Color.FromArgb(255, 230, 200)
+                    : Color.FromArgb(255, 248, 210);
+            }
+            if (_data.CxCProximasVencer.Count == 0) AgregarLabelVacio(dgv, "✓  Sin cuentas por cobrar próximas a vencer", Color.FromArgb(39, 174, 96));
             return dgv;
         }
 

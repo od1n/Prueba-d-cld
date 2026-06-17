@@ -356,5 +356,23 @@ namespace SistemaGestion
 
             SetSchemaVersion(conn, tx, 18);
         }
+
+        // ════════════════════════════════════════════════════════════════
+        //  EnsureConfigLegal — siembra valores legales predeterminados
+        //  Solo escribe si la clave no existe (no sobreescribe cambios del usuario).
+        // ════════════════════════════════════════════════════════════════
+        public static void EnsureConfigLegal()
+        {
+            void Seed(string k, string v) { if (ObtenerConfig(k, "") == "") GuardarConfig(k, v); }
+            Seed("IVA_Porcentaje",    "16");
+            Seed("IVSS_Empleado",     "4");
+            Seed("RPVH_Empleado",     "1");
+            Seed("IVSS_Patronal",     "9");
+            Seed("RPVH_Patronal",     "2");
+            Seed("INCES_Patronal",    "2");
+            Seed("UT_Bs",             "0");
+            Seed("SalarioMinimo_Bs",  "0");
+            Seed("DiasCredito_Default","30");
+        }
     }
 }

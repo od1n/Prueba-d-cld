@@ -234,6 +234,17 @@ async function guardarAbono(numero) {
 }
 
 // -- Nueva factura --------------------------------------------------------
+
+// Carga el IVA configurado desde la API y lo aplica al campo del formulario
+async function cargarIvaConfig() {
+    try {
+        const cfg = await apiGet('/api/config/legal');
+        const pct = parseFloat(cfg?.IVA_Porcentaje ?? '16') || 16;
+        const el  = document.getElementById('fIva');
+        if (el) { el.value = pct; recalcFactura(); }
+    } catch (_) { /* si falla queda el default 16 del HTML */ }
+}
+
 function abrirNueva() {
     itemsFactura = [];
     const hoy = new Date().toISOString().slice(0,10);
@@ -244,9 +255,12 @@ function abrirNueva() {
     <div class="form-group mb-8" style="position:relative">
       <label class="form-label">Cliente</label>
       <input id="fCliInput" class="input-field" placeholder="Buscar cliente..."
-        autocomplete="off" oninput="dropClientes(this.value)">
+        autocomplete="off" oninput="dropClientes(this.value)" style="padding-right:42px">
       <input type="hidden" id="fCliCod">
       <div id="ddCli" class="autocomplete-drop" style="display:none"></div>
+      <button type="button" onclick="crearClienteRapido()" class="btn btn-sm"
+        style="position:absolute;right:4px;top:28px;padding:2px 8px;background:#10a37f;color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:700;line-height:1.4"
+        title="Crear cliente nuevo">+</button>
     </div>
     <div class="form-grid-2 mb-8">
       <div class="form-group">
@@ -305,6 +319,7 @@ function abrirNueva() {
     openModal('modalForm');
     renderTablaFactItems();
     onFormaPagoChange();
+    cargarIvaConfig(); // aplica IVA configurado (async, no bloquea)
 }
 
 function onFormaPagoChange() {
@@ -455,6 +470,68 @@ async function guardarFactura() {
     } catch(err) {
         if (btn) { btn.disabled=false; btn.textContent='Guardar factura'; }
         alert('Error: '+err.message);
+    }
+}
+
+// -- Crear cliente rápido -------------------------------------------------
+async function crearClienteRapido() {
+    // Construir modal inline
+    const modalId = 'modalCrearCli';
+    let existing = document.getElementById(modalId);
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = modalId;
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center';
+    overlay.innerHTML = `
+      <div style="background:var(--fondo,#1e1e2e);border:1px solid var(--borde,#333);border-radius:10px;padding:24px;width:360px;max-width:95vw;font-size:14px">
+        <div style="font-size:16px;font-weight:700;margin-bottom:16px">+ Nuevo Cliente</div>
+        <div class="form-group mb-8">
+          <label class="form-label">Código *</label>
+          <input id="ccCodigo" class="input-field" placeholder="Ej: 101">
+        </div>
+        <div class="form-group mb-8">
+          <label class="form-label">Nombre *</label>
+          <input id="ccNombre" class="input-field" placeholder="Nombre o razón social">
+        </div>
+        <div class="form-group mb-8">
+          <label class="form-label">CI / RIF</label>
+          <input id="ccRif" class="input-field" placeholder="J-12345678-9">
+        </div>
+        <div class="form-group mb-16">
+          <label class="form-label">Teléfono</label>
+          <input id="ccTel" class="input-field" placeholder="0414-0000000">
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn" onclick="document.getElementById('${modalId}').remove()">Cancelar</button>
+          <button class="btn btn-primary" id="btnGuardarCli" onclick="guardarClienteRapido()">Guardar</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+    document.getElementById('ccNombre')?.focus();
+}
+
+async function guardarClienteRapido() {
+    const cod  = document.getElementById('ccCodigo')?.value?.trim();
+    const nom  = document.getElementById('ccNombre')?.value?.trim();
+    const rif  = document.getElementById('ccRif')?.value?.trim() || '';
+    const tel  = document.getElementById('ccTel')?.value?.trim() || '';
+
+    if (!cod || !nom) { alert('Código y nombre son obligatorios.'); return; }
+
+    const btn = document.getElementById('btnGuardarCli');
+    if (btn) { btn.disabled = true; btn.textContent = 'Guardando...'; }
+
+    try {
+        const resp = await apiPost('/api/clientes', { codigo: cod, descripcion: nom, ciRif: rif, telefono: tel });
+        document.getElementById('modalCrearCli')?.remove();
+        // Seleccionar el nuevo cliente en el formulario
+        document.getElementById('fCliInput').value = nom;
+        document.getElementById('fCliCod').value = resp.codigo || cod;
+    } catch(err) {
+        if (btn) { btn.disabled = false; btn.textContent = 'Guardar'; }
+        alert('Error: ' + err.message);
     }
 }
 

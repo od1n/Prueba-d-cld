@@ -365,6 +365,21 @@ CargarDatos();
             using var dlg = new DlgFactura(null);
             if (dlg.ShowDialog() == DialogResult.OK)
             {
+                // Verificar morosidad antes de crear factura a crédito
+                if (dlg.Resultado.FormaDePago == "Credito")
+                {
+                    var (tieneMora, montoVencido, cuentas) = DatabaseService.VerificarMorosidadCliente(dlg.Resultado.Codigo);
+                    if (tieneMora)
+                    {
+                        var resp = MessageBox.Show(
+                            $"⚠ Este cliente tiene {cuentas} cuenta(s) por cobrar vencida(s)\n" +
+                            $"Monto vencido: ${montoVencido:N2}\n\n" +
+                            "¿Desea continuar con la venta a crédito?",
+                            "Cliente con morosidad", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+                        if (resp != DialogResult.Yes) return;
+                    }
+                }
+
                 try
                 {
                     DatabaseService.InsertarFactura(dlg.Resultado);
@@ -377,6 +392,33 @@ CargarDatos();
                         dlg.Resultado.NumeroF,
                         dlg.Lineas,
                         esNueva: true);
+
+                    // Auto-crear CxC si la factura es a crédito
+                    if (dlg.Resultado.FormaDePago == "Credito")
+                    {
+                        decimal saldoCxC = dlg.Resultado.TotalF - dlg.Resultado.Abono;
+                        if (saldoCxC > 0)
+                        {
+                            var cli = DatabaseService.ObtenerClientes()
+                                .Find(c => c.Codigo == dlg.Resultado.Codigo);
+                            string nombreCli = cli != null
+                                ? $"{cli.Codigo} - {cli.Descripcion}"
+                                : dlg.Resultado.Codigo;
+                            int diasCred = dlg.Resultado.DiasCreditoF > 0
+                                ? dlg.Resultado.DiasCreditoF : 30;
+
+                            DatabaseService.InsertarCuenta(new CuentaCobrar
+                            {
+                                Cliente      = nombreCli,
+                                Concepto     = $"Factura {dlg.Resultado.NumeroF}",
+                                Monto        = saldoCxC,
+                                Pagado       = 0,
+                                FechaEmision = dlg.Resultado.Fecha,
+                                FechaVence   = dlg.Resultado.Fecha.AddDays(diasCred),
+                                Estado       = "Vigente"
+                            });
+                        }
+                    }
 
                     CargarDatos();
                 }
@@ -697,6 +739,20 @@ CargarDatos();
             }
 
             panelIzq.Controls.Add(cmbCliente);
+
+            // Botón para crear cliente rápido sin salir de la factura
+            var btnNuevoCliente = new Button
+            {
+                Text = "+", Font = new Font("Segoe UI", 11f, FontStyle.Bold),
+                Size = new Size(30, 24), Location = new Point(354, y),
+                FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(16, 163, 127),
+                ForeColor = Color.White, Cursor = Cursors.Hand
+            };
+            btnNuevoCliente.FlatAppearance.BorderSize = 0;
+            new ToolTip().SetToolTip(btnNuevoCliente, "Crear cliente nuevo");
+            btnNuevoCliente.Click += (s, e) => CrearClienteRapido();
+            if (!soloLectura) panelIzq.Controls.Add(btnNuevoCliente);
+
             y += 32;
 
             Lbl("Fecha:", y);
@@ -1309,6 +1365,127 @@ CargarDatos();
             if (prefix != null) return prefix.Codigo;
 
             return "";
+        }
+
+        private void CrearClienteRapido()
+        {
+            // Auto-generar siguiente código numérico
+            int maxCod = _clientesFactura
+                .Select(c => int.TryParse(c.Codigo, out var n) ? n : 0)
+                .DefaultIfEmpty(0).Max();
+            string codigoSugerido = (maxCod + 1).ToString();
+
+            using var dlg = new Form
+            {
+                Text = "Cliente Rápido",
+                Size = new Size(400, 310),
+                StartPosition = FormStartPosition.CenterParent,
+                FormBorderStyle = FormBorderStyle.FixedDialog,
+                MaximizeBox = false, MinimizeBox = false,
+                Font = new Font("Segoe UI", 9.5f)
+            };
+
+            int cy = 15;
+            Label MkLbl(string t) => new Label { Text = t, AutoSize = true, Location = new Point(12, cy + 3) };
+            TextBox MkTxt(string val = "") => new TextBox
+            {
+                Location = new Point(130, cy), Size = new Size(240, 24), Text = val
+            };
+
+            dlg.Controls.Add(MkLbl("Código:")); var txtCod  = MkTxt(codigoSugerido); dlg.Controls.Add(txtCod);  cy += 34;
+            dlg.Controls.Add(MkLbl("Nombre:"));  var txtNom  = MkTxt();               dlg.Controls.Add(txtNom);  cy += 34;
+            dlg.Controls.Add(MkLbl("CI/RIF:"));  var txtRif  = MkTxt();               dlg.Controls.Add(txtRif);  cy += 34;
+            dlg.Controls.Add(MkLbl("Teléfono:")); var txtTel  = MkTxt();              dlg.Controls.Add(txtTel);  cy += 34;
+            dlg.Controls.Add(MkLbl("Dirección:")); var txtDir = MkTxt();              dlg.Controls.Add(txtDir);  cy += 42;
+
+            var btnGuardar = new Button
+            {
+                Text = "Guardar", DialogResult = DialogResult.None,
+                Location = new Point(130, cy), Size = new Size(110, 28),
+                BackColor = Color.FromArgb(16, 163, 127), ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat
+            };
+            btnGuardar.FlatAppearance.BorderSize = 0;
+
+            var btnCancelar = new Button
+            {
+                Text = "Cancelar", DialogResult = DialogResult.Cancel,
+                Location = new Point(250, cy), Size = new Size(100, 28),
+                FlatStyle = FlatStyle.Flat
+            };
+
+            btnGuardar.Click += (s, e) =>
+            {
+                var cod  = txtCod.Text.Trim();
+                var nom  = txtNom.Text.Trim();
+                if (string.IsNullOrWhiteSpace(cod) || string.IsNullOrWhiteSpace(nom))
+                {
+                    MessageBox.Show("Código y nombre son obligatorios.", "Validación",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+                try
+                {
+                    DatabaseService.InsertarCliente(new Cliente
+                    {
+                        Codigo       = cod,
+                        Descripcion  = nom,
+                        CiRif        = txtRif.Text.Trim(),
+                        Telefono     = txtTel.Text.Trim(),
+                        Direccion    = txtDir.Text.Trim(),
+                        Fecha        = DateTime.Today
+                    });
+                    dlg.Tag = cod;
+                    dlg.DialogResult = DialogResult.OK;
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("Error al guardar: " + ex.Message, "Error",
+                        MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            };
+
+            dlg.Controls.AddRange(new Control[] { btnGuardar, btnCancelar });
+            dlg.AcceptButton = btnGuardar;
+            dlg.CancelButton = btnCancelar;
+            txtNom.Focus();
+
+            if (dlg.ShowDialog(this) != DialogResult.OK) return;
+
+            var nuevoCodigo = dlg.Tag?.ToString() ?? "";
+
+            // Refrescar lista de clientes
+            _clientesFactura = DatabaseService.ObtenerClientes()
+                .OrderBy(c => int.TryParse(c.Codigo, out _) ? 0 : 1)
+                .ThenBy(c => int.TryParse(c.Codigo, out var n) ? n : int.MaxValue)
+                .ThenBy(c => c.Codigo)
+                .ToList();
+
+            var clienteItems = _clientesFactura
+                .Select(c => new ClienteComboItem { Codigo = c.Codigo, Descripcion = c.Descripcion })
+                .ToList();
+
+            cmbCliente.DataSource = null;
+            cmbCliente.DataSource = clienteItems;
+            cmbCliente.DisplayMember = "Texto";
+            cmbCliente.ValueMember = "Codigo";
+
+            // Actualizar autocompletar
+            var ac = new AutoCompleteStringCollection();
+            foreach (var c in _clientesFactura)
+            {
+                if (!string.IsNullOrWhiteSpace(c.Codigo)) ac.Add(c.Codigo);
+                if (!string.IsNullOrWhiteSpace(c.Descripcion)) ac.Add(c.Descripcion);
+                if (!string.IsNullOrWhiteSpace(c.Codigo) || !string.IsNullOrWhiteSpace(c.Descripcion))
+                    ac.Add((c.Codigo + " - " + c.Descripcion).Trim(' ', '-'));
+            }
+            cmbCliente.AutoCompleteMode = AutoCompleteMode.SuggestAppend;
+            cmbCliente.AutoCompleteSource = AutoCompleteSource.CustomSource;
+            cmbCliente.AutoCompleteCustomSource = ac;
+
+            // Seleccionar el nuevo cliente en el combo
+            if (!string.IsNullOrWhiteSpace(nuevoCodigo))
+                cmbCliente.SelectedValue = nuevoCodigo;
         }
     }
 

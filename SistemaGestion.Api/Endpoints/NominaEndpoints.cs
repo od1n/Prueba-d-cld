@@ -830,6 +830,7 @@ tr td{padding:1.5mm 2mm}
                     req.IdEmpleado, fecha, req.Justificada,
                     req.Observaciones ?? "", req.TasaBCV > 0 ? req.TasaBCV : null);
 
+                if (id == -2) return Results.BadRequest(new { error = "La fecha no pertenece a ningún período de nómina registrado." });
                 if (id < 0) return Results.NotFound(new { error = "Empleado no encontrado." });
 
                 AuthEndpoints.RegistrarAuditoria(ctx, "INASISTENCIA_REGISTRADA",

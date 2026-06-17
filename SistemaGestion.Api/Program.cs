@@ -282,6 +282,9 @@ try
     // Asegurar tabla de inasistencias.
     Db.EnsureInasistencias();
 
+    // Sembrar valores legales predeterminados si no existen.
+    Db.EnsureConfigLegal();
+
     // Limpieza inicial de sesiones expiradas hace > 24h.
     var limpiadas = SistemaGestion.Api.Auth.SesionesActivas.LimpiarExpiradas();
     if (limpiadas > 0)
@@ -311,6 +314,7 @@ app.MapEgresosEndpoints();
 app.MapComprasEndpoints();
 app.MapReportesEndpoints();
 app.MapNominaEndpoints();
+app.MapConfigEndpoints();
 app.MapGet("/", ctx => { ctx.Response.Redirect("/index.html"); return Task.CompletedTask; });
 
 Console.WriteLine("[API] Portal móvil corriendo:");

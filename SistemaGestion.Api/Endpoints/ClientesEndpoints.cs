@@ -432,8 +432,52 @@ namespace SistemaGestion.Api.Endpoints
                     }
 
                     tx.Commit();
+
+                    // Auto-crear CxC si es factura a crédito
+                    bool esCreditoApi = (req.FormaDePago ?? "").StartsWith("Credito", StringComparison.OrdinalIgnoreCase);
+                    bool avisoMora = false;
+                    if (esCreditoApi && total > 0)
+                    {
+                        // Calcular días de crédito desde el campo o desde el valor de FormaDePago ("Credito 30")
+                        int diasCredApi = req.DiasCredito > 0 ? req.DiasCredito : 30;
+                        if (req.DiasCredito <= 0)
+                        {
+                            var parts = (req.FormaDePago ?? "").Split(' ');
+                            if (parts.Length > 1 && int.TryParse(parts[1], out int d)) diasCredApi = d;
+                        }
+                        DateTime fechaFact = DateTime.TryParse(fecha, out var ff) ? ff : DateTime.Today;
+
+                        using var c2 = Db.Conn();
+                        var cxc = c2.CreateCommand();
+                        cxc.CommandText = @"INSERT INTO CuentasCobrar (Cliente,Concepto,Monto,Pagado,FechaEmision,FechaVence,Estado)
+                            VALUES ($cl,$co,$m,0,$fe,$fv,'Vigente')";
+                        cxc.Parameters.AddWithValue("$cl", req.CodigoCliente ?? "");
+                        cxc.Parameters.AddWithValue("$co", $"Factura {numF}");
+                        cxc.Parameters.AddWithValue("$m",  (double)total);
+                        cxc.Parameters.AddWithValue("$fe", fechaFact.ToString("yyyy-MM-dd"));
+                        cxc.Parameters.AddWithValue("$fv", fechaFact.AddDays(diasCredApi).ToString("yyyy-MM-dd"));
+                        cxc.ExecuteNonQuery();
+
+                        // Comprobar morosidad del cliente (solo advertencia, no bloquea)
+                        using var c3 = Db.Conn();
+                        var chkMora = c3.CreateCommand();
+                        chkMora.CommandText = @"SELECT COUNT(*), COALESCE(SUM(Monto-Pagado),0)
+                            FROM CuentasCobrar
+                            WHERE Cliente LIKE $cod
+                              AND Estado NOT IN ('Pagada','Saldada')
+                              AND FechaVence < $hoy
+                              AND (Monto-Pagado) > 0";
+                        chkMora.Parameters.AddWithValue("$cod", $"%{req.CodigoCliente ?? ""}%");
+                        chkMora.Parameters.AddWithValue("$hoy", DateTime.Today.ToString("yyyy-MM-dd"));
+                        using var rm = chkMora.ExecuteReader();
+                        if (rm.Read() && !rm.IsDBNull(0) && Convert.ToInt32(rm[0]) > 0)
+                            avisoMora = true;
+                    }
+
                     return Results.Created($"/api/facturas/{Uri.EscapeDataString(numF)}",
-                        new { numeroF=numF, total, iva=ivaMonto });
+                        new { numeroF=numF, total, iva=ivaMonto,
+                              cxcCreada=esCreditoApi && total > 0,
+                              avisoMorosidad=avisoMora });
                 }
                 catch (Exception ex)
                 {
