@@ -588,28 +588,11 @@ namespace SistemaGestion
         // ── Task C: Imprimir planilla ─────────────────────────────────────
         private void ImprimirPlanilla()
         {
-            // Recopilar moldes activos en el grid
-            var moldesEnGrid = new List<string>();
-            foreach (DataGridViewRow row in dgvMoldes.Rows)
-            {
-                if (row.IsNewRow) continue;
-                string val = row.Cells["Molde"].Value?.ToString() ?? "";
-                if (!string.IsNullOrWhiteSpace(val))
-                    moldesEnGrid.Add(val.Split('—')[0].Trim());
-            }
-
-            using var dlg = new DlgSeleccionarMoldesPlanilla(_moldes, moldesEnGrid);
-            if (dlg.ShowDialog() != DialogResult.OK) return;
-
-            var seleccionados = dlg.MoldesSeleccionados;
-            if (seleccionados.Count == 0)
-            { Warn("Selecciona al menos un molde para la planilla."); return; }
-
             try
             {
                 byte[] pdf = PdfService.GenerarPlanillaProduccion(
                     dtpFecha.Value,
-                    seleccionados,
+                    12,  // 12 filas vacías — el operario escribe los moldes en uso
                     (int)_nudVueltas.Value,
                     EsVirgen ? "Virgen" : "Reciclado");
 

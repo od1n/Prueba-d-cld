@@ -5,7 +5,6 @@
 // ════════════════════════════════════════════════════════════════════════
 
 using System;
-using System.Collections.Generic;
 using QuestPDF.Fluent;
 using QuestPDF.Helpers;
 using QuestPDF.Infrastructure;
@@ -16,14 +15,15 @@ namespace SistemaGestion
     {
         /// <summary>
         /// Genera una planilla de producción diaria imprimible.
+        /// 12 filas vacías para que el operario escriba los moldes en uso ese día.
         /// </summary>
         /// <param name="fecha">Fecha del día.</param>
-        /// <param name="moldes">Moldes activos en la línea ese día.</param>
+        /// <param name="filasMolde">Cantidad de filas vacías para moldes (máx 12-14 por día).</param>
         /// <param name="vueltas">Ciclos estimados (0 = no se muestra la columna).</param>
         /// <param name="tipoMaterial">«Virgen» o «Reciclado».</param>
         public static byte[] GenerarPlanillaProduccion(
             DateTime      fecha,
-            List<TbMolde> moldes,
+            int           filasMolde   = 12,
             int           vueltas      = 0,
             string        tipoMaterial = "Virgen")
         {
@@ -120,56 +120,24 @@ namespace SistemaGestion
                                 HC("Observaciones");
                             });
 
-                            // ─ Filas de datos
+                            // ─ Filas vacías para que el operario escriba los moldes del día
                             string[] grises = { "#FFFFFF", "#F0F4FF" };
-                            for (int i = 0; i < moldes.Count; i++)
+                            for (int i = 0; i < filasMolde; i++)
                             {
-                                var    m  = moldes[i];
                                 string bg = grises[i % 2];
-
-                                // Celda con texto
-                                void DC(string t, bool negrita = false)
-                                {
-                                    var c = tbl.Cell().Background(bg)
-                                               .BorderBottom(0.3f).BorderColor("#CCCCCC")
-                                               .Padding(3).AlignCenter();
-                                    if (negrita) c.Text(t).Bold();
-                                    else         c.Text(t);
-                                }
-
-                                // Celda vacía para rellenar a mano
-                                void BC() =>
+                                void FC(string t = "") =>
                                     tbl.Cell().Background(bg)
                                        .BorderBottom(0.3f).BorderColor("#CCCCCC")
-                                       .MinHeight(24).Text("");
+                                       .MinHeight(28).Padding(3).AlignCenter().Text(t);
 
-                                DC((i + 1).ToString());
-                                DC($"{m.CodigoMold}\n{m.Descripcion}", negrita: true);
-                                if (mostrarVuelt) BC();
-                                if (esVirgen) { BC(); BC(); }
-                                else            BC();
-                                BC(); // Defect.
-                                BC(); // Total
-                                BC(); // Obs.
-                            }
-
-                            // ─ Filas vacías extras hasta completar mínimo 10
-                            int filasExtra = Math.Max(0, 10 - moldes.Count);
-                            for (int x = 0; x < filasExtra; x++)
-                            {
-                                string xbg = grises[(moldes.Count + x) % 2];
-                                void XC() =>
-                                    tbl.Cell().Background(xbg)
-                                       .BorderBottom(0.3f).BorderColor("#CCCCCC")
-                                       .MinHeight(24).Text("");
-                                XC(); // #
-                                XC(); // Molde
-                                if (mostrarVuelt) XC();
-                                if (esVirgen) { XC(); XC(); }
-                                else            XC();
-                                XC(); // Defect.
-                                XC(); // Total
-                                XC(); // Obs.
+                                FC((i + 1).ToString()); // #
+                                FC();                    // Molde (vacío — lo llena el operario)
+                                if (mostrarVuelt) FC();
+                                if (esVirgen) { FC(); FC(); }
+                                else            FC();
+                                FC(); // Defect.
+                                FC(); // Total
+                                FC(); // Obs.
                             }
 
                             // ─ Fila de totales
