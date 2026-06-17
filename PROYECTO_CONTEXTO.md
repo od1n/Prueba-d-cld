@@ -33,49 +33,60 @@ Credenciales: admin / admin1234
 ### OLIMPO (producción — admin) — IP: 192.168.68.132
 - **SO**: Windows, usuario `PC`
 - **Repo**: `C:\Users\PC\AppData\Local\SistemaGestion\repo`
+- **Publish WinForms**: `C:\Users\PC\AppData\Local\SistemaGestion\publish\App`
 - **Publish API**: `C:\Users\PC\AppData\Local\SistemaGestion\publish\Api`
 - **BD SQLite**: `C:\Users\PC\AppData\Roaming\SistemaGestion\sistema_gestion.db`
 - **Env vars**: `C:\Users\PC\AppData\Local\SistemaGestion\publish\Api\sg-env.cmd`
 - **Digitalizador Python**: `C:\SistemaGestion\digitalizador`
 - **Funciones**: BD maestra, app escritorio, API, digitalizador OCR
 - **Script inicio**: `C:\Users\PC\AppData\Local\SistemaGestion\repo\Scripts\iniciar-servicios-olimpo.cmd`
+- **Después de pull**: publicar WinForms y API por separado, luego reiniciar ambos
 
 ### SERVO (oficina — usuario) — conecta a OLIMPO por red
 - **Repo**: `C:\SistemaGestion` (raíz, NO subcarpeta repo)
 - **Publish API**: `C:\Users\naos\AppData\Local\SistemaGestion\publish\Api`
+- **Content root en ejecución**: `C:\SistemaGestion\publish\Api` (verificado: la API corre desde publish, NO desde bin/Debug)
 - **BD**: `\\192.168.68.132\SistemaGestion\sistema_gestion.db` (red, misma BD de OLIMPO)
 - **Digitalizador**: usa el de OLIMPO via `http://192.168.68.132:8080`
 - **Funciones**: SOLO API web (NO WinForms). Impresión de facturas sobre formularios preimpresos
 - **Script inicio**: `C:\SistemaGestion\Scripts\iniciar-servicios-servo.cmd`
+- **Puertos**: HTTP 5050 (redirige a HTTPS), HTTPS 5443
+- **Cert HTTPS**: CN=SistemaGestion-LAN, O=SistemaGestion, OU=Portal (expira 2031-06-09)
 - **Impresora**: EPSON L1250 (soporta tamaños de papel personalizados)
 - **IMPORTANTE**: NO crear subcarpetas repo/ ni Prueba-d-cld-develop/ dentro de C:\SistemaGestion — causan duplicación de archivos .cs y errores de compilación
+- **IMPORTANTE**: Después de pull hay que **republicar** (`dotnet publish`) y reiniciar la API. Solo `dotnet build` NO es suficiente — la API ejecuta desde la carpeta publish
 
 ---
 
 ## 3. Flujo de deploy
 
+**Ramas activas**: `master` y `develop`. Verificar siempre en cuál rama se hizo el commit (git commitea en la rama activa). Ambas deben mantenerse sincronizadas.
+
 ```powershell
 # 1. En CHAOS — commit y push
 cd "C:\Users\Toor\source\repos\Prueba d cld"
-git add <archivos>
+git add -A
 git commit -m "descripción"
-git push origin develop
+git push origin master
+# Si también se usa develop: git checkout develop && git merge master && git push origin develop
 
-# 2. En OLIMPO — pull, publish WinForms + API por separado
+# 2. En OLIMPO — pull, publish WinForms + API por separado, reiniciar
 cd C:\Users\PC\AppData\Local\SistemaGestion\repo
-git pull origin develop
+git pull origin master
 dotnet publish SistemaGestion.csproj -c Release -o C:\Users\PC\AppData\Local\SistemaGestion\publish\App --self-contained
-cd SistemaGestion.Api
-dotnet publish SistemaGestion.Api.csproj -c Release -o C:\Users\PC\AppData\Local\SistemaGestion\publish\Api --self-contained
+dotnet publish SistemaGestion.Api\SistemaGestion.Api.csproj -c Release -o C:\Users\PC\AppData\Local\SistemaGestion\publish\Api --self-contained
 # Reiniciar: cerrar ventana de la API y ejecutar:
 C:\Users\PC\AppData\Local\SistemaGestion\repo\Scripts\iniciar-servicios-olimpo.cmd
 
-# 3. En SERVO — pull, publish SOLO API (NO WinForms)
+# 3. En SERVO — pull, publish SOLO API (NO WinForms), reiniciar API
 cd C:\SistemaGestion
-git pull origin develop
-cd SistemaGestion.Api
-dotnet publish SistemaGestion.Api.csproj -c Release -o C:\Users\naos\AppData\Local\SistemaGestion\publish\Api --self-contained
+git pull origin master
+dotnet publish SistemaGestion.Api -c Release -o C:\SistemaGestion\publish\Api
+# Detener la API (Ctrl+C en la ventana) y reiniciar:
+C:\SistemaGestion\Scripts\iniciar-servicios-servo.cmd
 ```
+
+**CRÍTICO — SERVO**: `dotnet build` compila en `bin/Debug` pero la API corre desde `C:\SistemaGestion\publish\Api`. Siempre usar `dotnet publish` después de cada pull, de lo contrario los cambios no se reflejan.
 
 **IMPORTANTE**: publicar CADA proyecto por separado (no la solución). `dotnet publish` a nivel de .sln con `--output` mezcla salidas y causa errores.
 
@@ -252,6 +263,42 @@ int filasVaciasNota = Math.Max(0, 18 - nItems);  // Nota: max 18 filas
 - `Manual-App-Escritorio-SistemaGestion.pdf` (24 páginas): +3 secciones (Kardex, Reorden, Impresión)
 - `Manual-Tecnico-SistemaGestion.pdf` (25 páginas): +3 secciones (Kardex dual, Pronóstico, API actualizada)
 
+### Mejoras v1.2 (Junio 2026)
+
+#### Nómina
+- Fórmula pago real: `PagoReal = TotalDevengado - DeduccionesReales`
+- `DeduccionesReales = DescuentoFaltas + CuotaPrestamo + OtrasDeduccion`
+- IVSS (4%) y RPVH (1%) son informativos, NO se descuentan del pago
+- Porcentajes IVSS/RPVH ahora config-driven (tabla `ConfiguracionSistema`), no hardcodeados
+- Descuento por falta basado en bono real del día (producción) o sueldo diario × tasa (otros)
+- Cache de `CalcularBonoProduccion` al registrar N faltas del mismo día
+- Validación: fecha de falta debe pertenecer a un período de nómina existente (retorna -2 si no)
+
+#### Panel de Configuración Legal (admin)
+- `FrmConfigLegal.cs` — WinForms con 5 secciones: Facturación, Nómina Empleado, Nómina Patronal, Valores Legales, Crédito
+- API: `GET/PUT /api/config/legal` en `ConfigEndpoints.cs`
+- `EnsureConfigLegal()` en ambas capas siembra valores default al iniciar
+- Claves: IVA_Porcentaje, IVSS_Empleado, RPVH_Empleado, IVSS_Patronal, RPVH_Patronal, INCES_Patronal, UT_Bs, SalarioMinimo_Bs, DiasCredito_Default
+
+#### Facturación
+- Botón "+ Cliente" en formulario de factura (WinForms: `FrmFacturas.cs`, Web: `facturas.js`)
+- CxC automática al facturar a crédito (usa `DiasCredito_Default` de ConfiguracionSistema)
+- Verificación de morosidad antes de extender crédito (`VerificarMorosidadCliente`)
+
+#### Alertas
+- CxC próximas a vencer (3 días) en `AlertasService.cs` y `FrmAlertas.cs`
+- Badge en tab "CxC Por Vencer" con grid de cuentas próximas
+
+#### Planilla de producción
+- WinForms (`PdfService_PlanillaProduccion.cs`): 12 filas vacías, columna Molde en blanco
+- API (`GET /api/produccion/planilla`): 12 filas vacías HTML, columna Molde en blanco
+- El operario escribe a mano los moldes en uso ese día (máx 12-14 diferentes)
+- Eliminado el diálogo de selección de moldes en WinForms (ya no lista todos los moldes del catálogo)
+
+#### Esquema BD
+- Versión actual: 26
+- Índices en InasistenciasEmpleado: `idx_inas_emp(IdEmpleado)`, `idx_inas_fecha(Fecha)`, `idx_inas_emp_fecha(IdEmpleado,Fecha)` UNIQUE
+
 ### Pendiente futuro
 - Registrar la API como servicio de Windows (actualmente se ejecuta manual)
 - Fine-tuning de impresión de factura fiscal sobre formularios preimpresos (calibrar posiciones)
@@ -288,6 +335,11 @@ int filasVaciasNota = Math.Max(0, 18 - nItems);  // Nota: max 18 filas
 | Auth/login | `SistemaGestion.Api/Endpoints/AuthEndpoints.cs` + `Auth/TokenService.cs` |
 | Config API | `SistemaGestion.Api/Program.cs` |
 | BD schema + migraciones | `DB.cs` (WinForms, MigrarEsquema) / `Db.cs` (API) |
+| Config legal (admin) | `FrmConfigLegal.cs` (WinForms) / `ConfigEndpoints.cs` (API) |
+| Alertas sistema | `AlertasService.cs` + `FrmAlertas.cs` |
+| Planilla producción PDF | `PdfService_PlanillaProduccion.cs` (WinForms QuestPDF) |
+| Planilla producción HTML | `ProduccionEndpoints.cs` → `GET /api/produccion/planilla` |
+| CxC / Morosidad | `DB.cs` → `VerificarMorosidadCliente` / `ClientesEndpoints.cs` |
 | Variables de entorno | `Scripts/sg-env-olimpo.cmd` / `Scripts/sg-env-servo.cmd` |
 
 ---
