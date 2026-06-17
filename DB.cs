@@ -5059,12 +5059,12 @@ namespace SistemaGestion
             using var r = cmd.ExecuteReader();
             while (r.Read())
                 list.Add(new InasistenciaEmpleado {
-                    Id               = I(r,0),
-                    IdEmpleado       = I(r,1),
+                    Id               = r.GetInt32(0),
+                    IdEmpleado       = r.GetInt32(1),
                     NombreEmpleado   = S(r,2),
                     TipoEmpleado     = S(r,3),
                     Fecha            = DateTime.TryParse(S(r,4), out var f) ? f : DateTime.MinValue,
-                    Justificada      = I(r,5) != 0,
+                    Justificada      = r.GetInt32(5) != 0,
                     MontoDescuentoBs = D(r,6),
                     Observaciones    = S(r,7)
                 });
