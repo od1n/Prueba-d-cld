@@ -32,15 +32,18 @@ Credenciales: admin / admin1234
 
 ### OLIMPO (producción — admin) — IP: 192.168.68.132
 - **SO**: Windows, usuario `PC`
-- **Repo**: `C:\Users\PC\AppData\Local\SistemaGestion\repo`
+- **Repo**: `C:\SistemaGestion`
 - **Publish WinForms**: `C:\Users\PC\AppData\Local\SistemaGestion\publish\App`
 - **Publish API**: `C:\Users\PC\AppData\Local\SistemaGestion\publish\Api`
-- **BD SQLite**: `C:\Users\PC\AppData\Roaming\SistemaGestion\sistema_gestion.db`
-- **Env vars**: `C:\Users\PC\AppData\Local\SistemaGestion\publish\Api\sg-env.cmd`
+- **BD SQLite**: `C:\SistemaGestion\sistema_gestion.db` (única BD, compartida por red como `\\192.168.68.132\SistemaGestion\sistema_gestion.db`)
+- **Env var `SG_DB_PATH`**: `C:\SistemaGestion\sistema_gestion.db` (User scope — OBLIGATORIA, sin ella la app busca en AppData una BD inexistente)
+- **Tablas config**: `ConfigSistema` (legacy) y `ConfiguracionSistema` (v16+, para parámetros legales IVA/IVSS/etc.)
 - **Digitalizador Python**: `C:\SistemaGestion\digitalizador`
 - **Funciones**: BD maestra, app escritorio, API, digitalizador OCR
-- **Script inicio**: `C:\Users\PC\AppData\Local\SistemaGestion\repo\Scripts\iniciar-servicios-olimpo.cmd`
-- **Después de pull**: publicar WinForms y API por separado, luego reiniciar ambos
+- **Después de pull**:
+  - WinForms: `dotnet publish SistemaGestion.csproj -c Release -r win-x64 --self-contained -o "C:\Users\PC\AppData\Local\SistemaGestion\publish\App"`
+  - API: `dotnet publish SistemaGestion.Api -c Release -o "C:\Users\PC\AppData\Local\SistemaGestion\publish\Api"`
+  - Luego reiniciar ambos
 
 ### SERVO (oficina — usuario) — conecta a OLIMPO por red
 - **Repo**: `C:\SistemaGestion` (raíz, NO subcarpeta repo)
