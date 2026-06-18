@@ -242,7 +242,11 @@ async function cargarIvaConfig() {
         const raw = cfg?.IVA_Porcentaje;
         const pct = (raw !== null && raw !== undefined && raw !== '') ? parseFloat(raw) : 16;
         const el  = document.getElementById('fIva');
-        if (el) { el.value = pct; recalcFactura(); }
+        if (el) {
+            el.innerHTML = `<option value="${pct}">${pct}%</option><option value="0">0% (Nota de Entrega)</option>`;
+            el.value = pct;
+            recalcFactura();
+        }
     } catch (_) { /* si falla queda el default 16 del HTML */ }
 }
 
@@ -281,7 +285,10 @@ function abrirNueva() {
     <div class="form-grid-2 mb-12">
       <div class="form-group">
         <label class="form-label">IVA %</label>
-        <input id="fIva" type="number" class="input-field" value="16" min="0" max="100" oninput="recalcFactura()">
+        <select id="fIva" class="input-field" onchange="recalcFactura()">
+          <option value="16">16%</option>
+          <option value="0">0% (Nota de Entrega)</option>
+        </select>
       </div>
       <div class="form-group">
         <label class="form-label">Descuento %</label>
@@ -455,7 +462,7 @@ async function guardarFactura() {
         fecha: document.getElementById('fFecha')?.value || null,
         codigoCliente: cli,
         formaDePago: fp,
-        pctIva: document.getElementById('fIva')?.value !== '' ? parseFloat(document.getElementById('fIva').value) : 16,
+        pctIva: parseFloat(document.getElementById('fIva')?.value ?? '16'),
         descuento: parseFloat(document.getElementById('fDesc')?.value) || 0,
         diasCredito: diasCredito,
         observaciones: document.getElementById('fObs')?.value?.trim() || '',
