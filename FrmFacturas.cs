@@ -630,10 +630,12 @@ CargarDatos();
         // Cabecera
         private TextBox       txtNumero, txtTransporte, txtObs, txtDestinoExp;
         private DateTimePicker dtpFecha;
-        private NumericUpDown  numDescuento, numAbono, numIva, numTotal, numDias;
-        private ComboBox       cmbCliente, cmbFormaPago;
+        private NumericUpDown  numDescuento, numAbono, numTotal, numDias;
+        private ComboBox       cmbCliente, cmbFormaPago, cmbIva;
         private CheckBox       chkExportacion;
         private Label          lblDestinoExp, lblTipoDoc;
+        private decimal        _ivaPctSistema = 16m;
+        private decimal        _ivaCalculado = 0m;
         private List<Cliente>  _clientesFactura = new List<Cliente>();
 
         // Grid de lineas
@@ -781,7 +783,18 @@ CargarDatos();
             panelIzq.Controls.Add(cmbFormaPago); y += 32;
 
             Lbl("Desc. global (%):", y); numDescuento = Num(y, 100);       y += 32;
-            Lbl("IVA ($):", y);          numIva       = Num(y, 9999999);   y += 32;
+            _ivaPctSistema = decimal.TryParse(
+                DatabaseService.ObtenerConfig("IVA_Porcentaje", "16"), out var _ipv) ? _ipv : 16m;
+            Lbl("IVA %:", y);
+            cmbIva = new ComboBox
+            {
+                Location = new Point(130, y), Size = new Size(220, 24),
+                DropDownStyle = ComboBoxStyle.DropDownList, Enabled = !soloLectura
+            };
+            cmbIva.Items.Add($"{_ivaPctSistema}%");
+            cmbIva.Items.Add("0% (Nota de Entrega)");
+            cmbIva.SelectedIndex = 0;
+            panelIzq.Controls.Add(cmbIva);                                    y += 32;
 
             // ── EXPORTACIÓN (v22) ──────────────────────────────────────────
             // Checkbox que sólo importa cuando IVA = 0. Si se marca, el
@@ -856,7 +869,7 @@ CargarDatos();
             void RefrescarTipoDoc()
             {
                 var tipo = DatabaseService.ClasificarTipoDocumento(
-                    numIva.Value, chkExportacion.Checked);
+                    _ivaCalculado, chkExportacion.Checked);
                 switch (tipo)
                 {
                     case "FacturaConIVA":
@@ -876,7 +889,7 @@ CargarDatos();
                         break;
                 }
             }
-            numIva.ValueChanged       += (s, e) => RefrescarTipoDoc();
+            cmbIva.SelectedIndexChanged += (s, e) => { RecalcularTotal(); RefrescarTipoDoc(); };
             chkExportacion.CheckedChanged += (s, e) => RefrescarTipoDoc();
             RefrescarTipoDoc();
 
@@ -1019,7 +1032,7 @@ CargarDatos();
                 if (cmbFormaPago.Items.Contains(f.FormaDePago))
                     cmbFormaPago.SelectedItem = f.FormaDePago;
                 numDescuento.Value         = f.Descuento;
-                numIva.Value               = f.IvaF;
+                cmbIva.SelectedIndex       = f.IvaF > 0 ? 0 : 1;
                 numAbono.Value             = f.Abono < 0 ? 0 : f.Abono;
                 numTotal.Value             = f.TotalF;
                 numDias.Value              = f.DiasCreditoF;
@@ -1077,7 +1090,7 @@ CargarDatos();
             };
 
             numDescuento.ValueChanged += (s, e) => RecalcularTotal();
-            numIva.ValueChanged += (s, e) => RecalcularTotal();
+            // cmbIva ya tiene evento en RefrescarTipoDoc arriba
 
             RecalcularTotal();
         
@@ -1159,8 +1172,10 @@ CargarDatos();
             lblTotalLineas.Text = "Subtotal lineas: " + total.ToString("C2");
 
             decimal desc = numDescuento?.Value ?? 0;
-            decimal iva = numIva?.Value ?? 0;
-            decimal totalConDesc = total * (1 - desc / 100m) + iva;
+            decimal pctIva = (cmbIva?.SelectedIndex == 0) ? _ivaPctSistema : 0m;
+            decimal baseIva = total * (1 - desc / 100m);
+            _ivaCalculado = baseIva * (pctIva / 100m);
+            decimal totalConDesc = baseIva + _ivaCalculado;
             if (numTotal != null)
                 numTotal.Value = Math.Min(totalConDesc, numTotal.Maximum);
         }
@@ -1253,13 +1268,13 @@ CargarDatos();
 
             // ── Validación de exportación ────────────────────────────────
             // Si marcó exportación pero IVA > 0 → no tiene sentido.
-            if (chkExportacion.Checked && numIva.Value > 0)
+            if (chkExportacion.Checked && cmbIva.SelectedIndex == 0)
             {
                 MessageBox.Show(this,
                     "Una factura de exportación tiene IVA 0% por ley.\n" +
-                    "Quita el IVA o desmarca la exportación.",
+                    "Selecciona 0% o desmarca la exportación.",
                     "Inconsistencia", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                numIva.Focus();
+                cmbIva.Focus();
                 return;
             }
             // Si marcó exportación, exigir destino
@@ -1275,7 +1290,7 @@ CargarDatos();
 
             // ── Si va a guardarse como NotaEntrega, confirmar ────────────
             string tipoFinal = DatabaseService.ClasificarTipoDocumento(
-                numIva.Value, chkExportacion.Checked);
+                _ivaCalculado, chkExportacion.Checked);
             if (tipoFinal == "NotaEntrega")
             {
                 if (!Sesion.EsAdmin && !Sesion.TienePermiso("NotasEntregaCrear"))
@@ -1310,7 +1325,7 @@ CargarDatos();
                 Observaciones = txtObs.Text?.Trim() ?? "",
                 FormaDePago = cmbFormaPago.SelectedItem?.ToString() ?? "Contado",
                 Abono = numAbono.Value,
-                IvaF = numIva.Value,
+                IvaF = _ivaCalculado,
                 DiasCreditoF = (int)numDias.Value,
                 EsExportacion      = chkExportacion.Checked,
                 DestinoExportacion = chkExportacion.Checked
