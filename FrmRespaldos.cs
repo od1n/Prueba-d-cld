@@ -30,9 +30,10 @@ namespace SistemaGestion
                 Location  = new Point(12, 13)
             });
 
-            var btnRespaldo  = Btn("+ Respaldar ahora", Color.FromArgb(30, 140, 70));
-            var btnVerificar = Btn("Verificar",          Color.FromArgb(120, 60, 180));
-            var btnAbrir     = Btn("Abrir carpeta",      Color.FromArgb(26, 74, 138));
+            var btnRespaldo   = Btn("+ Respaldar ahora", Color.FromArgb(30, 140, 70));
+            var btnRestaurar  = Btn("Restaurar",          Color.FromArgb(180, 60, 60), 100);
+            var btnVerificar  = Btn("Verificar",          Color.FromArgb(120, 60, 180));
+            var btnAbrir      = Btn("Abrir carpeta",      Color.FromArgb(26, 74, 138));
             
             
             var _btnAyuda = new Button {
@@ -51,7 +52,7 @@ namespace SistemaGestion
                 WrapContents = false, BackColor = Color.Transparent,
                 Padding = new Padding(0, 9, 8, 0)
             };
-            _pnlHdr.Controls.AddRange(new Control[] { _btnAyuda, btnRespaldo, btnVerificar, btnAbrir });
+            _pnlHdr.Controls.AddRange(new Control[] { _btnAyuda, btnRespaldo, btnRestaurar, btnVerificar, btnAbrir });
             hdr.Controls.Add(_pnlHdr);
             // ── ToolTips ─────────────────────────────────────────────────
             var _tip = AyudaService.CrearTooltip();
@@ -131,8 +132,9 @@ namespace SistemaGestion
             Controls.AddRange(new Control[] { dgv, panelRuta, hdr, footer });
 
             // ── Eventos ───────────────────────────────────────────────────
-            btnRespaldo.Click  += (s, e) => HacerRespaldoManual();
-            btnVerificar.Click += (s, e) => VerificarIntegridad();
+            btnRespaldo.Click   += (s, e) => HacerRespaldoManual();
+            btnRestaurar.Click  += (s, e) => RestaurarRespaldo();
+            btnVerificar.Click  += (s, e) => VerificarIntegridad();
             btnAbrir.Click     += (s, e) =>
             {
                 Directory.CreateDirectory(BackupService.CarpetaRespaldos);
@@ -176,6 +178,106 @@ CargarDatos();
             }
 
             CargarDatos();
+        }
+
+        // ── Restaurar respaldo ────────────────────────────────────────────
+        private void RestaurarRespaldo()
+        {
+            if (dgv.CurrentRow == null)
+            {
+                MessageBox.Show(this, "Selecciona un respaldo de la lista.",
+                    "Restaurar", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            var nombre = dgv.CurrentRow.Cells["Archivo"].Value?.ToString();
+            if (string.IsNullOrEmpty(nombre)) return;
+
+            // Buscar el archivo .enc correspondiente
+            string encPath = Path.Combine(BackupService.CarpetaRespaldos,
+                nombre.Replace(".db", ".db.enc"));
+            if (!File.Exists(encPath))
+            {
+                MessageBox.Show(this, "No se encontró el archivo:\n" + encPath,
+                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            var confirm = MessageBox.Show(this,
+                "¿Restaurar la base de datos desde este respaldo?\n\n" +
+                "Archivo: " + nombre + "\n\n" +
+                "ADVERTENCIA: Esto reemplazará TODA la base de datos actual.\n" +
+                "Se creará un respaldo de seguridad antes de restaurar.",
+                "Confirmar restauración",
+                MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+            if (confirm != DialogResult.Yes) return;
+
+            try
+            {
+                string rutaBD = SecurityService.RutaBD;
+
+                // 1. Respaldar BD actual por seguridad
+                string backupActual = rutaBD + ".pre-restauracion";
+                if (File.Exists(rutaBD))
+                    File.Copy(rutaBD, backupActual, overwrite: true);
+
+                // 2. Descifrar a archivo temporal
+                string tempDescifrado = rutaBD + ".restaurando";
+                try
+                {
+                    SecurityService.DescifrarRespaldo(encPath, tempDescifrado);
+                }
+                catch (Exception exDec)
+                {
+                    MessageBox.Show(this,
+                        "Error al descifrar el respaldo:\n" + exDec.Message,
+                        "Error de descifrado", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    if (File.Exists(tempDescifrado)) File.Delete(tempDescifrado);
+                    return;
+                }
+
+                // 3. Verificar que es SQLite válido
+                var header = new byte[16];
+                using (var fs = File.OpenRead(tempDescifrado))
+                    fs.Read(header, 0, 16);
+                if (System.Text.Encoding.ASCII.GetString(header, 0, 13) != "SQLite format")
+                {
+                    MessageBox.Show(this,
+                        "El archivo descifrado no es una base de datos SQLite válida.",
+                        "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    File.Delete(tempDescifrado);
+                    return;
+                }
+
+                // 4. Forzar cierre de conexiones SQLite (liberar archivo)
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+
+                // 5. Reemplazar BD
+                // Eliminar WAL/SHM si existen
+                foreach (var ext in new[] { "-wal", "-shm" })
+                    if (File.Exists(rutaBD + ext)) File.Delete(rutaBD + ext);
+
+                File.Copy(tempDescifrado, rutaBD, overwrite: true);
+                File.Delete(tempDescifrado);
+
+                // 6. Reinicializar BD
+                DatabaseService.Inicializar();
+
+                MessageBox.Show(this,
+                    "Base de datos restaurada exitosamente desde:\n" + nombre + "\n\n" +
+                    "El respaldo de seguridad está en:\n" + backupActual + "\n\n" +
+                    "Se recomienda reiniciar la aplicación.",
+                    "Restauración exitosa",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this,
+                    "Error al restaurar:\n" + ex.Message,
+                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
 
         // ── Verificar integridad ──────────────────────────────────────────
