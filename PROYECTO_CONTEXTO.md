@@ -242,20 +242,33 @@ El share SMB `SistemaGestion` en OLIMPO apuntaba a `C:\Users\PC\AppData\Roaming\
 - Hay respaldos encriptados en `C:\Users\PC\AppData\Roaming\SistemaGestion\Respaldos\` (12 archivos .db.enc, el más reciente del 18/06/2026 00:04, 614 KB)
 - Clave de descifrado: `C:\Users\PC\AppData\Roaming\SistemaGestion\sg.key` (DPAPI)
 
-### Lo que falta hacer
-1. **Descifrar el respaldo más reciente** usando `SecurityService.DescifrarRespaldo()` o la herramienta `Descifrar/`
-   - El proyecto `Descifrar/` está en el repo pero tuvo error "Padding is invalid"
-   - Posible causa: necesita ejecutarse como usuario PC en OLIMPO exactamente igual que el WinForms
-   - Alternativa: agregar botón "Restaurar" al `FrmRespaldos.cs` y usarlo desde el WinForms
-2. **Copiar la BD descifrada** a `C:\SistemaGestion\sistema_gestion.db`
-3. **Verificar datos**: clientes, productos, facturas presentes
-4. **Asegurar tabla ConfiguracionSistema** existe en la BD restaurada
-5. **Recrear usuario oficina01** (ofi001, rol Ventas)
-6. **Reiniciar API en SERVO** y verificar login + datos
+### Lo que se intentó (TODO FALLÓ con "Padding is invalid and cannot be removed")
+1. Herramienta standalone `Descifrar/` (proyecto .NET en el repo) — reimplementa AES-256-CBC → padding error
+2. Herramienta standalone usando ProjectReference a SistemaGestion.csproj → conflictos de compilación
+3. Botón "Restaurar" agregado a `FrmRespaldos.cs` que llama `SecurityService.DescifrarRespaldo()` directamente → MISMO padding error
+
+**Conclusión**: el error NO es de reimplementación. `SecurityService.DescifrarRespaldo()` ejecutándose dentro del propio WinForms (mismo usuario PC, mismo DPAPI, mismo código) también falla. Esto indica que:
+- La clave AES en `sg.key` fue regenerada en algún momento DESPUÉS de crear los respaldos, O
+- Los archivos .enc están corruptos, O
+- Hay un problema con DPAPI (la clave se descifra a 256 bits pero el valor podría ser incorrecto si el perfil Windows cambió)
+
+### Lo que falta investigar
+1. **Verificar integridad de los .enc**: usar el botón "Verificar" en FrmRespaldos — si los SHA256 coinciden, los archivos no están corruptos
+2. **Verificar si la clave fue regenerada**: buscar en `SecurityService.cs` cuándo se genera `sg.key` (método `GenerarClave` o similar). Si se genera al no encontrar el archivo, podría haberse regenerado accidentalmente
+3. **Probar respaldos más antiguos**: si TODOS fallan, el problema es la clave. Si solo los recientes fallan, la clave se regeneró en cierta fecha
+4. **Buscar BD en otros lugares**: quizás hay una copia no cifrada en algún respaldo manual, en la papelera de reciclaje, o en Shadow Copies de Windows (`vssadmin list shadows`)
+5. **DPAPI recovery**: si la contraseña del usuario Windows PC cambió, DPAPI puede no descifrar correctamente. Verificar con `dpapi::masterkey` o similar
+
+### Si no se puede recuperar
+- La BD tiene estructura correcta (tablas creadas por migraciones). Solo faltan los DATOS.
+- Habría que reingresar clientes, productos e inventario manualmente
+- Las facturas históricas se perderían
 
 ### Pendientes adicionales (después de restaurar BD)
-- Vista previa de factura en WinForms: ya implementada en código, falta probar después del deploy
-- Agregar función de restaurar respaldo al WinForms (`FrmRespaldos.cs`)
+- Vista previa de factura en WinForms: ya implementada en código (`FrmFacturas.cs`), falta probar
+- El botón Restaurar ya está en `FrmRespaldos.cs` — funcionará cuando se resuelva el problema de la clave
+- Recrear usuario oficina01 (ofi001, rol Ventas)
+- Reiniciar API en SERVO y verificar login + datos
 
 ---
 
