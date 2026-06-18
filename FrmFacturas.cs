@@ -1315,6 +1315,35 @@ CargarDatos();
                 if (resp != DialogResult.Yes) return;
             }
 
+            // ── Vista previa antes de guardar ────────────────────────
+            decimal pctIva = (cmbIva?.SelectedIndex == 0) ? _ivaPctSistema : 0m;
+            string nombreCli = cmbCliente.Text;
+            string formaPago = cmbFormaPago.SelectedItem?.ToString() ?? "Contado";
+            decimal subTotal = lineas.Sum(l => l.Cantidad * l.PrecioUnit);
+            decimal descMonto = subTotal * (numDescuento.Value / 100m);
+            decimal baseImponible = subTotal - descMonto;
+
+            string resumen = $"═══ VISTA PREVIA ═══\n\n" +
+                $"Tipo: {tipoFinal}\n" +
+                $"Cliente: {nombreCli}\n" +
+                $"Fecha: {dtpFecha.Value:dd/MM/yyyy}\n" +
+                $"Forma de pago: {formaPago}\n" +
+                $"IVA: {pctIva}%\n\n" +
+                $"── Artículos ({lineas.Count}) ──\n";
+            foreach (var l in lineas)
+                resumen += $"  {l.Descripcion}  ×{l.Cantidad}  @{l.PrecioUnit:C2}  = {(l.Cantidad * l.PrecioUnit):C2}\n";
+            resumen += $"\n── Totales ──\n" +
+                $"  Subtotal:       {subTotal:C2}\n" +
+                $"  Descuento ({numDescuento.Value}%): -{descMonto:C2}\n" +
+                $"  IVA ({pctIva}%):      {_ivaCalculado:C2}\n" +
+                $"  ─────────────────\n" +
+                $"  TOTAL:          {numTotal.Value:C2}\n\n" +
+                $"¿Confirmar y guardar?";
+
+            var confirmar = MessageBox.Show(this, resumen,
+                "Confirmar factura", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            if (confirmar != DialogResult.Yes) return;
+
             Resultado = new Factura
             {
                 NumeroF = txtNumero.Text.Trim(),
@@ -1323,7 +1352,7 @@ CargarDatos();
                 Descuento = numDescuento.Value,
                 Transporte = txtTransporte.Text?.Trim() ?? "",
                 Observaciones = txtObs.Text?.Trim() ?? "",
-                FormaDePago = cmbFormaPago.SelectedItem?.ToString() ?? "Contado",
+                FormaDePago = formaPago,
                 Abono = numAbono.Value,
                 IvaF = _ivaCalculado,
                 DiasCreditoF = (int)numDias.Value,

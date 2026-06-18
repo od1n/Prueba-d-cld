@@ -449,11 +449,132 @@ function recalcFactura() {
     set('fSub', sub); set('fDsc', desc); set('fIva2', iva); set('fTot', tot);
 }
 
-// -- Guardar factura ------------------------------------------------------
-async function guardarFactura() {
+// -- Guardar factura (con vista previa) ------------------------------------
+function guardarFactura() {
     const cli = document.getElementById('fCliCod')?.value?.trim();
     if (!cli) { alert('Selecciona un cliente.'); return; }
     if (!itemsFactura.length) { alert('Agrega al menos un articulo.'); return; }
+    const fp = document.getElementById('fFormaPago')?.value || 'Contado';
+    let diasCredito = 0;
+    if (fp.startsWith('Credito')) diasCredito = parseInt(document.getElementById('fDiasCredito')?.value) || 30;
+    const pctIva = parseFloat(document.getElementById('fIva')?.value ?? '16');
+    const pctDesc = parseFloat(document.getElementById('fDesc')?.value) || 0;
+    const body = {
+        numeroF: null,
+        fecha: document.getElementById('fFecha')?.value || null,
+        codigoCliente: cli,
+        formaDePago: fp,
+        pctIva: pctIva,
+        descuento: pctDesc,
+        diasCredito: diasCredito,
+        observaciones: document.getElementById('fObs')?.value?.trim() || '',
+        items: itemsFactura.map(it => ({ codigo: it.codigo, cantidad: it.cantidad, precioUnit: it.precio }))
+    };
+    mostrarVistaPrevia(body, pctIva, pctDesc);
+}
+
+function mostrarVistaPrevia(body, pctIva, pctDesc) {
+    const nombreCli = document.getElementById('fCliInput')?.value || body.codigoCliente;
+    const tipoDoc = pctIva > 0 ? 'Factura con IVA' : 'Nota de entrega';
+    const esFiscal = pctIva > 0;
+    const sub = itemsFactura.reduce((s,it) => s + it.cantidad * it.precio, 0);
+    const descMonto = sub * pctDesc / 100;
+    const base = sub - descMonto;
+    const ivaMonto = base * pctIva / 100;
+    const total = base + ivaMonto;
+
+    let filas = '';
+    for (const it of itemsFactura) {
+        const st = it.cantidad * it.precio;
+        filas += `<tr style="border-bottom:1px solid rgba(255,255,255,.06)">
+            <td style="padding:6px 8px">${it.descripcion || it.codigo}</td>
+            <td style="text-align:right;padding:6px 8px">${it.cantidad}</td>
+            <td style="text-align:right;padding:6px 8px">${formatUSD(it.precio)}</td>
+            <td style="text-align:right;padding:6px 8px;font-weight:600">${formatUSD(st)}</td></tr>`;
+    }
+
+    const fechaFmt = body.fecha ? new Date(body.fecha+'T12:00:00').toLocaleDateString('es-VE') : '—';
+
+    const modalId = 'modalPreviewFact';
+    let ex = document.getElementById(modalId);
+    if (ex) ex.remove();
+
+    const ov = document.createElement('div');
+    ov.id = modalId;
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+    ov.innerHTML = `
+    <div style="background:#1a1a2e;color:#e0e0e0;border-radius:12px;max-width:500px;width:100%;max-height:90vh;overflow-y:auto;padding:24px;font-family:Arial,sans-serif;font-size:13px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid rgba(255,255,255,.1)">
+        <span style="font-size:20px">📄</span>
+        <div>
+          <div style="font-size:16px;font-weight:600;color:#fff">Vista previa</div>
+          <div style="font-size:12px;color:#888">Revisa antes de guardar</div>
+        </div>
+      </div>
+      <div style="margin-bottom:14px">
+        <span style="display:inline-block;padding:4px 12px;border-radius:6px;font-size:12px;font-weight:600;
+          background:${esFiscal ? 'rgba(16,163,127,.15)' : 'rgba(230,160,40,.15)'};
+          color:${esFiscal ? '#10a37f' : '#e0a028'}">
+          ${esFiscal ? '✓' : '⚠'} ${tipoDoc}${esFiscal ? ' — documento fiscal' : ' — sin valor fiscal'}
+        </span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px">
+        <div style="background:rgba(255,255,255,.05);border-radius:8px;padding:10px">
+          <div style="font-size:11px;color:#888">Cliente</div>
+          <div style="font-weight:600;color:#fff;margin-top:2px">${nombreCli}</div>
+        </div>
+        <div style="background:rgba(255,255,255,.05);border-radius:8px;padding:10px">
+          <div style="font-size:11px;color:#888">Fecha</div>
+          <div style="font-weight:600;color:#fff;margin-top:2px">${fechaFmt}</div>
+        </div>
+        <div style="background:rgba(255,255,255,.05);border-radius:8px;padding:10px">
+          <div style="font-size:11px;color:#888">Forma de pago</div>
+          <div style="font-weight:600;color:#fff;margin-top:2px">${body.formaDePago}</div>
+        </div>
+        <div style="background:rgba(255,255,255,.05);border-radius:8px;padding:10px">
+          <div style="font-size:11px;color:#888">IVA</div>
+          <div style="font-weight:600;color:#fff;margin-top:2px">${pctIva}%</div>
+        </div>
+      </div>
+      <div style="font-size:12px;color:#888;margin-bottom:8px">Artículos (${itemsFactura.length})</div>
+      <table style="width:100%;border-collapse:collapse;margin-bottom:16px">
+        <thead><tr style="border-bottom:1px solid rgba(255,255,255,.15)">
+          <th style="text-align:left;padding:6px 8px;color:#888;font-weight:500">Producto</th>
+          <th style="text-align:right;padding:6px 8px;color:#888;font-weight:500">Cant.</th>
+          <th style="text-align:right;padding:6px 8px;color:#888;font-weight:500">Precio</th>
+          <th style="text-align:right;padding:6px 8px;color:#888;font-weight:500">Subtotal</th>
+        </tr></thead>
+        <tbody>${filas}</tbody>
+      </table>
+      <div style="background:rgba(255,255,255,.05);border-radius:8px;padding:12px 16px;margin-bottom:20px">
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+          <span style="color:#888">Subtotal</span><span>${formatUSD(sub)}</span></div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+          <span style="color:#888">Descuento (${pctDesc}%)</span><span>-${formatUSD(descMonto)}</span></div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+          <span style="color:#888">IVA (${pctIva}%)</span><span>${formatUSD(ivaMonto)}</span></div>
+        <div style="display:flex;justify-content:space-between;padding-top:8px;border-top:1px solid rgba(255,255,255,.15)">
+          <span style="font-size:15px;font-weight:600;color:#fff">Total</span>
+          <span style="font-size:18px;font-weight:700;color:#00d4aa">${formatUSD(total)}</span></div>
+      </div>
+      ${body.observaciones ? `<div style="margin-bottom:16px;padding:8px 12px;background:rgba(255,255,255,.03);border-radius:6px;font-size:12px"><span style="color:#888">Obs:</span> ${body.observaciones}</div>` : ''}
+      <div style="display:flex;gap:8px">
+        <button onclick="document.getElementById('${modalId}').remove()" style="flex:1;padding:10px;border-radius:8px;border:1px solid rgba(255,255,255,.15);background:transparent;color:#ccc;cursor:pointer;font-size:13px">
+          ← Volver a editar</button>
+        <button onclick="confirmarGuardarFactura()" style="flex:1;padding:10px;border-radius:8px;border:none;background:#10a37f;color:#fff;cursor:pointer;font-size:13px;font-weight:600">
+          ✓ Confirmar y guardar</button>
+      </div>
+    </div>`;
+    document.body.appendChild(ov);
+    ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+}
+
+let _bodyPendiente = null;
+function guardarFacturaOriginal(body) { _bodyPendiente = body; }
+
+async function confirmarGuardarFactura() {
+    const modal = document.getElementById('modalPreviewFact');
+    const cli = document.getElementById('fCliCod')?.value?.trim();
     const fp = document.getElementById('fFormaPago')?.value || 'Contado';
     let diasCredito = 0;
     if (fp.startsWith('Credito')) diasCredito = parseInt(document.getElementById('fDiasCredito')?.value) || 30;
@@ -468,6 +589,7 @@ async function guardarFactura() {
         observaciones: document.getElementById('fObs')?.value?.trim() || '',
         items: itemsFactura.map(it => ({ codigo: it.codigo, cantidad: it.cantidad, precioUnit: it.precio }))
     };
+    if (modal) modal.remove();
     const btn = document.getElementById('btnGuardarFact');
     if (btn) { btn.disabled=true; btn.textContent='Guardando...'; }
     try {
