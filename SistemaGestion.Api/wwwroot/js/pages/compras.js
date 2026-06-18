@@ -366,7 +366,7 @@ async function guardarCompra() {
         codigoP:      prov,
         formaDePago:  document.getElementById('cFormaPago')?.value || 'Contado',
         descuentoC:   parseFloat(document.getElementById('cDesc')?.value) || 0,
-        pctIva:       parseFloat(document.getElementById('cIva')?.value) || 16,
+        pctIva:       document.getElementById('cIva')?.value !== '' ? parseFloat(document.getElementById('cIva').value) : 16,
         diasDeCred:   parseInt(document.getElementById('cDias')?.value) || 0,
         observaciones:document.getElementById('cObs')?.value?.trim() || '',
         items: itemsCompra.map(it => ({

@@ -239,7 +239,8 @@ async function guardarAbono(numero) {
 async function cargarIvaConfig() {
     try {
         const cfg = await apiGet('/api/config/legal');
-        const pct = parseFloat(cfg?.IVA_Porcentaje ?? '16') || 16;
+        const raw = cfg?.IVA_Porcentaje;
+        const pct = (raw !== null && raw !== undefined && raw !== '') ? parseFloat(raw) : 16;
         const el  = document.getElementById('fIva');
         if (el) { el.value = pct; recalcFactura(); }
     } catch (_) { /* si falla queda el default 16 del HTML */ }
