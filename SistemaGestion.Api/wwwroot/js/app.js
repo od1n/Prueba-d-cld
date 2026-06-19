@@ -207,6 +207,7 @@ function renderNav(activa) {
         { id: 'reportes',   icon: '📊', label: 'Reportes', href: '/pages/reportes.html' },
         { id: 'nomina',     icon: '💰', label: 'Nómina',   href: '/pages/nomina.html' },
         { id: 'produccion', icon: '🏭', label: 'Producción', href: '/pages/digitalizador.html' },
+        { id: 'camaras',    icon: '📷', label: 'Cámaras',    href: '/pages/camaras.html' },
     ];
     return `
     <nav class="bottom-nav" role="navigation" aria-label="Navegación principal">

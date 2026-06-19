@@ -414,3 +414,55 @@ select.input-field { cursor: pointer; }
   .content { max-width: 960px; padding: 24px; }
   .kpi-grid { grid-template-columns: repeat(4, 1fr); }
 }
+
+/* ── Cámaras ─────────────────────────────────────────────────── */
+.cam-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+@media (min-width: 540px) {
+  .cam-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (min-width: 900px) {
+  .cam-grid { grid-template-columns: repeat(3, 1fr); }
+}
+.cam-card {
+  background: var(--fondo-card);
+  border: 1px solid var(--borde);
+  border-radius: var(--radio);
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.cam-card:hover { border-color: var(--cyan); }
+.cam-img-wrap {
+  position: relative;
+  background: #111;
+  aspect-ratio: 16/9;
+}
+.cam-img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.cam-status {
+  position: absolute; top: 8px; right: 8px;
+  font-size: 10px; color: var(--texto-dim);
+  text-shadow: 0 0 4px #000;
+}
+.cam-info {
+  padding: 8px 10px;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.cam-nombre { font-size: 13px; font-weight: 600; color: var(--texto); }
+.cam-modelo { font-size: 11px; }
+.empty-state {
+  text-align: center; padding: 60px 20px;
+  color: var(--texto-dim);
+}
+.btn-close {
+  background: none; border: none; color: var(--texto-dim);
+  font-size: 18px; cursor: pointer; padding: 4px 8px;
+}
+.btn-close:hover { color: var(--texto); }
