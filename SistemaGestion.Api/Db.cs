@@ -516,16 +516,33 @@ namespace SistemaGestion.Api
             public bool   Activa        { get; set; } = true;
             public int    Orden         { get; set; }
 
-            /// <summary>Descifra la clave DPAPI. Solo usar server-side.</summary>
+            /// <summary>Descifra la clave AES (SG_CAM_KEY). Solo usar server-side.</summary>
             public string ObtenerClavePlano()
             {
                 if (string.IsNullOrEmpty(ClaveCifrada)) return "";
                 try
                 {
-                    var cifrado   = Convert.FromBase64String(ClaveCifrada);
-                    var descifrado = System.Security.Cryptography.ProtectedData.Unprotect(
-                        cifrado, null, System.Security.Cryptography.DataProtectionScope.CurrentUser);
-                    return System.Text.Encoding.UTF8.GetString(descifrado);
+                    // AES-256-CBC: base64( IV[16] + ciphertext )
+                    var b64Key = Environment.GetEnvironmentVariable("SG_CAM_KEY",
+                                     EnvironmentVariableTarget.Machine)
+                              ?? Environment.GetEnvironmentVariable("SG_CAM_KEY")
+                              ?? "";
+                    if (string.IsNullOrEmpty(b64Key)) return "";
+                    var key  = Convert.FromBase64String(b64Key);
+                    var blob = Convert.FromBase64String(ClaveCifrada);
+                    if (blob.Length < 17) return "";
+
+                    var iv     = new byte[16];
+                    var cipher = new byte[blob.Length - 16];
+                    Buffer.BlockCopy(blob, 0, iv, 0, 16);
+                    Buffer.BlockCopy(blob, 16, cipher, 0, cipher.Length);
+
+                    using var aes = System.Security.Cryptography.Aes.Create();
+                    aes.Key = key;
+                    aes.IV  = iv;
+                    using var dec = aes.CreateDecryptor();
+                    var plain = dec.TransformFinalBlock(cipher, 0, cipher.Length);
+                    return System.Text.Encoding.UTF8.GetString(plain);
                 }
                 catch { return ""; }
             }

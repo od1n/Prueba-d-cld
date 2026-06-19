@@ -1060,6 +1060,26 @@ namespace SistemaGestion
             // Aplicar migraciones incrementales al esquema existente
             MigrarEsquema(c);
 
+            // ── Migrar claves de cámaras DPAPI → AES (one-shot) ────────────
+            //   Solo funciona en la máquina que cifró con DPAPI (OLIMPO, usuario PC).
+            //   Si SG_CAM_KEY no está configurada o no hay claves DPAPI, no hace nada.
+            try
+            {
+                var camKey = Environment.GetEnvironmentVariable("SG_CAM_KEY",
+                                 EnvironmentVariableTarget.Machine)
+                          ?? Environment.GetEnvironmentVariable("SG_CAM_KEY");
+                if (!string.IsNullOrEmpty(camKey))
+                {
+                    int migradas = MigrarClavesDpapiAAes();
+                    if (migradas > 0)
+                        Console.WriteLine($"[DB] Claves de cámaras migradas DPAPI→AES: {migradas}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[DB] WARN migración claves cámaras: {ex.Message}");
+            }
+
             // ── Tablas opcionales (defensivo) ───────────────────────────────
             //   TasaCambio puede no existir en BDs migradas desde versiones
             //   antiguas. La creamos aqui para que el JOIN del reporte de

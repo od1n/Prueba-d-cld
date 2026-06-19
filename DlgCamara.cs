@@ -244,14 +244,14 @@ namespace SistemaGestion
                     _txtClave.Focus();
                     return;
                 }
-                claveCifrada = SecurityService.DpapiCifrar(clave);
+                claveCifrada = SecurityService.CamCifrar(clave);
             }
             else
             {
                 // Edit → si dejaron vacío, mantener la cifrada original
                 claveCifrada = string.IsNullOrEmpty(clave)
                     ? _original.ClaveCifrada
-                    : SecurityService.DpapiCifrar(clave);
+                    : SecurityService.CamCifrar(clave);
             }
 
             Resultado = _original ?? new Camara();

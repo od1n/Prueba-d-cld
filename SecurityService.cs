@@ -270,5 +270,87 @@ namespace SistemaGestion
             string hashActual   = CalcularHash(rutaArchivo);
             return string.Equals(hashGuardado, hashActual, StringComparison.OrdinalIgnoreCase);
         }
+
+        // ── AES para cámaras (cross-machine via SG_CAM_KEY) ──────────────
+        // La clave se lee de la variable de entorno SG_CAM_KEY (base64, 32 bytes).
+        // Formato de salida: base64( IV[16] + ciphertext )
+        // Esto reemplaza DPAPI para ClaveCifrada en Camaras, permitiendo que
+        // tanto OLIMPO como SERVO descifren con la misma clave.
+
+        private static byte[] ObtenerCamKey()
+        {
+            var b64 = Environment.GetEnvironmentVariable("SG_CAM_KEY",
+                          EnvironmentVariableTarget.Machine)
+                   ?? Environment.GetEnvironmentVariable("SG_CAM_KEY");
+            if (string.IsNullOrEmpty(b64))
+                throw new InvalidOperationException(
+                    "Variable de entorno SG_CAM_KEY no configurada. " +
+                    "Debe contener una clave AES-256 en base64 (32 bytes).");
+            var key = Convert.FromBase64String(b64);
+            if (key.Length != 32)
+                throw new InvalidOperationException(
+                    $"SG_CAM_KEY debe ser 32 bytes (AES-256). Tiene {key.Length}.");
+            return key;
+        }
+
+        /// <summary>
+        /// Cifra un texto con AES-256-CBC usando SG_CAM_KEY.
+        /// Devuelve base64( IV + ciphertext ).
+        /// </summary>
+        public static string CamCifrar(string texto)
+        {
+            if (string.IsNullOrEmpty(texto)) return "";
+            byte[] key  = ObtenerCamKey();
+            byte[] data = Encoding.UTF8.GetBytes(texto);
+
+            using var aes = Aes.Create();
+            aes.Key = key;
+            aes.GenerateIV();
+
+            using var enc = aes.CreateEncryptor();
+            byte[] cipher = enc.TransformFinalBlock(data, 0, data.Length);
+
+            // IV (16) + ciphertext
+            byte[] result = new byte[aes.IV.Length + cipher.Length];
+            Buffer.BlockCopy(aes.IV, 0, result, 0, aes.IV.Length);
+            Buffer.BlockCopy(cipher, 0, result, aes.IV.Length, cipher.Length);
+            return Convert.ToBase64String(result);
+        }
+
+        /// <summary>
+        /// Descifra un texto previamente cifrado con CamCifrar.
+        /// </summary>
+        public static string CamDescifrar(string base64)
+        {
+            if (string.IsNullOrEmpty(base64)) return "";
+            byte[] key  = ObtenerCamKey();
+            byte[] blob = Convert.FromBase64String(base64);
+            if (blob.Length < 17) return ""; // mínimo IV(16) + 1 byte
+
+            byte[] iv     = new byte[16];
+            byte[] cipher = new byte[blob.Length - 16];
+            Buffer.BlockCopy(blob, 0, iv, 0, 16);
+            Buffer.BlockCopy(blob, 16, cipher, 0, cipher.Length);
+
+            using var aes = Aes.Create();
+            aes.Key = key;
+            aes.IV  = iv;
+
+            using var dec = aes.CreateDecryptor();
+            byte[] plain = dec.TransformFinalBlock(cipher, 0, cipher.Length);
+            return Encoding.UTF8.GetString(plain);
+        }
+
+        /// <summary>
+        /// Genera una clave AES-256 aleatoria y la devuelve en base64.
+        /// Usar una sola vez para crear el valor de SG_CAM_KEY.
+        /// </summary>
+        public static string GenerarCamKey()
+        {
+            using var aes = Aes.Create();
+            aes.KeySize = 256;
+            aes.GenerateKey();
+            return Convert.ToBase64String(aes.Key);
+        }
     }
 }

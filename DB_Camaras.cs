@@ -5,8 +5,8 @@
 //
 // Diseño:
 //   - La clave RTSP (codigo de verificacion del sticker) se guarda CIFRADA
-//     con DPAPI (SecurityService.DpapiCifrar). Solo se descifra al construir
-//     la URL en runtime para conectar. Nunca se guarda en plano.
+//     con AES-256 (SecurityService.CamCifrar, clave en SG_CAM_KEY).
+//     Solo se descifra al construir la URL en runtime. Nunca se guarda en plano.
 //   - Admin ve todas las cámaras activas implícitamente, sin necesidad de
 //     filas en PermisosCamara.
 //   - Resto de usuarios: relación N:N en PermisosCamara. Sin filas → no ven.
@@ -28,7 +28,7 @@ namespace SistemaGestion
         public string   IpLocal       { get; set; } = "";
         public int      PuertoRtsp    { get; set; } = 554;
         public string   UsuarioCamara { get; set; } = "admin";
-        public string   ClaveCifrada  { get; set; } = "";   // base64 DPAPI
+        public string   ClaveCifrada  { get; set; } = "";   // base64 AES (SG_CAM_KEY)
         public string   RutaStream    { get; set; } = "/Streaming/Channels/101";
         public string   Modelo        { get; set; } = "";
         public bool     Activa        { get; set; } = true;
@@ -36,14 +36,14 @@ namespace SistemaGestion
         public DateTime FechaCreacion { get; set; }
 
         /// <summary>
-        /// Devuelve la clave en plano descifrando con DPAPI. Solo usar en
-        /// runtime para construir la URL RTSP. No exponer en UI ni logs.
+        /// Devuelve la clave en plano descifrando con AES (SG_CAM_KEY).
+        /// Solo usar en runtime para construir la URL RTSP. No exponer en UI ni logs.
         /// </summary>
         public string ObtenerClavePlano()
         {
             if (string.IsNullOrEmpty(ClaveCifrada)) return "";
-            try { return SecurityService.DpapiDescifrar(ClaveCifrada); }
-            catch { return ""; }   // perfil Windows distinto o blob corrupto
+            try { return SecurityService.CamDescifrar(ClaveCifrada); }
+            catch { return ""; }   // clave no configurada o blob corrupto
         }
 
         /// <summary>
@@ -375,6 +375,64 @@ namespace SistemaGestion
             cmd.Parameters.AddWithValue("$mo",  cam.Modelo        ?? "");
             cmd.Parameters.AddWithValue("$ac",  cam.Activa ? 1 : 0);
             cmd.Parameters.AddWithValue("$or",  cam.Orden);
+        }
+
+        // ── Migración DPAPI → AES (SG_CAM_KEY) ─────────────────────────────
+        /// <summary>
+        /// Re-cifra las claves de cámaras de DPAPI a AES. Debe ejecutarse
+        /// una sola vez en OLIMPO bajo el usuario que originalmente cifró.
+        /// Devuelve el número de claves migradas.
+        /// </summary>
+        public static int MigrarClavesDpapiAAes()
+        {
+            int migradas = 0;
+            using var c = Conn();
+            using var tx = c.BeginTransaction();
+
+            try
+            {
+                // Leer todas las cámaras con ClaveCifrada no vacía
+                var cmd = c.CreateCommand();
+                cmd.Transaction = tx;
+                cmd.CommandText = "SELECT Id, ClaveCifrada FROM Camaras WHERE ClaveCifrada <> ''";
+                var pendientes = new List<(int id, string cifrada)>();
+                using (var r = cmd.ExecuteReader())
+                    while (r.Read())
+                        pendientes.Add((r.GetInt32(0), r.GetString(1)));
+
+                foreach (var (id, cifradaDpapi) in pendientes)
+                {
+                    // Intentar descifrar con DPAPI
+                    string plano;
+                    try { plano = SecurityService.DpapiDescifrar(cifradaDpapi); }
+                    catch { continue; } // no se puede descifrar → saltar
+
+                    if (string.IsNullOrEmpty(plano)) continue;
+
+                    // Verificar que no esté ya en formato AES (si la migración
+                    // se ejecuta dos veces, DpapiDescifrar fallaría con el
+                    // nuevo formato, así que este caso no debería ocurrir)
+
+                    // Re-cifrar con AES
+                    string cifradaAes = SecurityService.CamCifrar(plano);
+
+                    var upd = c.CreateCommand();
+                    upd.Transaction = tx;
+                    upd.CommandText = "UPDATE Camaras SET ClaveCifrada = $cv WHERE Id = $id";
+                    upd.Parameters.AddWithValue("$cv", cifradaAes);
+                    upd.Parameters.AddWithValue("$id", id);
+                    upd.ExecuteNonQuery();
+                    migradas++;
+                }
+
+                tx.Commit();
+            }
+            catch
+            {
+                tx.Rollback();
+                throw;
+            }
+            return migradas;
         }
     }
 }
