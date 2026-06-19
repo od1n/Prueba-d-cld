@@ -1,7 +1,13 @@
 import sqlite3
 import os
 
-db = os.path.join(r"C:\Users\PC\AppData\Roaming\SistemaGestion", "sistema_gestion.db")
+## Ruta canónica: C:\SistemaGestion\sistema_gestion.db (OLIMPO)
+## Fallback: SG_DB_PATH si está definida
+db = os.environ.get("SG_DB_PATH") or r"C:\SistemaGestion\sistema_gestion.db"
+if not os.path.exists(db):
+    alt = os.path.join(os.environ.get("APPDATA", ""), "SistemaGestion", "sistema_gestion.db")
+    if os.path.exists(alt):
+        db = alt
 print(f"Conectando a: {db}")
 c = sqlite3.connect(db)
 cur = c.cursor()

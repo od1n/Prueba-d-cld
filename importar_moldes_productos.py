@@ -3,18 +3,14 @@ import sys
 import os
 
 # Detect machine by path
-if os.path.exists(r"C:\Users\PC\AppData\Roaming\SistemaGestion\sistema_gestion.db"):
-    db = r"C:\Users\PC\AppData\Roaming\SistemaGestion\sistema_gestion.db"
-elif os.path.exists(r"C:\SistemaGestion\data\sistema_gestion.db"):
-    db = r"C:\SistemaGestion\data\sistema_gestion.db"
-else:
-    for p in [r"C:\Users\PC\AppData\Roaming\SistemaGestion", r"C:\SistemaGestion\data", r"C:\SistemaGestion"]:
-        for root, dirs, files in os.walk(p):
-            for f in files:
-                if f == "sistema_gestion.db":
-                    db = os.path.join(root, f)
-                    break
-    if "db" not in dir():
+## Ruta canónica: C:\SistemaGestion\sistema_gestion.db (OLIMPO)
+## Fallback: SG_DB_PATH si está definida
+db = os.environ.get("SG_DB_PATH") or r"C:\SistemaGestion\sistema_gestion.db"
+if not os.path.exists(db):
+    alt = os.path.join(os.environ.get("APPDATA", ""), "SistemaGestion", "sistema_gestion.db")
+    if os.path.exists(alt):
+        db = alt
+    else:
         print("ERROR: No se encontro la base de datos")
         sys.exit(1)
 

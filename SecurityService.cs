@@ -188,7 +188,10 @@ namespace SistemaGestion
 
             using var aes = Aes.Create();
             aes.Key     = clave;
-            aes.KeySize = 256;
+            // NO asignar aes.KeySize después de aes.Key:
+            // en .NET, el setter de KeySize SIEMPRE pone KeyValue = null,
+            // lo que causa que CreateEncryptor() use una clave aleatoria nueva
+            // en vez de la clave real. Bug que hacía irrecuperables los respaldos.
             aes.GenerateIV();   // IV aleatorio por archivo
 
             using var fsOrigen  = new FileStream(rutaOrigen,  FileMode.Open,   FileAccess.Read);

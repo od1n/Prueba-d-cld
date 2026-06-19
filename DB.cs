@@ -1614,6 +1614,22 @@ namespace SistemaGestion
                         "ALTER TABLE DetalleProduccionMolde ADD COLUMN CantReciclado REAL DEFAULT 0");
                 }
 
+                // ── MIGRACIÓN v14: Kardex de inventario ─────────────────────────
+                if (versionActual < 14)
+                    MigrarV14(conn, tx);   // SetSchemaVersion interno
+
+                // ── MIGRACIÓN v15: Roles de usuarios ────────────────────────────
+                if (versionActual < 15)
+                    MigrarV15(conn, tx);   // SetSchemaVersion interno
+
+                // ── MIGRACIÓN v16: Índices, TasaCambio, ConfiguracionSistema ────
+                if (versionActual < 16)
+                    MigrarV16(conn, tx);
+
+                // ── MIGRACIÓN v17: Inventario.Activo ────────────────────────────
+                if (versionActual < 17)
+                    MigrarV17(conn, tx);
+
                 // ── MIGRACIÓN v18: Seguridad de autenticación ─────────────────────
                 // Agrega columnas para PBKDF2, RequiereCambioPassword y rate limiting
                 if (versionActual < 18)
