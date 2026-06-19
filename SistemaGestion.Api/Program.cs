@@ -262,7 +262,8 @@ app.UseAuthorization();
 //   2) SG_TEST_BD  — ruta temporal en tests automatizados
 //   3) Default     — %AppData%\SistemaGestion\sistema_gestion.db
 var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-var rutaBD  = Environment.GetEnvironmentVariable("SG_DB_PATH")
+var rutaBD  = Environment.GetEnvironmentVariable("SG_DB_PATH", EnvironmentVariableTarget.Machine)
+           ?? Environment.GetEnvironmentVariable("SG_DB_PATH")
            ?? Environment.GetEnvironmentVariable("SG_TEST_BD")
            ?? Path.Combine(appData, "SistemaGestion", "sistema_gestion.db");
 try

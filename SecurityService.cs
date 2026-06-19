@@ -33,7 +33,8 @@ namespace SistemaGestion
         /// (permite compartir la BD en una carpeta de red).
         /// </summary>
         public static string RutaBD =>
-            Environment.GetEnvironmentVariable("SG_DB_PATH")
+            Environment.GetEnvironmentVariable("SG_DB_PATH", EnvironmentVariableTarget.Machine)
+            ?? Environment.GetEnvironmentVariable("SG_DB_PATH")
             ?? Path.Combine(CarpetaDatos, DB_FILENAME);
 
         /// <summary>Cadena de conexión SQLite lista para usar.</summary>
