@@ -414,7 +414,6 @@ function renderPaso3(el) {
 }
 
 // ── Utilidades ───────────────────────────────────────────────
-function eshA(v) { return esh(v).replace(/"/g, '&quot;'); }
 
 function formatearFechaInput(fechaStr) {
     if (!fechaStr) return new Date().toISOString().slice(0, 10);
