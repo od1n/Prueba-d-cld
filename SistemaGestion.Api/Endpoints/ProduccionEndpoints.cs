@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using SistemaGestion.Api.Auth;
 
 namespace SistemaGestion.Api.Endpoints
 {
@@ -119,7 +120,7 @@ namespace SistemaGestion.Api.Endpoints
                         new { ok = false, error = $"Digitalizador no disponible: {ex.Message}" },
                         statusCode: 503);
                 }
-            }).RequireAuthorization().DisableAntiforgery().RequireRateLimiting("ia-extraccion");
+            }).AddEndpointFilter(RequireRole.Of(TokenService.PuedeEscribirProduccion)).RequireAuthorization().DisableAntiforgery().RequireRateLimiting("ia-extraccion");
 
             // ── Proxy: confirmar / guardar ────────────────────────────────
 
@@ -143,7 +144,7 @@ namespace SistemaGestion.Api.Endpoints
                         new { ok = false, error = $"Digitalizador no disponible: {ex.Message}" },
                         statusCode: 503);
                 }
-            }).RequireAuthorization();
+            }).AddEndpointFilter(RequireRole.Of(TokenService.PuedeEscribirProduccion)).RequireAuthorization();
 
             // ── Registro manual de producción (sin digitalizador) ─────────
 
@@ -218,7 +219,7 @@ namespace SistemaGestion.Api.Endpoints
                     tx.Rollback();
                     return Results.Problem(ex.Message);
                 }
-            }).RequireAuthorization();
+            }).AddEndpointFilter(RequireRole.Of(TokenService.PuedeEscribirProduccion)).RequireAuthorization();
 
             // ── Listado de registros recientes ────────────────────────────
 

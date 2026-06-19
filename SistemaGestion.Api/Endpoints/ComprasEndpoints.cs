@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using SistemaGestion.Api.Auth;
 
 namespace SistemaGestion.Api.Endpoints
 {
@@ -224,7 +225,7 @@ namespace SistemaGestion.Api.Endpoints
                     tx.Rollback();
                     return Results.Problem(ex.Message);
                 }
-            }).RequireAuthorization();
+            }).AddEndpointFilter(RequireRole.Of(TokenService.PuedeEscribirCompras)).RequireAuthorization();
 
             // ── PUT actualizar compra ────────────────────────────────────
             app.MapPut("/api/compras/{id}", (string id, CompraRequest req, HttpContext ctx) =>
@@ -359,7 +360,7 @@ namespace SistemaGestion.Api.Endpoints
                     tx.Rollback();
                     return Results.Problem(ex.Message);
                 }
-            }).RequireAuthorization();
+            }).AddEndpointFilter(RequireRole.Of(TokenService.PuedeEscribirCompras)).RequireAuthorization();
 
             // ── GET pronóstico de reorden ─────────────────────────────────
             app.MapGet("/api/inventario/pronostico-reorden", (int? diasAnalisis, int? leadTime, int? coberturaMeta) =>

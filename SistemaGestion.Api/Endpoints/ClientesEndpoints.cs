@@ -484,7 +484,7 @@ namespace SistemaGestion.Api.Endpoints
                     tx.Rollback();
                     return Results.Problem(ex.Message);
                 }
-            }).RequireAuthorization();
+            }).AddEndpointFilter(RequireRole.Of(TokenService.PuedeEscribirFacturas)).RequireAuthorization();
 
             // ── POST pago parcial / abono ─────────────────────────────────
             app.MapPost("/api/facturas/{numero}/pago", (string numero, AbonoRequest req) =>
@@ -505,7 +505,7 @@ namespace SistemaGestion.Api.Endpoints
                 upd.Parameters.AddWithValue("$n",numero);
                 upd.ExecuteNonQuery();
                 return Results.Ok(new { abono=nuevoAbono, saldo=total-nuevoAbono, pagada=nuevoAbono>=total });
-            }).RequireAuthorization();
+            }).AddEndpointFilter(RequireRole.Of(TokenService.PuedeEscribirFacturas)).RequireAuthorization();
 
 
             // ── GET página imprimible ─────────────────────────────────────

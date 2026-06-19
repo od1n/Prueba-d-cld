@@ -19,7 +19,7 @@ Dos interfaces:
 
 Módulos: Dashboard, Facturación, Clientes, Inventario, Kardex, Producción, Nómina, Egresos/Compras, Reportes, Digitalizador OCR, Ayuda IA.
 
-Credenciales portal: admin / admin1234 (admin), PC / catiremia (usuario normal)
+Credenciales portal: ver archivo local de credenciales (NO guardar en repositorio)
 
 ---
 
@@ -118,16 +118,16 @@ Prueba d cld/
 │   ├── Frm*.cs                           # Formularios
 │   ├── DB*.cs                            # Acceso a datos
 │   ├── Pdf*.cs                           # Generación de PDFs (QuestPDF)
-│   ├── SecurityService.cs                # DPAPI, AES cifrado respaldos, rutas BD
+│   ├── SecurityService.cs                # DPAPI, AES respaldos, AES cámaras (SG_CAM_KEY), rutas BD
 │   ├── BackupService.cs                  # Respaldo automático diario
 │   └── *Service.cs                       # Otros servicios
 │
 ├── SistemaGestion.Api/                   # API Web (.NET 8 Minimal API)
 │   ├── Program.cs                        # Kestrel, auth JWT, CORS, rate limiting
 │   ├── Db.cs                             # Acceso SQLite (distinto al DB.cs de WinForms)
-│   ├── Auth/                             # JWT, cert HTTPS, sesiones
-│   ├── Endpoints/                        # Minimal API endpoints
-│   └── wwwroot/                          # Frontend SPA (HTML + JS vanilla)
+│   ├── Auth/                             # JWT, cert HTTPS, RequireRoleFilter
+│   ├── Endpoints/                        # Minimal API endpoints (con filtros de rol)
+│   └── wwwroot/                          # Frontend SPA (HTML + JS vanilla, incluye cámaras)
 │
 ├── SistemaGestion.Api.Tests/             # Tests xUnit
 ├── Descifrar/                            # Herramienta para descifrar respaldos (standalone)
@@ -188,6 +188,10 @@ Prueba d cld/
 - Headers: CSP, X-Frame-Options DENY, HSTS, nosniff
 - Restricción a red local (IPs privadas/loopback)
 - Revocación de tokens por jti
+- Autorización por rol en endpoints de escritura (RequireRoleFilter): Admin para Nómina, Admin/Contabilidad para Compras y Egresos, Admin/Ventas para Facturas, Admin/Almacen para Producción
+- System prompt del asistente IA hardcodeado server-side (no controlable por el cliente)
+- Claves de cámaras cifradas con AES-256-CBC (SG_CAM_KEY, variable de entorno Machine scope) — reemplaza DPAPI para permitir descifrado cross-machine
+- Tokens y credenciales: NO se hardcodean en archivos trackeados por git. Usar variables de entorno Machine scope
 
 ---
 
@@ -203,9 +207,13 @@ Prueba d cld/
 | Auth/login | `AuthEndpoints.cs` + `Auth/TokenService.cs` |
 | BD schema + migraciones | `DB.cs` (WinForms) / `Db.cs` + `DB_Deploy.cs` (API) |
 | Respaldos | `BackupService.cs` + `SecurityService.cs` |
+| Cámaras (WinForms) | `DB_Camaras.cs` + `DlgCamara.cs` + `FrmCamarasAdmin.cs` |
+| Cámaras (API) | `CamarasEndpoints.cs` + `Db.cs` (CamaraDto) |
+| Cámaras (frontend) | `wwwroot/pages/camaras.html` + `wwwroot/js/pages/camaras.js` |
 | Impresión QuestPDF | `PdfService.cs` |
 | Impresión portal web | `ClientesEndpoints.cs` |
-| Variables entorno | `Scripts/sg-env-olimpo.cmd` / `sg-env-servo.cmd` |
+| Auth/roles API | `Auth/TokenService.cs` + `Auth/RequireRoleFilter.cs` |
+| Variables entorno | `Scripts/sg-env-olimpo.cmd` / `sg-env-servo.cmd` (solo instrucciones, sin secrets) |
 
 ---
 
@@ -231,48 +239,63 @@ Prueba d cld/
 
 ---
 
-## 12. PROBLEMA ACTIVO — Restaurar BD de producción (Junio 18, 2026)
+## 12. Cámaras EZVIZ
 
-### Qué pasó
-El share SMB `SistemaGestion` en OLIMPO apuntaba a `C:\Users\PC\AppData\Roaming\SistemaGestion\` (donde estaba la BD real con todos los datos). Al corregir la configuración para que apunte a `C:\SistemaGestion\`, la BD en esa ruta estaba vacía (solo tenía estructura, sin clientes/productos/facturas).
+### H8 — 5 cámaras configuradas
+| Nombre | IP | Serial |
+|---|---|---|
+| Bolivar Oeste | 192.168.68.115 | L17476341 |
+| Techo Fund | 192.168.68.107 | L17476203 |
+| Camara 101 | 192.168.68.101 | por identificar |
+| Camara 108 | 192.168.68.108 | por identificar |
+| Camara 111 | 192.168.68.111 | por identificar |
 
-### Estado actual
-- `C:\SistemaGestion\sistema_gestion.db` — BD vacía (0 clientes, 0 productos, 1 usuario)
-- La BD original con datos ya no existe como archivo .db
-- Hay respaldos encriptados en `C:\Users\PC\AppData\Roaming\SistemaGestion\Respaldos\` (12 archivos .db.enc, el más reciente del 18/06/2026 00:04, 614 KB)
-- Clave de descifrado: `C:\Users\PC\AppData\Roaming\SistemaGestion\sg.key` (DPAPI)
+- Snapshot HTTP: `GET /onvif/snapshot` con Digest auth (JPEG ~83KB)
+- RTSP: puerto 554, ruta `/Streaming/Channels/101`
+- Credenciales: usuario `admin`, clave cifrada con AES (SG_CAM_KEY)
 
-### Lo que se intentó (TODO FALLÓ con "Padding is invalid and cannot be removed")
-1. Herramienta standalone `Descifrar/` (proyecto .NET en el repo) — reimplementa AES-256-CBC → padding error
-2. Herramienta standalone usando ProjectReference a SistemaGestion.csproj → conflictos de compilación
-3. Botón "Restaurar" agregado a `FrmRespaldos.cs` que llama `SecurityService.DescifrarRespaldo()` directamente → MISMO padding error
+### C6N — 7 cámaras, RTSP deshabilitado
+IPs: .100, .106, .109, .110, .112, .113, .114. Firmware V5.3.8 eliminó RTSP, sin opción para reactivar. Solo visibles en EZVIZ Studio.
 
-**Conclusión**: el error NO es de reimplementación. `SecurityService.DescifrarRespaldo()` ejecutándose dentro del propio WinForms (mismo usuario PC, mismo DPAPI, mismo código) también falla. Esto indica que:
-- La clave AES en `sg.key` fue regenerada en algún momento DESPUÉS de crear los respaldos, O
-- Los archivos .enc están corruptos, O
-- Hay un problema con DPAPI (la clave se descifra a 256 bits pero el valor podría ser incorrecto si el perfil Windows cambió)
+### Portal de cámaras (API)
+- `GET /api/camaras` — lista según permisos (admin=todas, otros=PermisosCamara)
+- `GET /api/camaras/{id}/snapshot` — proxy JPEG (credenciales server-side)
+- `GET /api/camaras/count` — conteo para badge UI
+- Frontend: `/pages/camaras.html` con refresco automático configurable
+- Permisos: non-admin solo ve Bolivar Oeste + Techo Fund (tabla PermisosCamara)
 
-### Lo que falta investigar
-1. **Verificar integridad de los .enc**: usar el botón "Verificar" en FrmRespaldos — si los SHA256 coinciden, los archivos no están corruptos
-2. **Verificar si la clave fue regenerada**: buscar en `SecurityService.cs` cuándo se genera `sg.key` (método `GenerarClave` o similar). Si se genera al no encontrar el archivo, podría haberse regenerado accidentalmente
-3. **Probar respaldos más antiguos**: si TODOS fallan, el problema es la clave. Si solo los recientes fallan, la clave se regeneró en cierta fecha
-4. **Buscar BD en otros lugares**: quizás hay una copia no cifrada en algún respaldo manual, en la papelera de reciclaje, o en Shadow Copies de Windows (`vssadmin list shadows`)
-5. **DPAPI recovery**: si la contraseña del usuario Windows PC cambió, DPAPI puede no descifrar correctamente. Verificar con `dpapi::masterkey` o similar
-
-### Si no se puede recuperar
-- La BD tiene estructura correcta (tablas creadas por migraciones). Solo faltan los DATOS.
-- Habría que reingresar clientes, productos e inventario manualmente
-- Las facturas históricas se perderían
-
-### Pendientes adicionales (después de restaurar BD)
-- Vista previa de factura en WinForms: ya implementada en código (`FrmFacturas.cs`), falta probar
-- El botón Restaurar ya está en `FrmRespaldos.cs` — funcionará cuando se resuelva el problema de la clave
-- Recrear usuario oficina01 (ofi001, rol Ventas)
-- Reiniciar API en SERVO y verificar login + datos
+### Variables de entorno para cámaras
+- `SG_CAM_KEY` (Machine scope): clave AES-256 en base64 (32 bytes). Debe ser la misma en OLIMPO y SERVO.
+- La migración DPAPI→AES corre automáticamente al arrancar WinForms si `SG_CAM_KEY` está configurada.
 
 ---
 
-## 13. Reglas para el asistente
+## 13. Variables de entorno (Machine scope)
+
+| Variable | Máquina | Descripción |
+|---|---|---|
+| `SG_DB_PATH` | OLIMPO, SERVO | Ruta canónica a la BD SQLite |
+| `SG_INTERNAL_TOKEN` | OLIMPO, SERVO | Token para comunicación API↔digitalizador |
+| `SG_CAM_KEY` | OLIMPO, SERVO | Clave AES-256 para cifrar claves de cámaras (base64) |
+| `SG_DIG_URL` | SERVO | URL del digitalizador en OLIMPO (http://192.168.68.132:8080) |
+
+Todas se configuran con `[Environment]::SetEnvironmentVariable("NOMBRE", "valor", "Machine")`. NUNCA hardcodear en archivos trackeados por git.
+
+---
+
+## 14. Resolución de ruta BD
+
+La ruta de la BD se resuelve así (en orden de prioridad):
+1. Variable de entorno `SG_DB_PATH` (Machine scope)
+2. Variable de entorno `SG_DB_PATH` (User/Process scope)
+3. Fallback: `%APPDATA%\SistemaGestion\sistema_gestion.db`
+
+Todos los componentes deben usar esta cadena: `SecurityService.RutaBD` (WinForms), `SG_DB_PATH` env var (API/Python).
+Si aparece una BD en ruta distinta a `C:\SistemaGestion\sistema_gestion.db` en OLIMPO, es un ERROR.
+
+---
+
+## 15. Reglas para el asistente
 
 - Español neutro (NUNCA argentino)
 - Push SOLO desde CHAOS. OLIMPO y SERVO solo hacen pull.
@@ -280,5 +303,7 @@ El share SMB `SistemaGestion` en OLIMPO apuntaba a `C:\Users\PC\AppData\Roaming\
 - SERVO solo corre API, NUNCA publicar WinForms ahí
 - Dar UNA solución probada, no múltiples intentos
 - Verificar rutas y estructura antes de dar comandos — no asumir
-- Si no se puede verificar que algo funciona, decirlo claramente
-- NUNCA debe haber más de una BD. Si aparece alguna en AppData o en otra ruta, es un error.
+- Si das un comando, asumir que se ejecutó a menos que el usuario diga lo contrario
+- NUNCA debe haber más de una BD. Si aparece alguna en AppData o en otra ruta, es un error
+- NUNCA hardcodear secrets (tokens, claves, credenciales) en archivos trackeados por git
+- Secrets van en variables de entorno Machine scope

@@ -108,5 +108,17 @@ namespace SistemaGestion.Api.Auth
         public static bool PuedeAjustarKardex(ClaimsPrincipal u) => EsAdmin(u);
         public static bool PuedeVerCxC(ClaimsPrincipal u) =>
             ObtenerRol(u) is "Admin" or "Ventas" or "Contabilidad";
+
+        // ── Permisos de escritura por módulo ──────────────────────────────
+        public static bool PuedeEscribirNomina(ClaimsPrincipal u) =>
+            ObtenerRol(u) is "Admin";
+        public static bool PuedeEscribirCompras(ClaimsPrincipal u) =>
+            ObtenerRol(u) is "Admin" or "Contabilidad";
+        public static bool PuedeEscribirEgresos(ClaimsPrincipal u) =>
+            ObtenerRol(u) is "Admin" or "Contabilidad";
+        public static bool PuedeEscribirFacturas(ClaimsPrincipal u) =>
+            ObtenerRol(u) is "Admin" or "Ventas";
+        public static bool PuedeEscribirProduccion(ClaimsPrincipal u) =>
+            ObtenerRol(u) is "Admin" or "Almacen";
     }
 }

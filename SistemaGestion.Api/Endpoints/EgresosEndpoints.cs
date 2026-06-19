@@ -181,7 +181,7 @@ namespace SistemaGestion.Api.Endpoints
                     return Results.Problem($"Error al contactar el digitalizador: {ex.Message}", statusCode: 502);
                 }
 
-            }).RequireAuthorization()
+            }).AddEndpointFilter(RequireRole.Of(TokenService.PuedeEscribirEgresos)).RequireAuthorization()
               .RequireRateLimiting("ia-extraccion")
               .DisableAntiforgery();
 
@@ -305,7 +305,7 @@ namespace SistemaGestion.Api.Endpoints
                     tx.Rollback();
                     return Results.Problem($"Error al guardar: {ex.Message}", statusCode: 500);
                 }
-            }).RequireAuthorization();
+            }).AddEndpointFilter(RequireRole.Of(TokenService.PuedeEscribirEgresos)).RequireAuthorization();
 
             // ── 4. Listar egresos ────────────────────────────────────────────
             // GET /api/egresos?desde=2025-01-01&hasta=2025-12-31&categoriaId=3

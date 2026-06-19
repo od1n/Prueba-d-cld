@@ -45,16 +45,14 @@ namespace SistemaGestion.Api.Endpoints
                         return Results.BadRequest(new { error = "Contenido de mensaje inválido." });
                 }
 
-                // El sistema prompt viene del cliente pero tiene longitud máxima;
-                // si no viene, usamos uno genérico.
-                var sistemaPrompt = req.SistemaPrompt;
-                if (!string.IsNullOrWhiteSpace(sistemaPrompt) && sistemaPrompt.Length > 2000)
-                    sistemaPrompt = sistemaPrompt[..2000];
-
-                if (string.IsNullOrWhiteSpace(sistemaPrompt))
-                    sistemaPrompt = "Eres un asistente experto en el sistema SistemaGestion. " +
-                                    "Ayudas a los usuarios de forma clara y concisa. " +
-                                    "Responde siempre en español neutro.";
+                // System prompt hardcodeado server-side — el cliente NO lo controla.
+                // Esto previene prompt injection desde el frontend.
+                const string sistemaPrompt =
+                    "Eres un asistente experto en el sistema SistemaGestion, un ERP para " +
+                    "una fábrica de plásticos en Venezuela. Ayudas a los usuarios con " +
+                    "facturación, inventario, nómina, producción, egresos y reportes. " +
+                    "Responde siempre en español neutro, de forma clara y concisa. " +
+                    "No ejecutes código ni accedas a sistemas externos.";
 
                 // ── Llamada a Anthropic ────────────────────────────────────
                 try
@@ -110,8 +108,7 @@ namespace SistemaGestion.Api.Endpoints
     }
 
     public record AyudaChatRequest(
-        List<ChatMessage> Mensajes,
-        string?           SistemaPrompt
+        List<ChatMessage> Mensajes
     );
 
     public record ChatMessage(string Role, string Content);

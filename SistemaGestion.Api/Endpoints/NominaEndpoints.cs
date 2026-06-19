@@ -1,3 +1,5 @@
+using SistemaGestion.Api.Auth;
+
 namespace SistemaGestion.Api.Endpoints
 {
     public static class NominaEndpoints
@@ -52,7 +54,7 @@ namespace SistemaGestion.Api.Endpoints
                 id.CommandText = "SELECT last_insert_rowid()";
                 int newId = (int)(long)(id.ExecuteScalar() ?? 0L);
                 return Results.Created($"/api/nomina/empleados/{newId}", new { id = newId });
-            }).RequireAuthorization();
+            }).AddEndpointFilter(RequireRole.Of(TokenService.PuedeEscribirNomina)).RequireAuthorization();
 
             app.MapPut("/api/nomina/empleados/{id:int}", (int id, EmpleadoRequest req) =>
             {
@@ -78,7 +80,7 @@ namespace SistemaGestion.Api.Endpoints
                 upd.Parameters.AddWithValue("$sn", (double)req.SalarioNormalUSD);
                 int rows = upd.ExecuteNonQuery();
                 return rows == 0 ? Results.NotFound() : Results.Ok(new { ok = true });
-            }).RequireAuthorization();
+            }).AddEndpointFilter(RequireRole.Of(TokenService.PuedeEscribirNomina)).RequireAuthorization();
 
             app.MapDelete("/api/nomina/empleados/{id:int}", (int id) =>
             {
@@ -88,7 +90,7 @@ namespace SistemaGestion.Api.Endpoints
                 cmd.Parameters.AddWithValue("$id", id);
                 cmd.ExecuteNonQuery();
                 return Results.Ok(new { ok = true });
-            }).RequireAuthorization();
+            }).AddEndpointFilter(RequireRole.Of(TokenService.PuedeEscribirNomina)).RequireAuthorization();
 
             // ════════════════════════════════════════════════════════════════
             //  PERÍODOS
@@ -134,7 +136,7 @@ namespace SistemaGestion.Api.Endpoints
                 id.CommandText = "SELECT last_insert_rowid()";
                 int newId = (int)(long)(id.ExecuteScalar() ?? 0L);
                 return Results.Created($"/api/nomina/periodos/{newId}", new { id=newId, tasa });
-            }).RequireAuthorization();
+            }).AddEndpointFilter(RequireRole.Of(TokenService.PuedeEscribirNomina)).RequireAuthorization();
 
             // ════════════════════════════════════════════════════════════════
             //  DETALLES / PROCESAMIENTO
@@ -334,7 +336,7 @@ namespace SistemaGestion.Api.Endpoints
                 AuthEndpoints.RegistrarAuditoria(c, "NOMINA_PROCESADA", "DetallesNomina",
                     $"Período={id}, empleados={procesados}");
                 return Results.Ok(new { procesados, diasPeriodo, advertencias });
-            }).RequireAuthorization();
+            }).AddEndpointFilter(RequireRole.Of(TokenService.PuedeEscribirNomina)).RequireAuthorization();
 
             // Actualizar una línea de detalle manualmente
             app.MapPut("/api/nomina/detalles/{id:int}", (int id, DetalleNominaRequest req, HttpContext ctx) =>
@@ -411,7 +413,7 @@ namespace SistemaGestion.Api.Endpoints
                 return rows == 0 ? Results.NotFound() : Results.Ok(new { ok=true,
                     devengado=totalDev, deduccionesReales=dedReales,
                     pagoRealUSD=pagoReal, pagoRealBs=pagoReal*tasa });
-            }).RequireAuthorization();
+            }).AddEndpointFilter(RequireRole.Of(TokenService.PuedeEscribirNomina)).RequireAuthorization();
 
             // Cerrar período + #9 auto-calcular aportes patronales
             app.MapPut("/api/nomina/periodos/{id:int}/cerrar", (int id, HttpContext ctx) =>
@@ -489,7 +491,7 @@ namespace SistemaGestion.Api.Endpoints
                 AuthEndpoints.RegistrarAuditoria(c, "PERIODO_CERRADO_API", "PeriodosNomina",
                     $"Id={id}, por {usuario}");
                 return Results.Ok(new { ok = true, aportesCalculados = true });
-            }).RequireAuthorization();
+            }).AddEndpointFilter(RequireRole.Of(TokenService.PuedeEscribirNomina)).RequireAuthorization();
 
             // Reabrir período (solo admin)
             app.MapPut("/api/nomina/periodos/{id:int}/reabrir", (int id, HttpContext ctx) =>
@@ -513,7 +515,7 @@ namespace SistemaGestion.Api.Endpoints
                 AuthEndpoints.RegistrarAuditoria(c, "PERIODO_REABIERTO", "PeriodosNomina",
                     $"Id={id}, por {usuario}");
                 return Results.Ok(new { ok = true });
-            }).RequireAuthorization();
+            }).AddEndpointFilter(RequireRole.Of(TokenService.PuedeEscribirNomina)).RequireAuthorization();
 
             // ── #4 Aportes patronales (consulta) ─────────────────────────
             app.MapGet("/api/nomina/periodos/{id:int}/aportes", (int id) =>
@@ -731,7 +733,7 @@ tr td{padding:1.5mm 2mm}
                     empleado = nombre, anio, aniosServicio = aniosServ,
                     salarioDiarioUSD = sal, tasaBCV = tasa, beneficios = result
                 });
-            }).RequireAuthorization();
+            }).AddEndpointFilter(RequireRole.Of(TokenService.PuedeEscribirNomina)).RequireAuthorization();
 
             // Registrar beneficio (con monto legal y monto gerencia)
             app.MapPost("/api/nomina/beneficios", (HttpContext ctx) =>
@@ -762,7 +764,7 @@ tr td{padding:1.5mm 2mm}
                     $"{b.NombreEmpleado} — {b.TipoBeneficio} {b.Anio}");
 
                 return Results.Ok(new { ok = true });
-            }).RequireAuthorization();
+            }).AddEndpointFilter(RequireRole.Of(TokenService.PuedeEscribirNomina)).RequireAuthorization();
 
             // Actualizar monto gerencia de un beneficio existente
             app.MapPut("/api/nomina/beneficios/{id}", (int id, HttpContext ctx) =>
@@ -784,7 +786,7 @@ tr td{padding:1.5mm 2mm}
                     $"Id={id}, MontoGerencia={body.MontoGerenciaUSD}");
 
                 return Results.Ok(new { ok = true });
-            }).RequireAuthorization();
+            }).AddEndpointFilter(RequireRole.Of(TokenService.PuedeEscribirNomina)).RequireAuthorization();
 
             // Marcar beneficio como pagado
             app.MapPost("/api/nomina/beneficios/{id}/pagar", (int id) =>
@@ -798,7 +800,7 @@ tr td{padding:1.5mm 2mm}
                 int rows = cmd.ExecuteNonQuery();
                 if (rows == 0) return Results.NotFound(new { error = "Beneficio no encontrado." });
                 return Results.Ok(new { ok = true });
-            }).RequireAuthorization();
+            }).AddEndpointFilter(RequireRole.Of(TokenService.PuedeEscribirNomina)).RequireAuthorization();
 
             // ════════════════════════════════════════════════════════════════
             //  INASISTENCIAS
@@ -843,7 +845,7 @@ tr td{padding:1.5mm 2mm}
                     ok = true, id,
                     montoDescuentoBs = inas?.MontoDescuentoBs ?? 0
                 });
-            }).RequireAuthorization();
+            }).AddEndpointFilter(RequireRole.Of(TokenService.PuedeEscribirNomina)).RequireAuthorization();
 
             // Actualizar inasistencia (justificar/injustificar)
             app.MapPut("/api/nomina/inasistencias/{id}", (int id, InasistenciaUpdateRequest req, HttpContext ctx) =>
@@ -855,7 +857,7 @@ tr td{padding:1.5mm 2mm}
                     $"Id={id}, Just={req.Justificada}");
 
                 return Results.Ok(new { ok = true });
-            }).RequireAuthorization();
+            }).AddEndpointFilter(RequireRole.Of(TokenService.PuedeEscribirNomina)).RequireAuthorization();
 
             // Eliminar inasistencia
             app.MapDelete("/api/nomina/inasistencias/{id}", (int id, HttpContext ctx) =>
@@ -865,7 +867,7 @@ tr td{padding:1.5mm 2mm}
 
                 AuthEndpoints.RegistrarAuditoria(ctx, "INASISTENCIA_ELIMINADA", $"Id={id}");
                 return Results.Ok(new { ok = true });
-            }).RequireAuthorization();
+            }).AddEndpointFilter(RequireRole.Of(TokenService.PuedeEscribirNomina)).RequireAuthorization();
         }
 
         // ── Helpers ───────────────────────────────────────────────────────

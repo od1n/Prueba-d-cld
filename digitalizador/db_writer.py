@@ -5,7 +5,8 @@ from pathlib import Path
 from typing import Optional
 
 def _resolver_db() -> Path:
-    ov = os.getenv("DB_PATH", "")
+    # SG_DB_PATH es la variable canónica (Machine scope en Windows)
+    ov = os.getenv("SG_DB_PATH", "") or os.getenv("DB_PATH", "")
     if ov:
         return Path(ov)
     appdata = os.getenv("APPDATA") or ""

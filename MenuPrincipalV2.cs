@@ -1217,7 +1217,7 @@ namespace SistemaGestion
             // Clientes de prueba (legacy, se mantiene del original)
             try
             {
-                string cs = "Data Source=SistemaGestion.db";
+                string cs = $"Data Source={SecurityService.RutaBD}";
                 if (CargarClientesHelper.ContarClientesExistentes(cs) == 0)
                 {
                     CargarClientesHelper.InsertarClientesDePrueba(cs);
