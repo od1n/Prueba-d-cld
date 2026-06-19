@@ -73,9 +73,8 @@ generar_kardex.py
 reparar_db_olimpo.ps1
 verificar_portal.ps1
 
-# Scripts de inicio obsoletos (reemplazados por Scripts/*.cmd)
+# Script de inicio legacy .bat (reemplazado por .ps1)
 iniciar_servidores.bat
-iniciar_servidores.ps1
 
 # Migración legacy (no necesaria para nuevas instalaciones)
 migrar_ElHato2K.bat
