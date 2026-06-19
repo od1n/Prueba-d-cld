@@ -24,9 +24,12 @@ async function render() {
           title="Desde" onchange="cargarFacturas()">
         <input type="date" id="fHasta" class="input-field" style="flex:1;min-width:120px"
           title="Hasta" onchange="cargarFacturas()">
-        <button class="btn btn-primary" style="white-space:nowrap"
-          onclick="abrirNueva()">+ Nueva</button>
-        <a href="/pages/digitalizar-factura.html" class="btn btn-ghost" style="white-space:nowrap">📷 Digitalizar</a>
+        <div style="display:flex;gap:8px;width:100%">
+          <button class="btn btn-primary" style="white-space:nowrap;flex:1"
+            onclick="abrirNueva()">+ Nueva</button>
+          <a href="/pages/digitalizar-factura.html" class="btn btn-ghost"
+            style="white-space:nowrap;flex:0 0 auto;width:auto;border:1px solid var(--cyan);color:var(--cyan)">📷 Digitalizar</a>
+        </div>
       </div>
       <div id="statsBar" style="display:none;padding:0 16px 10px;gap:8px;display:flex;flex-wrap:wrap"></div>
       <div id="listaFact"><div class="loading-msg"><div class="spinner"></div></div></div>
