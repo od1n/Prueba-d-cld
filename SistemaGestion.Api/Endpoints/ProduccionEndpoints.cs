@@ -249,6 +249,45 @@ namespace SistemaGestion.Api.Endpoints
 
             // ── Planilla imprimible en blanco ─────────────────────────────
 
+            // ── Proxy: extraer factura de venta (OCR) ─────────────────────
+            // Usa el digitalizador Python con tipo="factura_venta"
+            app.MapPost("/api/facturas/extraer-ocr", async (IFormFile imagen, IHttpClientFactory http) =>
+            {
+                const long MAX_BYTES = 20 * 1024 * 1024;
+                if (imagen.Length > MAX_BYTES)
+                    return Results.BadRequest(new { error = "Imagen demasiado grande (máx 20 MB)." });
+
+                try
+                {
+                    var cli = http.CreateClient("digitalizador");
+                    if (!string.IsNullOrEmpty(DIG_TOKEN))
+                        cli.DefaultRequestHeaders.Add("X-Internal-Token", DIG_TOKEN);
+
+                    using var ms = new MemoryStream();
+                    await imagen.CopyToAsync(ms);
+
+                    using var multipart = new MultipartFormDataContent();
+                    var imgPart = new ByteArrayContent(ms.ToArray());
+                    imgPart.Headers.ContentType =
+                        System.Net.Http.Headers.MediaTypeHeaderValue.Parse(
+                            imagen.ContentType ?? "image/jpeg");
+                    multipart.Add(imgPart, "imagen", imagen.FileName ?? "foto.jpg");
+                    multipart.Add(new StringContent("factura_venta"), "tipo");
+
+                    var resp = await cli.PostAsync($"{DIG_URL}/api/extraer", multipart);
+                    var body = await resp.Content.ReadAsStringAsync();
+                    return Results.Text(body, "application/json", statusCode: (int)resp.StatusCode);
+                }
+                catch (Exception ex)
+                {
+                    return Results.Json(
+                        new { ok = false, error = $"Digitalizador no disponible: {ex.Message}" },
+                        statusCode: 503);
+                }
+            }).AddEndpointFilter(RequireRole.Of(TokenService.PuedeEscribirFacturas)).RequireAuthorization().DisableAntiforgery().RequireRateLimiting("ia-extraccion");
+
+            // ── Planilla imprimible en blanco ─────────────────────────────
+
             app.MapGet("/api/produccion/planilla", async (HttpContext ctx) =>
             {
                 // 12 filas vacías — el operario escribe los moldes en uso ese día

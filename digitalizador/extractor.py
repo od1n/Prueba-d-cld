@@ -104,6 +104,41 @@ Campos ausentes → null. Responde ÚNICAMENTE con el JSON, sin bloques de códi
   "observaciones": null
 }"""
 
+PROMPT_FACTURA_VENTA = """Eres un asistente que extrae datos de facturas y notas de entrega de VENTA emitidas por una fábrica de plásticos venezolana (EL HATO PASCHER C.A.).
+
+Los documentos pueden ser:
+- Factura con IVA (tiene porcentaje de IVA > 0)
+- Nota de Entrega (sin IVA, IVA = 0)
+
+Los documentos son manuscritos o impresos. Extrae TODOS los datos visibles.
+- Los productos son tubos, accesorios PVC, mangueras. Los códigos son alfanuméricos (ej: TUB-4-2, ACC-01, MAN-3/4).
+- Si no hay código visible pero sí descripción, pon el código como null.
+- Si la cantidad o precio no son legibles, pon null (NO inventes valores).
+- El número de factura/nota suele tener formato "NE-XXXX" o un número simple.
+
+Responde ÚNICAMENTE con el JSON, sin explicaciones ni bloques de código:
+{
+  "encontrado": true,
+  "tipo_documento": "factura" o "nota_entrega",
+  "numero": null,
+  "fecha": "DD/MM/YYYY",
+  "cliente": null,
+  "rif_cliente": null,
+  "forma_pago": "Contado",
+  "dias_credito": 0,
+  "descuento_pct": 0,
+  "items": [
+    {
+      "codigo": null,
+      "descripcion": "nombre del producto",
+      "cantidad": 0,
+      "precio_unitario": 0.0
+    }
+  ],
+  "pct_iva": 16,
+  "observaciones": null
+}"""
+
 
 # ── Utilidades ────────────────────────────────────────────────────────────
 def _a_base64(imagen_bytes: bytes) -> str:
@@ -227,6 +262,9 @@ def extraer_planilla(imagen_bytes: bytes, backend_override: str = "") -> dict:
 
 def extraer_factura(imagen_bytes: bytes, backend_override: str = "") -> dict:
     return _extraer(imagen_bytes, PROMPT_FACTURA, backend_override)
+
+def extraer_factura_venta(imagen_bytes: bytes, backend_override: str = "") -> dict:
+    return _extraer(imagen_bytes, PROMPT_FACTURA_VENTA, backend_override)
 
 
 def modelo_disponible() -> bool:

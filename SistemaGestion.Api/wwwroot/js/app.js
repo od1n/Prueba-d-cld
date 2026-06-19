@@ -207,6 +207,7 @@ function renderNav(activa) {
         { id: 'reportes',   icon: '📊', label: 'Reportes', href: '/pages/reportes.html' },
         { id: 'nomina',     icon: '💰', label: 'Nómina',   href: '/pages/nomina.html' },
         { id: 'produccion', icon: '🏭', label: 'Producción', href: '/pages/digitalizador.html' },
+        { id: 'dig-factura', icon: '📄', label: 'Dig.Factura', href: '/pages/digitalizar-factura.html' },
         { id: 'camaras',    icon: '📷', label: 'Cámaras',    href: '/pages/camaras.html' },
     ];
     return `

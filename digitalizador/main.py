@@ -111,7 +111,9 @@ async def extraer(
     Si se pasa 'backend' en el form, ese valor sobreescribe VISION_BACKEND para esta llamada."""
     contenido = await imagen.read()
     try:
-        if tipo == "factura":
+        if tipo == "factura_venta":
+            datos = extractor.extraer_factura_venta(contenido, backend_override=backend)
+        elif tipo == "factura":
             datos = extractor.extraer_factura(contenido, backend_override=backend)
         else:
             datos = extractor.extraer_planilla(contenido, backend_override=backend)

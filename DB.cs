@@ -1286,7 +1286,7 @@ namespace SistemaGestion
         // Nunca se modifica una migracion existente: si hay un error se agrega
         // una nueva migracion que lo corrija.
         // Version actual del esquema en codigo: 7
-        public  const int SCHEMA_VERSION = 26;  // v26: InasistenciasEmpleado
+        public  const int SCHEMA_VERSION = 27;  // v27: PrecioUnit en DetallesFactura
 
         private static void MigrarEsquema(SqliteConnection conn)
         {
@@ -1886,6 +1886,20 @@ namespace SistemaGestion
                         CREATE UNIQUE INDEX IF NOT EXISTS idx_inas_emp_fecha ON InasistenciasEmpleado(IdEmpleado, Fecha);
                     ");
                     SetSchemaVersion(conn, tx, 26);
+                }
+
+                // ── v27: PrecioUnit en DetallesFactura ────────────────────────
+                if (versionActual < 27)
+                {
+                    AlterTableSafe(conn, tx,
+                        "ALTER TABLE DetallesFactura ADD COLUMN PrecioUnit REAL DEFAULT 0");
+                    // Rellenar precios históricos con el precio actual de inventario
+                    EjecutarSql(conn, tx, @"
+                        UPDATE DetallesFactura
+                        SET PrecioUnit = COALESCE(
+                            (SELECT i.Precio FROM Inventario i WHERE i.Codigo = DetallesFactura.Codigo), 0)
+                        WHERE PrecioUnit = 0 OR PrecioUnit IS NULL");
+                    SetSchemaVersion(conn, tx, 27);
                 }
 
                 tx.Commit();
@@ -3966,7 +3980,7 @@ namespace SistemaGestion
             var cmd = c.CreateCommand();
             cmd.CommandText = @"
                 SELECT df.IdFactura, df.Codigo, COALESCE(i.Descripcion,''), df.Cantidad,
-                       COALESCE(i.Precio,0), 0
+                       CASE WHEN COALESCE(df.PrecioUnit,0) > 0 THEN df.PrecioUnit ELSE COALESCE(i.Precio,0) END, 0
                 FROM DetallesFactura df
                 LEFT JOIN Inventario i ON i.Codigo = df.Codigo
                 WHERE df.IdFactura = $id";
@@ -4023,11 +4037,12 @@ namespace SistemaGestion
                     var cmdIns = conn.CreateCommand();
                     cmdIns.Transaction = tx;
                     cmdIns.CommandText = @"
-                        INSERT INTO DetallesFactura (IdFactura, Codigo, Cantidad)
-                        VALUES ($id, $cod, $qty)";
+                        INSERT INTO DetallesFactura (IdFactura, Codigo, Cantidad, PrecioUnit)
+                        VALUES ($id, $cod, $qty, $pu)";
                     cmdIns.Parameters.AddWithValue("$id",  idFactura);
                     cmdIns.Parameters.AddWithValue("$cod", linea.CodigoItem);
                     cmdIns.Parameters.AddWithValue("$qty", (double)linea.Cantidad);
+                    cmdIns.Parameters.AddWithValue("$pu",  (double)linea.PrecioUnit);
                     cmdIns.ExecuteNonQuery();
 
                     // 3. Leer stock actual del producto
@@ -4135,7 +4150,7 @@ namespace SistemaGestion
                 cmd.CommandText = @"
             SELECT df.Codigo,
                    SUM(df.Cantidad)           AS Unidades,
-                   SUM(df.PrecioF * df.Cantidad) AS Ingreso
+                   SUM(COALESCE(df.PrecioUnit,0) * df.Cantidad) AS Ingreso
             FROM DetallesFactura df
             JOIN Facturas f ON f.rowid = df.IdFactura
             WHERE 1=1 " +

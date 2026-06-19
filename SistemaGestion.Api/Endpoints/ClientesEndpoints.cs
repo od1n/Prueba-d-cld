@@ -301,7 +301,8 @@ namespace SistemaGestion.Api.Endpoints
                 var lineas = new List<object>();
                 var cmd2 = c.CreateCommand();
                 cmd2.CommandText = @"SELECT df.Codigo,COALESCE(i.Descripcion,df.Codigo),
-                    df.Cantidad,i.Precio
+                    df.Cantidad,
+                    CASE WHEN COALESCE(df.PrecioUnit,0)>0 THEN df.PrecioUnit ELSE COALESCE(i.Precio,0) END
                     FROM DetallesFactura df
                     LEFT JOIN Inventario i ON i.Codigo=df.Codigo
                     WHERE df.IdFactura=$id";
@@ -402,11 +403,12 @@ namespace SistemaGestion.Api.Endpoints
                     foreach (var (cod, cant, precio) in itemsCalc)
                     {
                         var dl = c.CreateCommand(); dl.Transaction = tx;
-                        dl.CommandText = @"INSERT OR REPLACE INTO DetallesFactura(IdFactura,Codigo,Cantidad)
-                            VALUES($id,$cod,$cant)";
+                        dl.CommandText = @"INSERT OR REPLACE INTO DetallesFactura(IdFactura,Codigo,Cantidad,PrecioUnit)
+                            VALUES($id,$cod,$cant,$pu)";
                         dl.Parameters.AddWithValue("$id",  rowid);
                         dl.Parameters.AddWithValue("$cod", cod);
                         dl.Parameters.AddWithValue("$cant",(double)cant);
+                        dl.Parameters.AddWithValue("$pu",  (double)precio);
                         dl.ExecuteNonQuery();
 
                         // Descontar stock
@@ -544,7 +546,8 @@ namespace SistemaGestion.Api.Endpoints
                 // Items
                 var cmdL = c.CreateCommand();
                 cmdL.CommandText = @"SELECT df.Codigo, COALESCE(i.Descripcion,df.Codigo),
-                    COALESCE(i.Precio,0), df.Cantidad
+                    CASE WHEN COALESCE(df.PrecioUnit,0)>0 THEN df.PrecioUnit ELSE COALESCE(i.Precio,0) END,
+                    df.Cantidad
                     FROM DetallesFactura df
                     LEFT JOIN Inventario i ON i.Codigo=df.Codigo
                     WHERE df.IdFactura=$id";
