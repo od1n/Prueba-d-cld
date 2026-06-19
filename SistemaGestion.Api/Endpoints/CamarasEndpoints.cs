@@ -85,18 +85,22 @@ namespace SistemaGestion.Api.Endpoints
                         Timeout = TimeSpan.FromSeconds(8)
                     };
 
-                    // Intentar ISAPI (Hikvision/EZVIZ H8)
-                    var url = $"http://{cam.IpLocal}/ISAPI/Streaming/channels/101/picture";
-                    var resp = await http.GetAsync(url);
+                    // EZVIZ H8: /onvif/snapshot devuelve JPEG con Digest auth
+                    // Fallbacks: ISAPI (Hikvision puro), luego Streaming
+                    string[] rutas = [
+                        $"http://{cam.IpLocal}/onvif/snapshot",
+                        $"http://{cam.IpLocal}/ISAPI/Streaming/channels/101/picture",
+                        $"http://{cam.IpLocal}/Streaming/channels/101/picture"
+                    ];
 
-                    if (!resp.IsSuccessStatusCode)
+                    HttpResponseMessage? resp = null;
+                    foreach (var url in rutas)
                     {
-                        // Fallback: ruta alternativa común
-                        url  = $"http://{cam.IpLocal}/Streaming/channels/101/picture";
                         resp = await http.GetAsync(url);
+                        if (resp.IsSuccessStatusCode) break;
                     }
 
-                    if (!resp.IsSuccessStatusCode)
+                    if (resp is null || !resp.IsSuccessStatusCode)
                         return Results.StatusCode(502);
 
                     var bytes = await resp.Content.ReadAsByteArrayAsync();
