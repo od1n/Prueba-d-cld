@@ -499,5 +499,125 @@ namespace SistemaGestion.Api
                 Console.WriteLine($"[API] WARN EnsureConfigLegal: {ex.Message}");
             }
         }
+
+        // ── Cámaras ─────────────────────────────────────────────────────────
+
+        public class CamaraDto
+        {
+            public int    Id            { get; set; }
+            public string Nombre        { get; set; } = "";
+            public string Ubicacion     { get; set; } = "";
+            public string IpLocal       { get; set; } = "";
+            public int    PuertoRtsp    { get; set; } = 554;
+            public string UsuarioCamara { get; set; } = "admin";
+            public string ClaveCifrada  { get; set; } = "";
+            public string RutaStream    { get; set; } = "/Streaming/Channels/101";
+            public string Modelo        { get; set; } = "";
+            public bool   Activa        { get; set; } = true;
+            public int    Orden         { get; set; }
+
+            /// <summary>Descifra la clave DPAPI. Solo usar server-side.</summary>
+            public string ObtenerClavePlano()
+            {
+                if (string.IsNullOrEmpty(ClaveCifrada)) return "";
+                try
+                {
+                    var cifrado   = Convert.FromBase64String(ClaveCifrada);
+                    var descifrado = System.Security.Cryptography.ProtectedData.Unprotect(
+                        cifrado, null, System.Security.Cryptography.DataProtectionScope.CurrentUser);
+                    return System.Text.Encoding.UTF8.GetString(descifrado);
+                }
+                catch { return ""; }
+            }
+        }
+
+        private static CamaraDto LeerCamaraDto(SqliteDataReader r) => new()
+        {
+            Id            = r.GetInt32(0),
+            Nombre        = r.IsDBNull(1) ? "" : r.GetString(1),
+            Ubicacion     = r.IsDBNull(2) ? "" : r.GetString(2),
+            IpLocal       = r.IsDBNull(3) ? "" : r.GetString(3),
+            PuertoRtsp    = r.GetInt32(4),
+            UsuarioCamara = r.IsDBNull(5) ? "admin" : r.GetString(5),
+            ClaveCifrada  = r.IsDBNull(6) ? "" : r.GetString(6),
+            RutaStream    = r.IsDBNull(7) ? "" : r.GetString(7),
+            Modelo        = r.IsDBNull(8) ? "" : r.GetString(8),
+            Activa        = r.GetInt32(9) == 1,
+            Orden         = r.GetInt32(10)
+        };
+
+        private const string SQL_CAM_COLS =
+            "Id, Nombre, Ubicacion, IpLocal, PuertoRtsp, UsuarioCamara, " +
+            "ClaveCifrada, RutaStream, Modelo, Activa, Orden";
+
+        /// <summary>
+        /// Cámaras visibles para el usuario.
+        /// Admin → todas las activas.  Otros → solo las de PermisosCamara.
+        /// </summary>
+        public static List<CamaraDto> ObtenerCamarasVisibles(int idUsuario, bool esAdmin)
+        {
+            var lista = new List<CamaraDto>();
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            if (esAdmin)
+            {
+                cmd.CommandText = $"SELECT {SQL_CAM_COLS} FROM Camaras WHERE Activa=1 ORDER BY Orden, Nombre";
+            }
+            else
+            {
+                cmd.CommandText = @"
+                    SELECT cam.Id, cam.Nombre, cam.Ubicacion, cam.IpLocal, cam.PuertoRtsp,
+                           cam.UsuarioCamara, cam.ClaveCifrada, cam.RutaStream, cam.Modelo,
+                           cam.Activa, cam.Orden
+                    FROM Camaras cam
+                    INNER JOIN PermisosCamara p ON p.IdCamara = cam.Id
+                    WHERE p.IdUsuario = $u AND cam.Activa = 1
+                    ORDER BY cam.Orden, cam.Nombre";
+                cmd.Parameters.AddWithValue("$u", idUsuario);
+            }
+            using var r = cmd.ExecuteReader();
+            while (r.Read()) lista.Add(LeerCamaraDto(r));
+            return lista;
+        }
+
+        public static CamaraDto? ObtenerCamaraPorId(int id)
+        {
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = $"SELECT {SQL_CAM_COLS} FROM Camaras WHERE Id = $id";
+            cmd.Parameters.AddWithValue("$id", id);
+            using var r = cmd.ExecuteReader();
+            return r.Read() ? LeerCamaraDto(r) : null;
+        }
+
+        public static List<int> ObtenerPermisosCamara(int idUsuario)
+        {
+            var ids = new List<int>();
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = "SELECT IdCamara FROM PermisosCamara WHERE IdUsuario=$u";
+            cmd.Parameters.AddWithValue("$u", idUsuario);
+            using var r = cmd.ExecuteReader();
+            while (r.Read()) ids.Add(r.GetInt32(0));
+            return ids;
+        }
+
+        public static int ContarCamarasVisibles(int idUsuario, bool esAdmin)
+        {
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            if (esAdmin)
+            {
+                cmd.CommandText = "SELECT COUNT(*) FROM Camaras WHERE Activa = 1";
+            }
+            else
+            {
+                cmd.CommandText = @"SELECT COUNT(*) FROM Camaras cam
+                    INNER JOIN PermisosCamara p ON p.IdCamara = cam.Id
+                    WHERE p.IdUsuario = $u AND cam.Activa = 1";
+                cmd.Parameters.AddWithValue("$u", idUsuario);
+            }
+            return Convert.ToInt32(cmd.ExecuteScalar());
+        }
     }
 }
