@@ -91,10 +91,20 @@ try:
     cur.execute("INSERT OR REPLACE INTO TbMoldes (CodigoMold,Descripcion,Fecha,FechaLastMant,DescMant,ModeloQfabrica,Observaciones,CantMatXunid) VALUES(?,?,?,?,?,?,?,?)", ("Bs Sl 01", "Base Slalon molde 01", "1999-01-01", None, "", "771000", "", 0)); n_mold+=1
     cur.execute("INSERT OR REPLACE INTO TbMoldes (CodigoMold,Descripcion,Fecha,FechaLastMant,DescMant,ModeloQfabrica,Observaciones,CantMatXunid) VALUES(?,?,?,?,?,?,?,?)", ("Sac Bt 01", "Saca Botas molde 01", "1999-01-01", None, "", "772000", "", 0)); n_mold+=1
 
+    # ── 4. Poblar MoldeProductos (relación molde→producto para la UI) ──
+    cur.execute("""
+        INSERT OR IGNORE INTO MoldeProductos (CodigoMolde, CodPrimera)
+        SELECT CodigoMold, ModeloQfabrica
+        FROM TbMoldes
+        WHERE ModeloQfabrica IS NOT NULL AND ModeloQfabrica != ''
+    """)
+    n_mp = cur.rowcount
+
     c.commit()
     print(f"Productos importados: {n_prod}")
     print(f"Productos nuevos creados (faltaban): {n_falt}")
     print(f"Moldes importados: {n_mold}")
+    print(f"MoldeProductos vinculados: {n_mp}")
     print("OK - Importacion completada.")
 except Exception as e:
     c.rollback()

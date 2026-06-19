@@ -145,7 +145,7 @@ namespace SistemaGestion
             dgv.DataSource = lista.Select(m => {
                 var mp = prods.GetValueOrDefault(m.CodigoMold);
                 string prodInfo = mp != null
-                    ? $"1a:{mp.CodPrimera ?? "-"} 2a:{mp.CodSegunda ?? "-"} R:{mp.CodReciclado ?? "-"}"
+                    ? $"{mp.CodPrimera ?? "-"} | {mp.CodSegunda ?? "-"} | {mp.CodReciclado ?? "-"}"
                     : "⚠ Sin configurar";
                 return new {
                     m.CodigoMold, m.Descripcion,
