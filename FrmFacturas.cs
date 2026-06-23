@@ -78,7 +78,7 @@ namespace SistemaGestion
 
             dgv = Grid(Color.FromArgb(26, 74, 138));
             dgv.DataBindingComplete += (s, e) => ColorearFilas();
-            dgv.DoubleClick         += (s, e) => VerDetalle();
+            dgv.CellDoubleClick     += (s, e) => VerDetalle();
             dgv.ColumnHeaderMouseClick += (s, e) => OrdenarPorColumna(e.ColumnIndex);
 
             var footer = new Panel { Dock = DockStyle.Bottom, Height = 45, BackColor = Color.FromArgb(240, 244, 250) };
@@ -443,14 +443,30 @@ CargarDatos();
         {
             if (dgv.CurrentRow == null) return;
             var num = dgv.CurrentRow.Cells["NumeroF"].Value?.ToString();
-            var f   = DatabaseService.ObtenerFacturas().Find(x => x.NumeroF == num);
-            if (f == null) return;
+            if (string.IsNullOrEmpty(num)) return;
 
-            int id      = ObtenerIdFactura(num);
-            var lineas  = DatabaseService.ObtenerDetallesFactura(id);
+            try
+            {
+                var f = DatabaseService.ObtenerFacturas(incluirNotasEntrega: true)
+                            .Find(x => x.NumeroF == num);
+                if (f == null)
+                {
+                    MessageBox.Show(this, $"No se encontró la factura {num}.",
+                        "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
 
-            using var dlg = new DlgFactura(f, lineas, soloLectura: true);
-            dlg.ShowDialog();
+                int id     = ObtenerIdFactura(num);
+                var lineas = DatabaseService.ObtenerDetallesFactura(id);
+
+                using var dlg = new DlgFactura(f, lineas, soloLectura: true);
+                dlg.ShowDialog();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, $"Error al abrir detalle:\n{ex.Message}",
+                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
 
         // ── ANULACIÓN (v21) ───────────────────────────────────────────────
