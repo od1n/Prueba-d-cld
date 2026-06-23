@@ -36,7 +36,8 @@ namespace SistemaGestion.Api
                 string[] fixes = {
                     "ALTER TABLE Inventario ADD COLUMN Activo INTEGER NOT NULL DEFAULT 1",
                     "ALTER TABLE Clientes ADD COLUMN Email TEXT DEFAULT ''",
-                    "ALTER TABLE Clientes ADD COLUMN Contacto TEXT DEFAULT ''"
+                    "ALTER TABLE Clientes ADD COLUMN Contacto TEXT DEFAULT ''",
+                    "ALTER TABLE DetallesFactura ADD COLUMN PrecioUnit REAL DEFAULT 0"
                 };
                 foreach (var sql in fixes)
                 {
@@ -52,6 +53,23 @@ namespace SistemaGestion.Api
                         if (!ex.Message.Contains("duplicate column", StringComparison.OrdinalIgnoreCase))
                             Console.WriteLine($"[API] WARN fix: {ex.Message}");
                     }
+                }
+
+                // Backfill PrecioUnit con precio actual de inventario donde sea 0
+                try
+                {
+                    using var cmdBf = c.CreateCommand();
+                    cmdBf.CommandText = @"
+                        UPDATE DetallesFactura
+                        SET PrecioUnit = COALESCE(
+                            (SELECT i.Precio FROM Inventario i WHERE i.Codigo = DetallesFactura.Codigo), 0)
+                        WHERE PrecioUnit = 0 OR PrecioUnit IS NULL";
+                    int rows = cmdBf.ExecuteNonQuery();
+                    if (rows > 0) Console.WriteLine($"[API] Backfill PrecioUnit: {rows} filas actualizadas");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[API] WARN backfill PrecioUnit: {ex.Message}");
                 }
             }
             catch (Exception ex)
