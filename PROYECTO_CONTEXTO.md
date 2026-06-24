@@ -40,8 +40,9 @@ Credenciales portal: ver archivo local de credenciales (NO guardar en repositori
 - **Env var `SG_DB_PATH` (Machine scope)**: `C:\SistemaGestion\sistema_gestion.db` (ruta LOCAL, no UNC)
 - **Publish WinForms**: `C:\Users\PC\AppData\Local\SistemaGestion\publish\App`
   - Comando: `dotnet publish SistemaGestion.csproj -c Release -r win-x64 --self-contained -o "C:\Users\PC\AppData\Local\SistemaGestion\publish\App"`
-- **Publish API** (OLIMPO también puede correr la API): `C:\SistemaGestion\publish\Api`
-  - Comando: `dotnet publish SistemaGestion.Api -c Release -o C:\SistemaGestion\publish\Api`
+- **Publish API**: `C:\Users\PC\AppData\Local\SistemaGestion\publish\Api`
+  - Enlace escritorio: ejecuta `iniciar-api.cmd` que hace `dotnet publish` + `dotnet SistemaGestion.Api.dll`
+  - `sg-env.cmd` en la misma carpeta configura SG_DB_PATH y SG_INTERNAL_TOKEN
 - **Tablas config**: `ConfigSistema` (legacy) y `ConfiguracionSistema` (v16+, parámetros legales IVA/IVSS/etc.)
 - **Respaldos automáticos**: `C:\Users\PC\AppData\Roaming\SistemaGestion\Respaldos\` (archivos .db.enc cifrados con AES-256, clave DPAPI en sg.key)
 - **Digitalizador Python**: `C:\SistemaGestion\digitalizador`
@@ -50,9 +51,9 @@ Credenciales portal: ver archivo local de credenciales (NO guardar en repositori
 ### SERVO (oficina — usuario) — conecta a OLIMPO por red
 - **Repo**: `C:\SistemaGestion` (aquí se hace `git pull`, NO push)
 - **Publish API**: `C:\SistemaGestion\publish\Api`
-  - Comando: `dotnet publish SistemaGestion.Api -c Release -o C:\SistemaGestion\publish\Api`
+  - `iniciar-api.cmd` hace `dotnet publish` + `dotnet SistemaGestion.Api.dll`
+  - `sg-env.cmd` configura SG_DB_PATH apuntando a OLIMPO por UNC
 - **BD**: accede a OLIMPO via `\\192.168.68.132\SistemaGestion\sistema_gestion.db` (red SMB)
-- **Env var `SG_DB_PATH` (Machine scope)**: `\\192.168.68.132\SistemaGestion\sistema_gestion.db` (ruta UNC porque la BD está en OLIMPO)
 - **Funciones**: SOLO API web (NO WinForms). Impresión de facturas
 - **Puertos**: HTTP 5050 (redirige a HTTPS), HTTPS 5443
 - **Impresora**: EPSON L1250
@@ -74,17 +75,16 @@ cd C:\SistemaGestion
 git pull origin master
 # WinForms (solo OLIMPO):
 dotnet publish SistemaGestion.csproj -c Release -r win-x64 --self-contained -o "C:\Users\PC\AppData\Local\SistemaGestion\publish\App"
-# API (si corre en OLIMPO):
-dotnet publish SistemaGestion.Api -c Release -o C:\SistemaGestion\publish\Api
+# API: cerrar la API y ejecutar el enlace del escritorio (iniciar-api.cmd hace publish + run)
 
 # 3. SERVO — pull y publish SOLO API
 cd C:\SistemaGestion
 git pull origin master
-dotnet publish SistemaGestion.Api -c Release -o C:\SistemaGestion\publish\Api
-# Reiniciar la API: cd C:\SistemaGestion\publish\Api && dotnet SistemaGestion.Api.dll
+# API: cerrar la API y ejecutar iniciar-api.cmd (hace publish + run)
+# Ruta: C:\SistemaGestion\publish\Api\iniciar-api.cmd
 ```
 
-**CRÍTICO**: `dotnet build` NO es suficiente — la API ejecuta desde la carpeta publish. Siempre `dotnet publish`.
+**CRÍTICO**: `dotnet build` y `dotnet run` NO son suficientes — la API ejecuta desde la carpeta publish. Los `iniciar-api.cmd` en ambas máquinas hacen `dotnet publish` automáticamente antes de arrancar.
 
 ---
 
@@ -210,6 +210,8 @@ Prueba d cld/
 | Cámaras (WinForms) | `DB_Camaras.cs` + `DlgCamara.cs` + `FrmCamarasAdmin.cs` |
 | Cámaras (API) | `CamarasEndpoints.cs` + `Db.cs` (CamaraDto) |
 | Cámaras (frontend) | `wwwroot/pages/camaras.html` + `wwwroot/js/pages/camaras.js` |
+| Digitalización facturas (frontend) | `wwwroot/pages/digitalizar-factura.html` + `wwwroot/js/pages/digitalizar-factura.js` |
+| Digitalización facturas (API proxy) | `ClientesEndpoints.cs` → `/api/facturas/extraer-ocr` (proxy al digitalizador Python) |
 | Impresión QuestPDF | `PdfService.cs` |
 | Impresión portal web | `ClientesEndpoints.cs` |
 | Auth/roles API | `Auth/TokenService.cs` + `Auth/RequireRoleFilter.cs` |
@@ -228,10 +230,41 @@ Prueba d cld/
 | BD vacía / datos desaparecidos | Múltiples copias de BD en distintas rutas | Verificar SG_DB_PATH y share SMB. Solo una BD en `C:\SistemaGestion\` |
 | `Padding is invalid` al descifrar backup | Posible incompatibilidad de clave DPAPI | Descifrar DEBE correr como usuario PC en OLIMPO (DPAPI CurrentUser) |
 | Push desde máquina incorrecta | `fatal: not a git repository` | Push SOLO desde CHAOS. OLIMPO y SERVO solo hacen pull. |
+| API 500 en detalle factura | Columna `PrecioUnit` no existe (migración v27 no corrió) | API Db.cs tiene fix defensivo que la crea al arrancar. También correr WinForms para aplicar migración completa |
+| WinForms VerDetalle no abre | `ObtenerFacturas()` no incluía Notas de Entrega | Corregido: pasa `incluirNotasEntrega: true` |
+| API sirve archivos viejos | `iniciar-api.cmd` no hacía `dotnet publish` | Corregido: ambos `iniciar-api.cmd` (OLIMPO y SERVO) ahora publican antes de ejecutar |
+| Digitalizador 403 Forbidden | `SG_INTERNAL_TOKEN` no configurada como variable Machine; digitalizador genera token aleatorio | Configurar `SG_INTERNAL_TOKEN` a nivel Machine en OLIMPO. En SERVO va en sg-env.cmd |
+| Digitalizador no accesible desde SERVO | API busca digitalizador en localhost por defecto | Configurar `SG_DIG_URL=http://192.168.68.132:8080` en sg-env.cmd de SERVO |
 
 ---
 
-## 11. Datos de la empresa
+## 11. Digitalizador OCR
+
+### Arquitectura
+- **Servidor Python** (FastAPI/Uvicorn) en OLIMPO, puerto 8080
+- **Backend de visión**: Ollama local con modelo `gemma4:31b-cloud` (configurable via `VISION_BACKEND` env var)
+- **Ubicación**: `C:\SistemaGestion\digitalizador\`
+- **Arranque**: `Digitalizador.cmd` en escritorio de OLIMPO, o `python main.py` desde `C:\SistemaGestion\digitalizador\`
+
+### Flujo de digitalización de facturas
+1. Portal web → usuario toma foto → `POST /api/facturas/extraer-ocr` (API C#)
+2. API C# proxy → `POST /api/extraer` con `tipo=factura_venta` (digitalizador Python)
+3. Digitalizador → Ollama/Claude Vision → extrae datos estructurados (JSON)
+4. Portal muestra formulario de revisión → usuario corrige → `POST /api/facturas` (guarda en BD)
+
+### Tipos de documentos soportados
+- `planilla` — planillas de producción (módulo Producción)
+- `factura_compra` — facturas de compras/egresos
+- `factura_venta` — facturas de venta y notas de entrega
+
+### Autenticación API↔Digitalizador
+- Header `X-Internal-Token` con valor de `SG_INTERNAL_TOKEN`
+- Si el digitalizador arranca sin la variable, genera un token aleatorio y muestra advertencia
+- **Importante**: reiniciar digitalizador y API después de configurar la variable para que ambos la tomen
+
+---
+
+## 12. Datos de la empresa
 - **Razón social**: EL HATO PASCHER C.A.
 - **RIF**: J-30571871-7
 - **Dirección**: Ctra. Villa de Cura - San Francisco de Asís, Local N° S/N, Sector Los Colorados - Villa de Cura - Estado Aragua
@@ -239,7 +272,7 @@ Prueba d cld/
 
 ---
 
-## 12. Cámaras EZVIZ
+## 13. Cámaras EZVIZ
 
 ### H8 — 5 cámaras configuradas
 | Nombre | IP | Serial |
@@ -270,20 +303,20 @@ IPs: .100, .106, .109, .110, .112, .113, .114. Firmware V5.3.8 eliminó RTSP, si
 
 ---
 
-## 13. Variables de entorno (Machine scope)
+## 14. Variables de entorno (Machine scope)
 
 | Variable | Máquina | Descripción |
 |---|---|---|
 | `SG_DB_PATH` | OLIMPO, SERVO | Ruta canónica a la BD SQLite |
-| `SG_INTERNAL_TOKEN` | OLIMPO, SERVO | Token para comunicación API↔digitalizador |
+| `SG_INTERNAL_TOKEN` | OLIMPO (Machine), SERVO (sg-env.cmd) | Token para comunicación API↔digitalizador. Debe coincidir en API y digitalizador |
+| `SG_DIG_URL` | SERVO (sg-env.cmd) | URL del digitalizador en OLIMPO: `http://192.168.68.132:8080`. No necesario en OLIMPO (default localhost) |
 | `SG_CAM_KEY` | OLIMPO, SERVO | Clave AES-256 para cifrar claves de cámaras (base64) |
-| `SG_DIG_URL` | SERVO | URL del digitalizador en OLIMPO (http://192.168.68.132:8080) |
 
 Todas se configuran con `[Environment]::SetEnvironmentVariable("NOMBRE", "valor", "Machine")`. NUNCA hardcodear en archivos trackeados por git.
 
 ---
 
-## 14. Resolución de ruta BD
+## 15. Resolución de ruta BD
 
 La ruta de la BD se resuelve así (en orden de prioridad):
 1. Variable de entorno `SG_DB_PATH` (Machine scope)
@@ -295,7 +328,7 @@ Si aparece una BD en ruta distinta a `C:\SistemaGestion\sistema_gestion.db` en O
 
 ---
 
-## 15. Reglas para el asistente
+## 16. Reglas para el asistente
 
 - Español neutro (NUNCA argentino)
 - Push SOLO desde CHAOS. OLIMPO y SERVO solo hacen pull.
