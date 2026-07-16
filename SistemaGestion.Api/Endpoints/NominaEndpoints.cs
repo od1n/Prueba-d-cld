@@ -100,7 +100,7 @@ namespace SistemaGestion.Api.Endpoints
                 using var c = Db.Conn();
                 var cmd = c.CreateCommand();
                 cmd.CommandText = @"SELECT Id,FechaDesde,FechaHasta,TasaBCV,Estado,Observaciones
-                    FROM PeriodosNomina ORDER BY Id DESC LIMIT 20";
+                    FROM PeriodosNomina ORDER BY Id DESC LIMIT 100";
                 var lista = new List<object>();
                 using var r = cmd.ExecuteReader();
                 while (r.Read())

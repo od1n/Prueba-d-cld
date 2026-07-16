@@ -39,7 +39,14 @@ async function render() {
             <div id="itemSeleccionado" class="hidden">
                 <div class="card" id="cardItem"></div>
                 <div class="card">
-                    <div class="card-title" id="tituloMovs">Movimientos recientes</div>
+                    <div class="card-title" id="tituloMovs">Movimientos</div>
+                    <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap;align-items:center">
+                        <label class="text-dim text-sm" style="flex-shrink:0">Desde</label>
+                        <input class="input-field" id="filtroDesde" type="date" style="flex:1;min-width:120px">
+                        <label class="text-dim text-sm" style="flex-shrink:0">Hasta</label>
+                        <input class="input-field" id="filtroHasta" type="date" style="flex:1;min-width:120px">
+                        <button class="btn btn-ghost text-sm" id="btnLimpiarFechas" style="padding:4px 8px;flex-shrink:0">Limpiar</button>
+                    </div>
                     <div id="listaMovs"><div class="spinner"></div></div>
                 </div>
                 ${puedoEscribir ? `
@@ -67,6 +74,14 @@ async function render() {
         </div>`;
 
     if (itemSelec) await seleccionarItem(itemSelec);
+
+    document.getElementById('filtroDesde')?.addEventListener('change', () => { if (itemSelec) cargarMovimientos(itemSelec); });
+    document.getElementById('filtroHasta')?.addEventListener('change', () => { if (itemSelec) cargarMovimientos(itemSelec); });
+    document.getElementById('btnLimpiarFechas')?.addEventListener('click', () => {
+        const d = document.getElementById('filtroDesde'); const h = document.getElementById('filtroHasta');
+        if (d) d.value = ''; if (h) h.value = '';
+        if (itemSelec) cargarMovimientos(itemSelec);
+    });
 }
 
 function cambiarKardex(tipo) {
@@ -160,9 +175,13 @@ async function cargarMovimientos(item) {
     div.innerHTML = '<div class="spinner"></div>';
     try {
         const codigo = kardexTipo === 'B' ? item.codigo : item.codigoInterno;
-        const endpoint = kardexTipo === 'B'
+        const desde = document.getElementById('filtroDesde')?.value || '';
+        const hasta = document.getElementById('filtroHasta')?.value || '';
+        let endpoint = kardexTipo === 'B'
             ? `/api/kardex/b?codigo=${encodeURIComponent(codigo)}`
             : `/api/kardex/a?codigo=${encodeURIComponent(codigo)}`;
+        if (desde) endpoint += `&desde=${encodeURIComponent(desde)}`;
+        if (hasta) endpoint += `&hasta=${encodeURIComponent(hasta)}`;
         const movs = await apiGet(endpoint) || [];
 
         if (movs.length === 0) {
@@ -170,7 +189,7 @@ async function cargarMovimientos(item) {
             return;
         }
 
-        div.innerHTML = movs.slice(0, 15).map(m => `
+        div.innerHTML = movs.map(m => `
             <div class="list-item">
                 <div class="list-item-main">
                     ${tagTipo(m.tipo)}

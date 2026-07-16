@@ -19,17 +19,21 @@ async function render() {
         <input class="input-field" id="buscarF" type="search"
           placeholder="Numero, cliente..." autocomplete="off" oninput="filtrarFact(this.value)">
       </div>
-      <div style="display:flex;gap:8px;padding:0 16px 10px;flex-wrap:wrap">
-        <input type="date" id="fDesde" class="input-field" style="flex:1;min-width:120px"
-          title="Desde" onchange="cargarFacturas()">
-        <input type="date" id="fHasta" class="input-field" style="flex:1;min-width:120px"
-          title="Hasta" onchange="cargarFacturas()">
-        <div style="display:flex;gap:8px;width:100%">
-          <button class="btn btn-primary" style="white-space:nowrap;flex:1"
-            onclick="abrirNueva()">+ Nueva</button>
-          <a href="/pages/digitalizar-factura.html" class="btn btn-ghost"
-            style="white-space:nowrap;flex:0 0 auto;width:auto;border:1px solid var(--cyan);color:var(--cyan)">📷 Digitalizar</a>
-        </div>
+      <div style="display:flex;gap:8px;padding:0 16px 10px;flex-wrap:wrap;align-items:center">
+        <input type="date" id="fDesde" class="input-field" style="flex:1;min-width:110px" title="Desde">
+        <input type="date" id="fHasta" class="input-field" style="flex:1;min-width:110px" title="Hasta">
+        <select id="fEstado" class="input-field" style="flex:1;min-width:90px">
+          <option value="">Todas</option>
+          <option value="pendiente">Pendientes</option>
+          <option value="pagada">Pagadas</option>
+        </select>
+        <button class="btn btn-primary" style="flex:0 0 auto;padding:8px 16px" onclick="cargarFacturas()">Buscar</button>
+      </div>
+      <div style="display:flex;gap:8px;padding:0 16px 10px">
+        <button class="btn btn-primary" style="white-space:nowrap;flex:1"
+          onclick="abrirNueva()">+ Nueva</button>
+        <a href="/pages/digitalizar-factura.html" class="btn btn-ghost"
+          style="white-space:nowrap;flex:0 0 auto;width:auto;border:1px solid var(--cyan);color:var(--cyan)">📷 Digitalizar</a>
       </div>
       <div id="statsBar" style="display:none;padding:0 16px 10px;gap:8px;display:flex;flex-wrap:wrap"></div>
       <div id="listaFact"><div class="loading-msg"><div class="spinner"></div></div></div>
@@ -49,14 +53,16 @@ async function render() {
 
 // -- Carga y filtrado -----------------------------------------------------
 async function cargarFacturas() {
-    const desde = document.getElementById('fDesde')?.value || '';
-    const hasta = document.getElementById('fHasta')?.value || '';
-    const q     = document.getElementById('buscarF')?.value || '';
+    const desde  = document.getElementById('fDesde')?.value || '';
+    const hasta  = document.getElementById('fHasta')?.value || '';
+    const q      = document.getElementById('buscarF')?.value || '';
+    const estado = document.getElementById('fEstado')?.value || '';
     let url = '/api/facturas';
     const ps = [];
-    if (q)     ps.push('q='+encodeURIComponent(q));
-    if (desde) ps.push('desde='+encodeURIComponent(desde));
-    if (hasta) ps.push('hasta='+encodeURIComponent(hasta));
+    if (q)      ps.push('q='+encodeURIComponent(q));
+    if (desde)  ps.push('desde='+encodeURIComponent(desde));
+    if (hasta)  ps.push('hasta='+encodeURIComponent(hasta));
+    if (estado) ps.push('estado='+encodeURIComponent(estado));
     if (ps.length) url += '?'+ps.join('&');
     try {
         todasFact = await apiGet(url) || [];
@@ -108,7 +114,7 @@ function renderListaFact(lista) {
               style="padding:12px 16px;background:none;border:none;border-bottom:1px solid var(--borde);
                      text-align:left;width:100%;cursor:pointer;color:inherit;font:inherit">
               <div class="list-item-main">
-                <div class="list-item-title">${esh(f.cliente || '(sin cliente)')}</div>
+                <div class="list-item-title">${esh(f.nombreCliente || f.cliente || '(sin cliente)')}</div>
                 <div class="list-item-sub">${esh(f.numeroF)} &middot; ${formatFecha(f.fecha)} &middot; ${esh(f.formaDePago || '')}</div>
               </div>
               <div style="text-align:right;flex-shrink:0;margin-left:8px">

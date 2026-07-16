@@ -6,6 +6,7 @@ const app = document.getElementById('app');
 let periodoActivo = null;   // objeto del período seleccionado
 let detallesActivos = [];   // líneas del período abierto
 let empleadoEditar = null;  // empleado en formulario
+let _empleadosCargados = []; // lista completa para filtro client-side
 
 // ── Tabs ──────────────────────────────────────────────────────────────────
 const TABS = [
@@ -550,8 +551,10 @@ async function guardarDetalle(id) {
 // ══════════════════════════════════════════════════════════════════════════
 async function renderTabEmpleados() {
     const div = document.getElementById('tabContent');
-    div.innerHTML = `<div style="padding:12px 16px;display:flex;justify-content:flex-end;gap:8px">
-        <label class="text-dim" style="display:flex;align-items:center;gap:6px;cursor:pointer">
+    div.innerHTML = `<div style="padding:12px 16px;display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;align-items:center">
+        <input type="text" id="buscarEmpleado" class="input-field" placeholder="Buscar nombre o cédula…"
+          style="flex:1;min-width:140px;max-width:260px" oninput="filtrarEmpleados()">
+        <label class="text-dim" style="display:flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap">
           <input type="checkbox" id="soloActivos" checked onchange="renderTabEmpleados()"> Solo activos
         </label>
         <button class="btn btn-primary btn-sm" onclick="abrirFormEmpleado(null)">＋ Nuevo</button>
@@ -560,6 +563,7 @@ async function renderTabEmpleados() {
     try {
         const solo = document.getElementById('soloActivos')?.checked ?? true;
         const lista = await apiGet(`/api/nomina/empleados?soloActivos=${solo}`) || [];
+        _empleadosCargados = lista;
         renderListaEmpleados(lista);
     } catch(err) {
         document.getElementById('listaEmpleados').innerHTML =
@@ -592,6 +596,17 @@ function renderListaEmpleados(lista) {
     div.querySelectorAll('.js-emp-btn').forEach(btn => {
         btn.addEventListener('click', () => abrirFormEmpleado(lista[+btn.dataset.ix]));
     });
+}
+
+function filtrarEmpleados() {
+    const q = (document.getElementById('buscarEmpleado')?.value || '').trim().toLowerCase();
+    if (!q) { renderListaEmpleados(_empleadosCargados); return; }
+    const filtrada = _empleadosCargados.filter(e => {
+        const nombre = (e.nombreCompleto || e.nombre || '').toLowerCase();
+        const cedula = (e.cedula || '').toLowerCase();
+        return nombre.includes(q) || cedula.includes(q);
+    });
+    renderListaEmpleados(filtrada);
 }
 
 // ── Formulario empleado ────────────────────────────────────────────────────

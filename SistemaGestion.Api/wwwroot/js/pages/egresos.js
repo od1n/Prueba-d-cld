@@ -23,6 +23,9 @@ async function init() {
     document.getElementById('btnNuevo').addEventListener('click',
         () => location.href = '/pages/egresos-nuevo.html');
     document.getElementById('btnBuscar').addEventListener('click', cargar);
+    document.getElementById('fBuscar').addEventListener('keydown', e => {
+        if (e.key === 'Enter') cargar();
+    });
 
     // Cerrar modal
     document.getElementById('modalOverlay').addEventListener('click', e => {
@@ -49,6 +52,10 @@ function buildShell() {
         <div>
           <label>Hasta</label>
           <input type="date" id="fHasta" value="${hasta}">
+        </div>
+        <div>
+          <label>Buscar</label>
+          <input type="text" id="fBuscar" placeholder="Concepto, proveedor, documento…" style="min-width:200px">
         </div>
         <div>
           <label>Categoría</label>
@@ -116,6 +123,7 @@ async function cargar() {
     const desde = document.getElementById('fDesde').value;
     const hasta = document.getElementById('fHasta').value;
     const cat   = document.getElementById('fCat').value;
+    const q     = document.getElementById('fBuscar').value.trim();
 
     const contenedor = document.getElementById('tablaContenido');
     contenedor.innerHTML = '<div class="el-empty"><div class="spinner" style="margin:0 auto 8px"></div>Cargando…</div>';
@@ -124,6 +132,7 @@ async function cargar() {
     if (desde) params.set('desde', desde);
     if (hasta) params.set('hasta', hasta);
     if (cat)   params.set('categoriaId', cat);
+    if (q)     params.set('q', q);
 
     try {
         const [lista] = await Promise.all([

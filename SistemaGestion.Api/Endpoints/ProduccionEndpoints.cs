@@ -223,18 +223,23 @@ namespace SistemaGestion.Api.Endpoints
 
             // ── Listado de registros recientes ────────────────────────────
 
-            app.MapGet("/api/produccion/registros", (string? desde, string? hasta) =>
+            app.MapGet("/api/produccion/registros", (string? desde, string? hasta, string? q) =>
             {
                 string d = desde ?? DateTime.Today.AddDays(-7).ToString("yyyy-MM-dd");
                 string h = hasta ?? DateTime.Today.ToString("yyyy-MM-dd");
                 using var c = Db.Conn();
                 var cmd = c.CreateCommand();
-                cmd.CommandText = @"SELECT Id,Fecha,CodigoMolde,Material,Operario,Turno,
+                string where = "Fecha BETWEEN $d AND $h";
+                if (!string.IsNullOrWhiteSpace(q))
+                    where += " AND (Operario LIKE $q OR CodigoMolde LIKE $q)";
+                cmd.CommandText = $@"SELECT Id,Fecha,CodigoMolde,Material,Operario,Turno,
                     CantPrimeraCalidad,CantSegundaCalidad,CantDefectuosas,Observaciones
-                    FROM RegistroProduccionDia WHERE Fecha BETWEEN $d AND $h
+                    FROM RegistroProduccionDia WHERE {where}
                     ORDER BY Fecha DESC, Id DESC LIMIT 100";
                 cmd.Parameters.AddWithValue("$d", d);
                 cmd.Parameters.AddWithValue("$h", h);
+                if (!string.IsNullOrWhiteSpace(q))
+                    cmd.Parameters.AddWithValue("$q", $"%{q}%");
                 var lista = new List<object>();
                 using var r = cmd.ExecuteReader();
                 while (r.Read())

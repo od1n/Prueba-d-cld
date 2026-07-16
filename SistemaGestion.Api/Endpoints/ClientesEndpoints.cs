@@ -11,7 +11,7 @@ namespace SistemaGestion.Api.Endpoints
                 if (!TokenService.PuedeVerCxC(ctx.User)) return Results.Forbid();
                 using var c = Db.Conn();
                 var cmd = c.CreateCommand();
-                cmd.CommandText = "SELECT Codigo,Descripcion,CiRif,Telefono,Ciudad,Direccion,Email,Contacto FROM Clientes ORDER BY Descripcion LIMIT 100";
+                cmd.CommandText = "SELECT Codigo,Descripcion,CiRif,Telefono,Ciudad,Direccion,Email,Contacto FROM Clientes ORDER BY Descripcion LIMIT 500";
                 var lista = new List<object>();
                 // Aplicar filtro en SQL para búsqueda por código, nombre y RIF
                 if (!string.IsNullOrWhiteSpace(q))
@@ -254,27 +254,48 @@ namespace SistemaGestion.Api.Endpoints
         public static void MapFacturasEndpoints(this WebApplication app)
         {
             // ── GET lista ────────────────────────────────────────────────
-            app.MapGet("/api/facturas", (string? q, string? desde, string? hasta) =>
+            app.MapGet("/api/facturas", (string? q, string? desde, string? hasta, string? estado) =>
             {
                 using var c = Db.Conn();
                 var cmd = c.CreateCommand();
-                cmd.CommandText = @"SELECT NumeroF,Fecha,Codigo,TotalF,Abono,FormaDePago
-                    FROM Facturas
-                    WHERE (Observaciones IS NULL OR Observaciones NOT LIKE 'ANULADA%')
-                    ORDER BY Fecha DESC, NumeroF DESC LIMIT 100";
+
+                var where = new List<string> { "COALESCE(f.Anulada,0) = 0" };
+                if (!string.IsNullOrWhiteSpace(desde))
+                {
+                    where.Add("f.Fecha >= $desde");
+                    cmd.Parameters.AddWithValue("$desde", desde);
+                }
+                if (!string.IsNullOrWhiteSpace(hasta))
+                {
+                    where.Add("f.Fecha <= $hasta");
+                    cmd.Parameters.AddWithValue("$hasta", hasta);
+                }
+                if (!string.IsNullOrWhiteSpace(q))
+                {
+                    where.Add("(f.NumeroF LIKE $q OR f.Codigo LIKE $q OR COALESCE(cl.Descripcion,'') LIKE $q)");
+                    cmd.Parameters.AddWithValue("$q", "%" + q + "%");
+                }
+                if (estado == "pagada")
+                    where.Add("f.Abono >= f.TotalF");
+                else if (estado == "pendiente")
+                    where.Add("f.Abono < f.TotalF");
+
+                cmd.CommandText = @"SELECT f.NumeroF, f.Fecha, f.Codigo, f.TotalF, f.Abono,
+                        f.FormaDePago, COALESCE(cl.Descripcion, f.Codigo) AS NombreCliente
+                    FROM Facturas f
+                    LEFT JOIN Clientes cl ON cl.Codigo = f.Codigo
+                    WHERE " + string.Join(" AND ", where) + @"
+                    ORDER BY f.Fecha DESC, f.NumeroF DESC
+                    LIMIT 500";
+
                 var lista = new List<object>();
                 using var r = cmd.ExecuteReader();
                 while (r.Read())
                 {
-                    string numF = Db.S(r,0), fecha = Db.S(r,1), cl = Db.S(r,2);
-                    if (!string.IsNullOrWhiteSpace(q) &&
-                        !cl.Contains(q, StringComparison.OrdinalIgnoreCase) &&
-                        !numF.Contains(q, StringComparison.OrdinalIgnoreCase)) continue;
-                    if (!string.IsNullOrWhiteSpace(desde) && string.Compare(fecha, desde) < 0) continue;
-                    if (!string.IsNullOrWhiteSpace(hasta) && string.Compare(fecha, hasta) > 0) continue;
                     decimal total=Db.D(r,3), abono=Db.D(r,4);
-                    lista.Add(new { numeroF=numF, fecha, cliente=cl,
-                        total, abono, saldo=total-abono, formaDePago=Db.S(r,5), pagada=abono>=total });
+                    lista.Add(new { numeroF=Db.S(r,0), fecha=Db.S(r,1), cliente=Db.S(r,2),
+                        total, abono, saldo=total-abono, formaDePago=Db.S(r,5),
+                        pagada=abono>=total, nombreCliente=Db.S(r,6) });
                 }
                 return Results.Ok(lista);
             }).RequireAuthorization();

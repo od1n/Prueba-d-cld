@@ -707,7 +707,7 @@ async function renderTabHistorial(zona) {
 
     zona.innerHTML = `
     <div class="card">
-        <div class="card-title">Filtrar por fecha</div>
+        <div class="card-title">Filtrar registros</div>
         <div class="form-grid-2">
             <div class="input-group">
                 <label class="input-label">Desde</label>
@@ -717,6 +717,10 @@ async function renderTabHistorial(zona) {
                 <label class="input-label">Hasta</label>
                 <input class="input-field" type="date" id="hist-hasta" value="${hoy}">
             </div>
+        </div>
+        <div class="input-group" style="margin-top:8px">
+            <label class="input-label">Buscar por operario o molde</label>
+            <input class="input-field" type="text" id="hist-q" placeholder="Ej: Juan, MOLDE-01...">
         </div>
         <button class="btn btn-cyan btn-sm" id="hist-buscar" style="margin-top:8px">Buscar</button>
     </div>
@@ -729,6 +733,7 @@ async function renderTabHistorial(zona) {
 async function cargarHistorial() {
     const desde = document.getElementById('hist-desde')?.value || '';
     const hasta = document.getElementById('hist-hasta')?.value || '';
+    const q     = document.getElementById('hist-q')?.value?.trim() || '';
     const listaDiv = document.getElementById('hist-lista');
     if (!listaDiv) return;
 
@@ -738,6 +743,7 @@ async function cargarHistorial() {
         const params = new URLSearchParams();
         if (desde) params.set('desde', desde);
         if (hasta) params.set('hasta', hasta);
+        if (q)     params.set('q', q);
         const registros = await apiGet('/api/produccion/registros?' + params.toString());
 
         if (!registros || registros.length === 0) {

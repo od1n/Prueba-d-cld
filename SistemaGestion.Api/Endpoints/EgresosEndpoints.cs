@@ -309,7 +309,7 @@ namespace SistemaGestion.Api.Endpoints
 
             // ── 4. Listar egresos ────────────────────────────────────────────
             // GET /api/egresos?desde=2025-01-01&hasta=2025-12-31&categoriaId=3
-            app.MapGet("/api/egresos", (string? desde, string? hasta, int? categoriaId) =>
+            app.MapGet("/api/egresos", (string? desde, string? hasta, int? categoriaId, string? q) =>
             {
                 var lista = new List<EgresoResDto>();
                 using var c   = Db.Conn();
@@ -337,6 +337,11 @@ namespace SistemaGestion.Api.Endpoints
                 {
                     sb.Append(" AND g.IdCategoria = @cat");
                     cmd.Parameters.AddWithValue("@cat", categoriaId.Value);
+                }
+                if (!string.IsNullOrWhiteSpace(q))
+                {
+                    sb.Append(" AND (g.Concepto LIKE @q OR g.Proveedor LIKE @q OR g.Observaciones LIKE @q)");
+                    cmd.Parameters.AddWithValue("@q", $"%{q.Trim()}%");
                 }
                 sb.Append(" ORDER BY g.Fecha DESC, g.Id DESC LIMIT 200");
                 cmd.CommandText = sb.ToString();

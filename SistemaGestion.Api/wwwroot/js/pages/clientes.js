@@ -33,9 +33,11 @@ async function render() {
     await cargarClientes();
 }
 
-async function cargarClientes() {
+async function cargarClientes(q) {
     try {
-        todosClientes = await apiGet('/api/clientes') || [];
+        let url = '/api/clientes';
+        if (q) url += '?q=' + encodeURIComponent(q);
+        todosClientes = await apiGet(url) || [];
         renderListaClientes(todosClientes);
     } catch(err) {
         document.getElementById('listaCli').innerHTML =
@@ -45,15 +47,7 @@ async function cargarClientes() {
 
 function filtrarClientes(q) {
     clearTimeout(timerBusq);
-    timerBusq = setTimeout(() => {
-        if (!q.trim()) { renderListaClientes(todosClientes); return; }
-        const lc = q.toLowerCase();
-        const filtrados = todosClientes.filter(c =>
-            (c.nombre||'').toLowerCase().includes(lc) ||
-            (c.ciRif||'').toLowerCase().includes(lc) ||
-            (c.codigo||'').toLowerCase().includes(lc));
-        renderListaClientes(filtrados);
-    }, 300);
+    timerBusq = setTimeout(() => cargarClientes(q.trim()), 400);
 }
 
 function renderListaClientes(lista) {

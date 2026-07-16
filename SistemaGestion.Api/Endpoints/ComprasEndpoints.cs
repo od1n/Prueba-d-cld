@@ -46,22 +46,34 @@ namespace SistemaGestion.Api.Endpoints
             {
                 using var c = Db.Conn();
                 var cmd = c.CreateCommand();
-                cmd.CommandText = @"SELECT c.CompraN,c.FechaC,c.CodigoP,p.Descripcion,
+                var where = new List<string>();
+                if (!string.IsNullOrWhiteSpace(q))
+                {
+                    where.Add("(c.CompraN LIKE $q OR p.Descripcion LIKE $q)");
+                    cmd.Parameters.AddWithValue("$q", "%" + q + "%");
+                }
+                if (!string.IsNullOrWhiteSpace(desde))
+                {
+                    where.Add("c.FechaC >= $desde");
+                    cmd.Parameters.AddWithValue("$desde", desde);
+                }
+                if (!string.IsNullOrWhiteSpace(hasta))
+                {
+                    where.Add("c.FechaC <= $hasta");
+                    cmd.Parameters.AddWithValue("$hasta", hasta);
+                }
+                string whereClause = where.Count > 0 ? "WHERE " + string.Join(" AND ", where) : "";
+                cmd.CommandText = $@"SELECT c.CompraN,c.FechaC,c.CodigoP,p.Descripcion,
                     c.TotalC,c.AbonoC,c.FormaDePago
                     FROM Compras c LEFT JOIN Proveedores p ON p.Codigo=c.CodigoP
-                    ORDER BY c.FechaC DESC, c.CompraN DESC LIMIT 100";
+                    {whereClause}
+                    ORDER BY c.FechaC DESC, c.CompraN DESC LIMIT 500";
                 var lista = new List<object>();
                 using var r = cmd.ExecuteReader();
                 while (r.Read())
                 {
-                    string num=Db.S(r,0), fecha=Db.S(r,1), nomP=Db.S(r,3);
-                    if (!string.IsNullOrWhiteSpace(q) &&
-                        !num.Contains(q, StringComparison.OrdinalIgnoreCase) &&
-                        !nomP.Contains(q, StringComparison.OrdinalIgnoreCase)) continue;
-                    if (!string.IsNullOrWhiteSpace(desde) && string.Compare(fecha, desde) < 0) continue;
-                    if (!string.IsNullOrWhiteSpace(hasta) && string.Compare(fecha, hasta) > 0) continue;
                     decimal total=Db.D(r,4), abono=Db.D(r,5);
-                    lista.Add(new { compraN=num, fecha, codigoP=Db.S(r,2), proveedor=nomP,
+                    lista.Add(new { compraN=Db.S(r,0), fecha=Db.S(r,1), codigoP=Db.S(r,2), proveedor=Db.S(r,3),
                         total, abono, saldo=total-abono, formaDePago=Db.S(r,6), pagada=abono>=total });
                 }
                 return Results.Ok(lista);

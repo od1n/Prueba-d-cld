@@ -21,6 +21,8 @@ async function render() {
           title="Desde" onchange="cargarCompras()">
         <input type="date" id="cHasta" class="input-field" style="flex:1;min-width:120px"
           title="Hasta" onchange="cargarCompras()">
+        <button class="btn btn-ghost" style="white-space:nowrap"
+          onclick="cargarCompras()">Buscar</button>
         <button class="btn btn-primary" style="white-space:nowrap"
           onclick="abrirNuevaCompra()">＋ Nueva</button>
       </div>
