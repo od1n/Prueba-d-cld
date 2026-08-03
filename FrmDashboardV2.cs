@@ -75,7 +75,7 @@ namespace SistemaGestion
         {
             Text          = "Dashboard — Resumen del Negocio";
             Size          = new Size(1320, 800);
-            MinimumSize   = new Size(1100, 660);
+            MinimumSize   = new Size(900, 550);
             StartPosition = FormStartPosition.CenterParent;
             BackColor     = CFondo;
             // Tipografia base mas grande (de 9.5 a 10pt) para legibilidad
@@ -160,11 +160,16 @@ namespace SistemaGestion
                 Dock = DockStyle.Fill, RowCount = 1, ColumnCount = 9,
                 BackColor = CSurf, Padding = new Padding(8, 6, 8, 6)
             };
-            // 6 KPIs + spacer + botón IA + botón Actualizar
-            int[] anchos = { 130, 130, 90, 90, 140, 260, 0, 160, 170 };
-            foreach (var w in anchos)
-                fila.ColumnStyles.Add(new ColumnStyle(
-                    w == 0 ? SizeType.Percent : SizeType.Absolute, w == 0 ? 100f : w));
+            // KPIs proporcionales + botones fijos (responsive a cualquier tamaño)
+            fila.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 14f));   // Ventas Hoy
+            fila.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 13f));   // Mes
+            fila.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,  9f));   // Pend
+            fila.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,  9f));   // Stk
+            fila.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 13f));   // CxC
+            fila.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 26f));   // BCV/Par
+            fila.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 16f));   // spacer
+            fila.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120f)); // btn IA
+            fila.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130f)); // btn Actualizar
 
             fila.Controls.Add(KpiCell("VENTAS HOY",  out _lblVentasHoy, "$ 0,00",  CAzul),    0, 0);
             fila.Controls.Add(KpiCell("MES",         out _lblVentasMes, "$ 0,00",  CAzul),    1, 0);
@@ -495,7 +500,7 @@ namespace SistemaGestion
             {
                 Text = _nombresGraficas[_idxGrafica],
                 Font = new Font("Segoe UI", 11f, FontStyle.Bold),
-                ForeColor = CTexto, Dock = DockStyle.Left, Width = 320,
+                ForeColor = CTexto, Dock = DockStyle.Fill,
                 AutoSize = false, TextAlign = ContentAlignment.MiddleLeft,
                 Padding = new Padding(12, 0, 0, 0)
             };
@@ -732,7 +737,8 @@ namespace SistemaGestion
                 "alta" => CDang, "media" => CWarn, _ => CTextoTen };
             var p = new Panel
             {
-                Width = 220, Height = 60, Margin = new Padding(8, 4, 8, 4),
+                Width = _pnlAlertas.ClientSize.Width - 20, Height = 60,
+                Margin = new Padding(8, 4, 8, 4),
                 BackColor = CSurf
             };
             var bar = new Panel { Dock = DockStyle.Left, Width = 3, BackColor = color };
@@ -840,7 +846,9 @@ namespace SistemaGestion
         {
             if (datos.Count == 0) { DibujarVacio(g); return; }
             int W = _pnlGrafica.Width, H = _pnlGrafica.Height;
-            int padL = 50, padR = 20, padT = 20, padB = 30;
+            int padL = Math.Max(40, W * 7 / 100);
+            int padR = Math.Max(15, W * 3 / 100);
+            int padT = 20, padB = Math.Max(24, H * 10 / 100);
             float maxV = (float)Math.Max(1m, datos.Max(d => d.val));
             int n = datos.Count;
             using var penLine = new Pen(CAzul, 2);
@@ -887,7 +895,9 @@ namespace SistemaGestion
         {
             if (datos.Count == 0) { DibujarVacio(g); return; }
             int W = _pnlGrafica.Width, H = _pnlGrafica.Height;
-            int padL = 50, padR = 20, padT = 20, padB = 30;
+            int padL = Math.Max(40, W * 7 / 100);
+            int padR = Math.Max(15, W * 3 / 100);
+            int padT = 20, padB = Math.Max(24, H * 10 / 100);
             float maxV = (float)Math.Max(1m, datos.Max(d => d.val));
             int n = datos.Count;
             float bw = (W - padL - padR) / (float)(n * 1.5f);
@@ -916,7 +926,9 @@ namespace SistemaGestion
         {
             if (datos.Count == 0) { DibujarVacio(g); return; }
             int W = _pnlGrafica.Width, H = _pnlGrafica.Height;
-            int padL = 140, padR = 80, padT = 12, padB = 12;
+            int padL = Math.Max(60, Math.Min(180, W * 20 / 100));
+            int padR = Math.Max(40, Math.Min(100, W * 10 / 100));
+            int padT = 12, padB = 12;
             float maxV = (float)Math.Max(1m, datos.Max(d => d.val));
             int n = Math.Min(10, datos.Count);
             float rh = (H - padT - padB) / (float)n - 4;
@@ -924,12 +936,15 @@ namespace SistemaGestion
             using var brLbl = new SolidBrush(CTexto);
             using var brVal = new SolidBrush(CTextoTen);
             var fontLbl = new Font("Segoe UI", 8.5f);
+            using var sfTrunc = new StringFormat { Trimming = StringTrimming.EllipsisCharacter,
+                FormatFlags = StringFormatFlags.NoWrap, LineAlignment = StringAlignment.Center };
             for (int i = 0; i < n; i++)
             {
                 float y = padT + i * (rh + 4);
                 float w = (W - padL - padR) * (float)datos[i].val / maxV;
                 g.FillRectangle(brBar, padL, y, w, rh);
-                g.DrawString(datos[i].lbl, fontLbl, brLbl, 6, y + (rh - 12) / 2);
+                g.DrawString(datos[i].lbl, fontLbl, brLbl,
+                    new RectangleF(4, y, padL - 6, rh), sfTrunc);
                 g.DrawString(((float)datos[i].val).ToString("N0"), fontLbl, brVal,
                     padL + w + 4, y + (rh - 12) / 2);
             }
@@ -940,8 +955,13 @@ namespace SistemaGestion
             if (datos.Count == 0 || datos.Sum(d => d.val) <= 0) { DibujarVacio(g); return; }
             int W = _pnlGrafica.Width, H = _pnlGrafica.Height;
             float total = (float)datos.Sum(d => d.val);
-            int size = Math.Min(W, H) - 60;
-            int cx = (W - size) / 2 - 60, cy = (H - size) / 2;
+            // Reservar espacio para leyenda a la derecha
+            int legendW = Math.Max(140, W * 22 / 100);
+            int availW = W - legendW;
+            int size = Math.Min(availW, H) - 40;
+            if (size < 80) size = 80;
+            int cx = (availW - size) / 2;
+            int cy = (H - size) / 2;
             float ang = -90;
             for (int i = 0; i < datos.Count; i++)
             {
@@ -952,20 +972,25 @@ namespace SistemaGestion
             }
             using var brHole = new SolidBrush(CSurf);
             g.FillEllipse(brHole, cx + size / 4, cy + size / 4, size / 2, size / 2);
+            // Texto central centrado correctamente
             using var brTotal = new SolidBrush(CTexto);
+            using var sfCenter = new StringFormat { Alignment = StringAlignment.Center,
+                LineAlignment = StringAlignment.Center };
             g.DrawString(total.ToString("N0"),
-                new Font("Segoe UI", 16f, FontStyle.Bold), brTotal,
-                cx + size / 2 - 40, cy + size / 2 - 12);
-            // legend
-            int lx = cx + size + 20, ly = cy + 10;
+                new Font("Segoe UI", Math.Max(12f, size / 10f), FontStyle.Bold), brTotal,
+                new RectangleF(cx + size / 4, cy + size / 4, size / 2, size / 2), sfCenter);
+            // Leyenda en la zona reservada
+            int lx = availW + 10, ly = cy + 10;
             var fontLbl = new Font("Segoe UI", 9f);
             using var brTxt = new SolidBrush(CTexto);
+            int lineH = Math.Max(20, (H - 40) / Math.Max(1, datos.Count));
+            if (lineH > 28) lineH = 28;
             for (int i = 0; i < datos.Count; i++)
             {
                 using var br = new SolidBrush(datos[i].col);
-                g.FillRectangle(br, lx, ly + i * 22, 12, 12);
+                g.FillRectangle(br, lx, ly + i * lineH, 12, 12);
                 g.DrawString(datos[i].lbl + ": " + ((float)datos[i].val).ToString("N0"),
-                    fontLbl, brTxt, lx + 18, ly + i * 22 - 2);
+                    fontLbl, brTxt, lx + 18, ly + i * lineH - 2);
             }
         }
 
