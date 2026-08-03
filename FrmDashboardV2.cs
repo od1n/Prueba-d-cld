@@ -213,10 +213,10 @@ namespace SistemaGestion
 
             var fila = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 2, ColumnCount = 4,
                 BackColor = CSurf };
-            // Anchos internos amplios: label "BCV" y "PAR" no se parten
-            fila.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 50f));   // label BCV
+            // Etiquetas compactas, valores con más espacio
+            fila.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 36f));   // label BCV
             fila.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));    // val BCV
-            fila.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 50f));   // label PAR
+            fila.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 36f));   // label PAR
             fila.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));    // val PAR
             fila.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
             fila.RowStyles.Add(new RowStyle(SizeType.Absolute, 16f));
@@ -224,15 +224,17 @@ namespace SistemaGestion
             fila.Controls.Add(new Label { Text = "BCV", Font = new Font("Segoe UI", 8f, FontStyle.Bold),
                 ForeColor = CTextoTen, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft,
                 Padding = new Padding(8, 0, 0, 0) }, 0, 0);
-            _lblBcvVal = new Label { Text = "—", Font = new Font("Segoe UI", 13f, FontStyle.Bold),
-                ForeColor = CTexto, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
+            _lblBcvVal = new Label { Text = "—", Font = new Font("Segoe UI", 12f, FontStyle.Bold),
+                ForeColor = CTexto, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft,
+                AutoEllipsis = true };
             fila.Controls.Add(_lblBcvVal, 1, 0);
 
             fila.Controls.Add(new Label { Text = "PAR", Font = new Font("Segoe UI", 8f, FontStyle.Bold),
                 ForeColor = CTextoTen, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft,
                 Padding = new Padding(8, 0, 0, 0) }, 2, 0);
-            _lblParaVal = new Label { Text = "—", Font = new Font("Segoe UI", 13f, FontStyle.Bold),
-                ForeColor = CMorado, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
+            _lblParaVal = new Label { Text = "—", Font = new Font("Segoe UI", 12f, FontStyle.Bold),
+                ForeColor = CMorado, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft,
+                AutoEllipsis = true };
             fila.Controls.Add(_lblParaVal, 3, 0);
 
             _lblBcvSello = new Label { Text = "sin tasa hoy",
