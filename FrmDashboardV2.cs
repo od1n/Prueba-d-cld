@@ -940,13 +940,23 @@ namespace SistemaGestion
             var fontLbl = new Font("Segoe UI", 8.5f);
             using var sfTrunc = new StringFormat { Trimming = StringTrimming.EllipsisCharacter,
                 FormatFlags = StringFormatFlags.NoWrap, LineAlignment = StringAlignment.Center };
+            // Pase 1: dibujar todas las barras
+            var posiciones = new (float y, float w)[n];
             for (int i = 0; i < n; i++)
             {
                 float y = padT + i * (rh + 4);
                 float w = (W - padL - padR) * (float)datos[i].val / maxV;
-                g.FillRectangle(brBar, padL, y, w, rh);
+                posiciones[i] = (y, w);
+                g.FillRectangle(brBar, padL, y, Math.Max(w, 2), rh);
+            }
+            // Pase 2: fondo limpio en zona de etiquetas + texto encima (nunca debajo de barras)
+            using var brBg = new SolidBrush(CSurf);
+            for (int i = 0; i < n; i++)
+            {
+                var (y, w) = posiciones[i];
+                g.FillRectangle(brBg, 0, y, padL - 2, rh);
                 g.DrawString(datos[i].lbl, fontLbl, brLbl,
-                    new RectangleF(4, y, padL - 6, rh), sfTrunc);
+                    new RectangleF(4, y, padL - 8, rh), sfTrunc);
                 g.DrawString(((float)datos[i].val).ToString("N0"), fontLbl, brVal,
                     padL + w + 4, y + (rh - 12) / 2);
             }
