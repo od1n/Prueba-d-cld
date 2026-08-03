@@ -214,24 +214,24 @@ namespace SistemaGestion
             // Fila de valores: altura fija = 1 línea, imposible que wrappee
             var rowVals = new Panel { Dock = DockStyle.Fill, BackColor = CSurf };
 
-            var lblB = new Label { Text = "B", Font = new Font("Segoe UI", 8f, FontStyle.Bold),
-                ForeColor = CTextoTen, Dock = DockStyle.Left, Width = 20, AutoSize = false,
+            var lblBcvTag = new Label { Text = "BCV", Font = new Font("Segoe UI", 8f, FontStyle.Bold),
+                ForeColor = CTextoTen, Dock = DockStyle.Left, Width = 32, AutoSize = false,
                 TextAlign = ContentAlignment.MiddleCenter };
-            _lblBcvVal = new Label { Text = "—", Font = new Font("Segoe UI", 13f, FontStyle.Bold),
-                ForeColor = CTexto, Dock = DockStyle.Left, Width = 70, AutoSize = false,
+            _lblBcvVal = new Label { Text = "—", Font = new Font("Segoe UI", 12f, FontStyle.Bold),
+                ForeColor = CTexto, Dock = DockStyle.Left, Width = 68, AutoSize = false,
                 TextAlign = ContentAlignment.MiddleLeft };
-            var lblP = new Label { Text = "P", Font = new Font("Segoe UI", 8f, FontStyle.Bold),
-                ForeColor = CTextoTen, Dock = DockStyle.Left, Width = 20, AutoSize = false,
+            var lblParTag = new Label { Text = "PAR", Font = new Font("Segoe UI", 8f, FontStyle.Bold),
+                ForeColor = CTextoTen, Dock = DockStyle.Left, Width = 32, AutoSize = false,
                 TextAlign = ContentAlignment.MiddleCenter };
-            _lblParaVal = new Label { Text = "—", Font = new Font("Segoe UI", 13f, FontStyle.Bold),
+            _lblParaVal = new Label { Text = "—", Font = new Font("Segoe UI", 12f, FontStyle.Bold),
                 ForeColor = CMorado, Dock = DockStyle.Fill, AutoSize = false,
                 TextAlign = ContentAlignment.MiddleLeft };
 
             // Dock order: Fill primero, luego Left en orden inverso
-            rowVals.Controls.Add(_lblParaVal);  // Fill → toma lo que sobra
-            rowVals.Controls.Add(lblP);          // Left
-            rowVals.Controls.Add(_lblBcvVal);    // Left
-            rowVals.Controls.Add(lblB);          // Left
+            rowVals.Controls.Add(_lblParaVal);   // Fill → toma lo que sobra
+            rowVals.Controls.Add(lblParTag);      // Left
+            rowVals.Controls.Add(_lblBcvVal);     // Left
+            rowVals.Controls.Add(lblBcvTag);      // Left
 
             // Sello de frescura (fila inferior fija)
             _lblBcvSello = new Label { Text = "sin tasa hoy",
@@ -927,18 +927,15 @@ namespace SistemaGestion
         {
             if (datos.Count == 0) { DibujarVacio(g); return; }
             int W = _pnlGrafica.Width, H = _pnlGrafica.Height;
-            int padL = Math.Max(80, Math.Min(220, W * 24 / 100));
+            int padL = Math.Max(90, Math.Min(260, W * 28 / 100));
             int padR = Math.Max(40, Math.Min(100, W * 10 / 100));
             int padT = 12, padB = 12;
             float maxV = (float)Math.Max(1m, datos.Max(d => d.val));
             int n = Math.Min(10, datos.Count);
             float rh = (H - padT - padB) / (float)n - 4;
             using var brBar = new SolidBrush(CAzul);
-            using var brLbl = new SolidBrush(CTexto);
             using var brVal = new SolidBrush(CTextoTen);
             var fontLbl = new Font("Segoe UI", 9.5f);
-            using var sfTrunc = new StringFormat { Trimming = StringTrimming.EllipsisCharacter,
-                FormatFlags = StringFormatFlags.NoWrap, LineAlignment = StringAlignment.Center };
             // Pase 1: dibujar todas las barras
             var posiciones = new (float y, float w)[n];
             for (int i = 0; i < n; i++)
@@ -948,20 +945,18 @@ namespace SistemaGestion
                 posiciones[i] = (y, w);
                 g.FillRectangle(brBar, padL, y, Math.Max(w, 2), rh);
             }
-            // Pase 2: fondo limpio + clip duro para que texto NUNCA se monte sobre las barras
+            // Pase 2: fondo limpio + TextRenderer con elipsis confiable
             using var brBg = new SolidBrush(CSurf);
             for (int i = 0; i < n; i++)
             {
                 var (y, w) = posiciones[i];
-                // Borrar zona de etiqueta (fondo blanco sobre la barra)
                 g.FillRectangle(brBg, 0, y, padL - 2, rh);
-                // Clip region: texto solo puede renderizar en la zona de etiqueta
-                var clipGuardado = g.Clip.Clone();
-                g.SetClip(new RectangleF(0, y - 1, padL - 2, rh + 2),
-                    System.Drawing.Drawing2D.CombineMode.Intersect);
-                g.DrawString(datos[i].lbl, fontLbl, brLbl, 4, y + (rh - 14) / 2);
-                g.Clip = clipGuardado;
-                clipGuardado.Dispose();
+                int ty = (int)(y + (rh - 16) / 2);
+                TextRenderer.DrawText(g, datos[i].lbl, fontLbl,
+                    new Rectangle(4, ty, padL - 8, 18),
+                    CTexto,
+                    TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis |
+                    TextFormatFlags.VerticalCenter);
                 // Valor a la derecha de la barra
                 g.DrawString(((float)datos[i].val).ToString("N0"), fontLbl, brVal,
                     padL + w + 4, y + (rh - 12) / 2);
