@@ -208,43 +208,42 @@ namespace SistemaGestion
         private Panel KpiBcvParalelo()
         {
             var p = new Panel { Dock = DockStyle.Fill, BackColor = CSurf,
-                Padding = new Padding(10, 4, 6, 4) };
+                Padding = new Padding(10, 2, 6, 2) };
             var bar = new Panel { Dock = DockStyle.Left, Width = 3, BackColor = COk };
 
-            var fila = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 2, ColumnCount = 4,
-                BackColor = CSurf };
-            // Etiquetas compactas, valores con más espacio
-            fila.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 36f));   // label BCV
-            fila.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));    // val BCV
-            fila.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 36f));   // label PAR
-            fila.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));    // val PAR
-            fila.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
-            fila.RowStyles.Add(new RowStyle(SizeType.Absolute, 16f));
+            // Fila de valores: altura fija = 1 línea, imposible que wrappee
+            var rowVals = new Panel { Dock = DockStyle.Fill, BackColor = CSurf };
 
-            fila.Controls.Add(new Label { Text = "BCV", Font = new Font("Segoe UI", 8f, FontStyle.Bold),
-                ForeColor = CTextoTen, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft,
-                Padding = new Padding(8, 0, 0, 0) }, 0, 0);
-            _lblBcvVal = new Label { Text = "—", Font = new Font("Segoe UI", 12f, FontStyle.Bold),
-                ForeColor = CTexto, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft,
-                AutoEllipsis = true };
-            fila.Controls.Add(_lblBcvVal, 1, 0);
+            var lblB = new Label { Text = "B", Font = new Font("Segoe UI", 8f, FontStyle.Bold),
+                ForeColor = CTextoTen, Dock = DockStyle.Left, Width = 20, AutoSize = false,
+                TextAlign = ContentAlignment.MiddleCenter };
+            _lblBcvVal = new Label { Text = "—", Font = new Font("Segoe UI", 13f, FontStyle.Bold),
+                ForeColor = CTexto, Dock = DockStyle.Left, Width = 70, AutoSize = false,
+                TextAlign = ContentAlignment.MiddleLeft };
+            var lblP = new Label { Text = "P", Font = new Font("Segoe UI", 8f, FontStyle.Bold),
+                ForeColor = CTextoTen, Dock = DockStyle.Left, Width = 20, AutoSize = false,
+                TextAlign = ContentAlignment.MiddleCenter };
+            _lblParaVal = new Label { Text = "—", Font = new Font("Segoe UI", 13f, FontStyle.Bold),
+                ForeColor = CMorado, Dock = DockStyle.Fill, AutoSize = false,
+                TextAlign = ContentAlignment.MiddleLeft };
 
-            fila.Controls.Add(new Label { Text = "PAR", Font = new Font("Segoe UI", 8f, FontStyle.Bold),
-                ForeColor = CTextoTen, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft,
-                Padding = new Padding(8, 0, 0, 0) }, 2, 0);
-            _lblParaVal = new Label { Text = "—", Font = new Font("Segoe UI", 12f, FontStyle.Bold),
-                ForeColor = CMorado, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft,
-                AutoEllipsis = true };
-            fila.Controls.Add(_lblParaVal, 3, 0);
+            // Dock order: Fill primero, luego Left en orden inverso
+            rowVals.Controls.Add(_lblParaVal);  // Fill → toma lo que sobra
+            rowVals.Controls.Add(lblP);          // Left
+            rowVals.Controls.Add(_lblBcvVal);    // Left
+            rowVals.Controls.Add(lblB);          // Left
 
+            // Sello de frescura (fila inferior fija)
             _lblBcvSello = new Label { Text = "sin tasa hoy",
                 Font = new Font("Segoe UI", 8f, FontStyle.Italic), ForeColor = CWarn,
-                Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft,
-                Padding = new Padding(8, 0, 0, 0) };
-            fila.SetColumnSpan(_lblBcvSello, 4);
-            fila.Controls.Add(_lblBcvSello, 0, 1);
+                Dock = DockStyle.Bottom, Height = 16, AutoSize = false,
+                TextAlign = ContentAlignment.MiddleLeft,
+                Padding = new Padding(6, 0, 0, 0) };
 
-            p.Controls.Add(fila); p.Controls.Add(bar);
+            // Orden: Fill (rowVals) primero, Bottom (sello) después
+            p.Controls.Add(rowVals);
+            p.Controls.Add(_lblBcvSello);
+            p.Controls.Add(bar);
             return p;
         }
 
@@ -949,14 +948,21 @@ namespace SistemaGestion
                 posiciones[i] = (y, w);
                 g.FillRectangle(brBar, padL, y, Math.Max(w, 2), rh);
             }
-            // Pase 2: fondo limpio en zona de etiquetas + texto encima (nunca debajo de barras)
+            // Pase 2: fondo limpio + clip duro para que texto NUNCA se monte sobre las barras
             using var brBg = new SolidBrush(CSurf);
             for (int i = 0; i < n; i++)
             {
                 var (y, w) = posiciones[i];
+                // Borrar zona de etiqueta (fondo blanco sobre la barra)
                 g.FillRectangle(brBg, 0, y, padL - 2, rh);
-                g.DrawString(datos[i].lbl, fontLbl, brLbl,
-                    new RectangleF(4, y, padL - 8, rh), sfTrunc);
+                // Clip region: texto solo puede renderizar en la zona de etiqueta
+                var clipGuardado = g.Clip.Clone();
+                g.SetClip(new RectangleF(0, y - 1, padL - 2, rh + 2),
+                    System.Drawing.Drawing2D.CombineMode.Intersect);
+                g.DrawString(datos[i].lbl, fontLbl, brLbl, 4, y + (rh - 14) / 2);
+                g.Clip = clipGuardado;
+                clipGuardado.Dispose();
+                // Valor a la derecha de la barra
                 g.DrawString(((float)datos[i].val).ToString("N0"), fontLbl, brVal,
                     padL + w + 4, y + (rh - 12) / 2);
             }
