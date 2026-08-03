@@ -165,9 +165,9 @@ namespace SistemaGestion
             fila.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 13f));   // Mes
             fila.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,  9f));   // Pend
             fila.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,  9f));   // Stk
-            fila.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 13f));   // CxC
+            fila.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 15f));   // CxC
             fila.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 26f));   // BCV/Par
-            fila.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 16f));   // spacer
+            fila.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 14f));   // spacer
             fila.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120f)); // btn IA
             fila.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130f)); // btn Actualizar
 
@@ -191,15 +191,15 @@ namespace SistemaGestion
         private Panel KpiCell(string etiqueta, out Label lblValor, string valorIni, Color barra)
         {
             var p = new Panel { Dock = DockStyle.Fill, BackColor = CSurf,
-                Padding = new Padding(10, 4, 6, 4) };
+                Padding = new Padding(6, 4, 4, 4) };
             var bar = new Panel { Dock = DockStyle.Left, Width = 3, BackColor = barra };
-            var lblEt = new Label { Text = etiqueta, Font = new Font("Segoe UI", 8f, FontStyle.Bold),
+            var lblEt = new Label { Text = etiqueta, Font = new Font("Segoe UI", 7.5f, FontStyle.Bold),
                 ForeColor = CTextoTen, AutoSize = false, Dock = DockStyle.Top, Height = 16,
-                Padding = new Padding(8, 0, 0, 0) };
-            // Valor mas grande (12pt) para legibilidad
-            var lblVal = new Label { Text = valorIni, Font = new Font("Segoe UI", 13f, FontStyle.Bold),
-                ForeColor = CTexto, AutoSize = false, Dock = DockStyle.Fill,
-                Padding = new Padding(8, 2, 0, 0) };
+                Padding = new Padding(6, 0, 0, 0) };
+            // Valor: altura fija = 1 línea, nunca wrappea
+            var lblVal = new Label { Text = valorIni, Font = new Font("Segoe UI", 12f, FontStyle.Bold),
+                ForeColor = CTexto, AutoSize = false, Dock = DockStyle.Top, Height = 24,
+                Padding = new Padding(6, 0, 0, 0) };
             lblValor = lblVal;
             p.Controls.Add(lblVal); p.Controls.Add(lblEt); p.Controls.Add(bar);
             return p;
@@ -927,7 +927,7 @@ namespace SistemaGestion
         {
             if (datos.Count == 0) { DibujarVacio(g); return; }
             int W = _pnlGrafica.Width, H = _pnlGrafica.Height;
-            int padL = Math.Max(60, Math.Min(180, W * 20 / 100));
+            int padL = Math.Max(80, Math.Min(220, W * 24 / 100));
             int padR = Math.Max(40, Math.Min(100, W * 10 / 100));
             int padT = 12, padB = 12;
             float maxV = (float)Math.Max(1m, datos.Max(d => d.val));
@@ -936,7 +936,7 @@ namespace SistemaGestion
             using var brBar = new SolidBrush(CAzul);
             using var brLbl = new SolidBrush(CTexto);
             using var brVal = new SolidBrush(CTextoTen);
-            var fontLbl = new Font("Segoe UI", 8.5f);
+            var fontLbl = new Font("Segoe UI", 9.5f);
             using var sfTrunc = new StringFormat { Trimming = StringTrimming.EllipsisCharacter,
                 FormatFlags = StringFormatFlags.NoWrap, LineAlignment = StringAlignment.Center };
             // Pase 1: dibujar todas las barras
