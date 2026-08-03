@@ -84,7 +84,10 @@ git pull origin master
 # Ruta: C:\SistemaGestion\publish\Api\iniciar-api.cmd
 ```
 
-**CRÍTICO**: `dotnet build` y `dotnet run` NO son suficientes — la API ejecuta desde la carpeta publish. Los `iniciar-api.cmd` en ambas máquinas hacen `dotnet publish` automáticamente antes de arrancar.
+**CRÍTICO**:
+- `dotnet build` y `dotnet run` NO son suficientes — la API ejecuta desde la carpeta publish. Los `iniciar-api.cmd` en ambas máquinas hacen `dotnet publish` automáticamente antes de arrancar.
+- WinForms corre desde `publish\App\`, NO desde `publish\`. Publicar en la ruta incorrecta hace que los cambios nunca se vean.
+- WinForms es **self-contained** (runtime .NET incluido en `publish\App\`). Publicar sin `--self-contained -r win-x64` reemplaza el runtimeconfig y la app deja de arrancar con error "You must install or update .NET".
 
 ---
 
@@ -205,6 +208,7 @@ Prueba d cld/
 | Compras + Kardex | `DB_Compras.cs` / `ComprasEndpoints.cs` |
 | Config legal | `FrmConfigLegal.cs` / `ConfigEndpoints.cs` |
 | Auth/login | `AuthEndpoints.cs` + `Auth/TokenService.cs` |
+| Dashboard KPIs/charts | `FrmDashboardV2.cs` — KPIs, charts custom-painted (GDI+), tasas BCV/PAR |
 | BD schema + migraciones | `DB.cs` (WinForms) / `Db.cs` + `DB_Deploy.cs` (API) |
 | Respaldos | `BackupService.cs` + `SecurityService.cs` |
 | Cámaras (WinForms) | `DB_Camaras.cs` + `DlgCamara.cs` + `FrmCamarasAdmin.cs` |
@@ -331,7 +335,9 @@ Si aparece una BD en ruta distinta a `C:\SistemaGestion\sistema_gestion.db` en O
 ## 16. Reglas para el asistente
 
 - Español neutro (NUNCA argentino)
+- **SIEMPRE indicar en qué máquina (CHAOS/OLIMPO/SERVO) se ejecuta cada comando PowerShell**. No dar un comando suelto sin decir dónde correrlo.
 - Push SOLO desde CHAOS. OLIMPO y SERVO solo hacen pull.
+- WinForms se publica SIEMPRE con `--self-contained -r win-x64`. Sin esto la app no arranca ("You must install or update .NET").
 - Publicar CADA proyecto .csproj por separado, NUNCA la solución con --output
 - SERVO solo corre API, NUNCA publicar WinForms ahí
 - Dar UNA solución probada, no múltiples intentos
