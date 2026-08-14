@@ -317,6 +317,7 @@ app.MapReportesEndpoints();
 app.MapNominaEndpoints();
 app.MapConfigEndpoints();
 app.MapCamarasEndpoints();
+app.MapAbonosEndpoints();
 app.MapGet("/", ctx => { ctx.Response.Redirect("/index.html"); return Task.CompletedTask; });
 
 Console.WriteLine("[API] Portal móvil corriendo:");

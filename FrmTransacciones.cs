@@ -125,6 +125,11 @@ namespace SistemaGestion
                 () => new FrmRegistroProduccionDia().ShowDialog(),
                 "Registrar la producción diaria de cada molde");
 
+            Add("◆", "Abonos",              "Pagos y estado de cuenta",
+                Color.FromArgb(30, 120, 180),     // azul medio
+                () => new FrmAbonos().ShowDialog(),
+                "Registrar abonos de clientes, ver comprobantes y generar estado de cuenta");
+
             // Distribución responsive: columnas según ancho disponible,
             // con buen aire entre tarjetas para que respiren visualmente.
             UICards.DistribuirGrid(grid, tarjetas, minAncho: 250, alto: 124, gap: 24);
