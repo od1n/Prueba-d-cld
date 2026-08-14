@@ -38,9 +38,10 @@ Credenciales portal: ver archivo local de credenciales (NO guardar en repositori
 - **BD SQLite (ÚNICA)**: `C:\SistemaGestion\sistema_gestion.db`
 - **Share SMB**: `\\192.168.68.132\SistemaGestion\` → apunta a `C:\SistemaGestion\` (VERIFICAR con `Get-SmbShare` si hay dudas)
 - **Env var `SG_DB_PATH` (Machine scope)**: `C:\SistemaGestion\sistema_gestion.db` (ruta LOCAL, no UNC)
-- **Publish WinForms**: `C:\Users\PC\AppData\Local\SistemaGestion\publish\App`
-  - Comando: `dotnet publish SistemaGestion.csproj -c Release -r win-x64 --self-contained -o "C:\Users\PC\AppData\Local\SistemaGestion\publish\App"`
-- **Publish API**: `C:\Users\PC\AppData\Local\SistemaGestion\publish\Api`
+- **Publish WinForms**: `C:\SistemaGestion\publish\App`
+  - Comando: `dotnet publish SistemaGestion.csproj -c Release -r win-x64 --self-contained -o "C:\SistemaGestion\publish\App"`
+  - Acceso directo en escritorio: apunta a `C:\SistemaGestion\publish\App\SistemaGestion.exe`
+- **Publish API**: `C:\SistemaGestion\publish\Api`
   - Enlace escritorio: ejecuta `iniciar-api.cmd` que hace `dotnet publish` + `dotnet SistemaGestion.Api.dll`
   - `sg-env.cmd` en la misma carpeta configura SG_DB_PATH y SG_INTERNAL_TOKEN
 - **Tablas config**: `ConfigSistema` (legacy) y `ConfiguracionSistema` (v16+, parámetros legales IVA/IVSS/etc.)
@@ -74,7 +75,7 @@ git push origin master
 cd C:\SistemaGestion
 git pull origin master
 # WinForms (solo OLIMPO):
-dotnet publish SistemaGestion.csproj -c Release -r win-x64 --self-contained -o "C:\Users\PC\AppData\Local\SistemaGestion\publish\App"
+dotnet publish SistemaGestion.csproj -c Release -r win-x64 --self-contained -o "C:\SistemaGestion\publish\App"
 # API: cerrar la API y ejecutar el enlace del escritorio (iniciar-api.cmd hace publish + run)
 
 # 3. SERVO — pull y publish SOLO API
@@ -230,7 +231,7 @@ Prueba d cld/
 | Login falla pero IntentosHoy=0 | API leyendo otra BD (share SMB apunta a carpeta incorrecta) | Verificar `Get-SmbShare -Name SistemaGestion` apunta a `C:\SistemaGestion\` |
 | `no such table: ConfiguracionSistema` | BD no tiene la tabla v16+ | `CREATE TABLE IF NOT EXISTS ConfiguracionSistema (...)` |
 | `parseFloat("0") \|\| 16` = 16 | JavaScript: 0 es falsy | Usar check explícito de null/undefined/empty |
-| WinForms no refleja cambios | Se hizo `dotnet build` en vez de `dotnet publish` | Siempre `dotnet publish` con `--self-contained -r win-x64` |
+| WinForms no refleja cambios | Se hizo `dotnet build` en vez de `dotnet publish`, o se publicó en ruta incorrecta | Siempre `dotnet publish SistemaGestion.csproj` con `--self-contained -r win-x64 -o "C:\SistemaGestion\publish\App"`. Verificar que el acceso directo apunte ahí |
 | BD vacía / datos desaparecidos | Múltiples copias de BD en distintas rutas | Verificar SG_DB_PATH y share SMB. Solo una BD en `C:\SistemaGestion\` |
 | `Padding is invalid` al descifrar backup | Posible incompatibilidad de clave DPAPI | Descifrar DEBE correr como usuario PC en OLIMPO (DPAPI CurrentUser) |
 | Push desde máquina incorrecta | `fatal: not a git repository` | Push SOLO desde CHAOS. OLIMPO y SERVO solo hacen pull. |
