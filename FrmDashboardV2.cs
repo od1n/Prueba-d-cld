@@ -847,9 +847,9 @@ namespace SistemaGestion
         {
             if (datos.Count == 0) { DibujarVacio(g); return; }
             int W = _pnlGrafica.Width, H = _pnlGrafica.Height;
-            int padL = Math.Max(40, W * 7 / 100);
+            int padL = Math.Max(50, W * 8 / 100);
             int padR = Math.Max(15, W * 3 / 100);
-            int padT = 20, padB = Math.Max(24, H * 10 / 100);
+            int padT = 20, padB = Math.Max(28, H * 12 / 100);
             float maxV = (float)Math.Max(1m, datos.Max(d => d.val));
             int n = datos.Count;
             using var penLine = new Pen(CAzul, 2);
@@ -857,7 +857,7 @@ namespace SistemaGestion
             using var brArea  = new SolidBrush(Color.FromArgb(30, CAzul));
             using var brLbl   = new SolidBrush(CTextoTen);
             using var brVal   = new SolidBrush(CTexto);
-            var fontLbl = new Font("Segoe UI", 7.5f);
+            var fontLbl = new Font("Segoe UI", 9f);
             for (int i = 0; i <= 4; i++)
             {
                 int y = padT + (H - padT - padB) * i / 4;
@@ -896,9 +896,9 @@ namespace SistemaGestion
         {
             if (datos.Count == 0) { DibujarVacio(g); return; }
             int W = _pnlGrafica.Width, H = _pnlGrafica.Height;
-            int padL = Math.Max(40, W * 7 / 100);
+            int padL = Math.Max(50, W * 8 / 100);
             int padR = Math.Max(15, W * 3 / 100);
-            int padT = 20, padB = Math.Max(24, H * 10 / 100);
+            int padT = 20, padB = Math.Max(28, H * 12 / 100);
             float maxV = (float)Math.Max(1m, datos.Max(d => d.val));
             int n = datos.Count;
             float bw = (W - padL - padR) / (float)(n * 1.5f);
@@ -906,7 +906,7 @@ namespace SistemaGestion
             using var brBarSoft = new SolidBrush(Color.FromArgb(150, CAzul));
             using var brLbl = new SolidBrush(CTextoTen);
             using var penGrid = new Pen(Color.FromArgb(240, 242, 246), 1);
-            var fontLbl = new Font("Segoe UI", 7.5f);
+            var fontLbl = new Font("Segoe UI", 9f);
             for (int i = 0; i <= 4; i++)
             {
                 int y = padT + (H - padT - padB) * i / 4;
@@ -994,7 +994,7 @@ namespace SistemaGestion
                 new RectangleF(cx + size / 4, cy + size / 4, size / 2, size / 2), sfCenter);
             // Leyenda en la zona reservada
             int lx = availW + 10, ly = cy + 10;
-            var fontLbl = new Font("Segoe UI", 9f);
+            var fontLbl = new Font("Segoe UI", 9.5f);
             using var brTxt = new SolidBrush(CTexto);
             int lineH = Math.Max(20, (H - 40) / Math.Max(1, datos.Count));
             if (lineH > 28) lineH = 28;
