@@ -234,11 +234,11 @@ namespace SistemaGestion
                         rtfRespIA.Text =
                             "⚠  Ollama no está disponible en http://localhost:11434.\n" +
                             "Asegúrate de que el servidor Ollama esté corriendo y que " +
-                            "tengas un modelo descargado (ej: ollama pull llama3).";
+                            "tengas un modelo descargado (ej: ollama pull gemma4:31b-cloud).";
                         return;
                     }
 
-                    string modelo = DatabaseService.ObtenerConfig("OllamaModelo", "llama3");
+                    string modelo = DatabaseService.ObtenerConfig("OllamaModelo", "gemma4:31b-cloud");
                     string prompt =
                         $"Eres un asistente de soporte para el sistema de gestión empresarial " +
                         $"venezolano \"SistemaGestion\". El usuario está en el módulo \"{titulo}\".\n\n" +

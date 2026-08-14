@@ -710,7 +710,7 @@ namespace SistemaGestion
                     return;
                 }
 
-                string modelo  = DatabaseService.ObtenerConfig("OllamaModelo", "llama3");
+                string modelo  = DatabaseService.ObtenerConfig("OllamaModelo", "gemma4:31b-cloud");
                 string empresa = DatabaseService.ObtenerConfig("NombreEmpresa", "la empresa");
 
                 // Contexto del sistema (tasa + alertas)

@@ -403,11 +403,11 @@ namespace SistemaGestion
                     _lblIATexto.Text =
                         "⚠  Ollama no está disponible en http://localhost:11434.\n\n" +
                         "Asegúrate de que el servidor Ollama esté corriendo y de que " +
-                        "tengas al menos un modelo descargado (ej: ollama pull llama3).";
+                        "tengas al menos un modelo descargado (ej: ollama pull gemma4:31b-cloud).";
                     return;
                 }
 
-                string modelo  = DatabaseService.ObtenerConfig("OllamaModelo", "llama3");
+                string modelo  = DatabaseService.ObtenerConfig("OllamaModelo", "gemma4:31b-cloud");
                 string empresa = DatabaseService.ObtenerConfig("NombreEmpresa", "la empresa");
 
                 // Construir contexto de alertas
@@ -450,7 +450,7 @@ namespace SistemaGestion
                 _lblIATexto.Text =
                     $"⚠  Error al contactar Ollama: {ex.Message}\n\n" +
                     $"Verifica que el servicio esté activo y que el modelo " +
-                    $"\"{DatabaseService.ObtenerConfig("OllamaModelo", "llama3")}\" esté descargado.";
+                    $"\"{DatabaseService.ObtenerConfig("OllamaModelo", "gemma4:31b-cloud")}\" esté descargado.";
             }
             finally
             {

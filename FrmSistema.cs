@@ -93,7 +93,7 @@ namespace SistemaGestion
 
             var lblHint = new Label
             {
-                Text = "Modelos populares: llama3, mistral, phi3, gemma2",
+                Text = "Modelos populares: gemma4:31b-cloud, llama3, mistral, phi3",
                 Location = new Point(xCtrl, y),
                 AutoSize = true,
                 Font = new Font("Segoe UI", 8f, FontStyle.Italic),
@@ -251,7 +251,7 @@ namespace SistemaGestion
             {
                 _txtEmpresa.Text = DatabaseService.ObtenerConfig("NombreEmpresa", "Mi Empresa");
                 _txtRIF.Text     = DatabaseService.ObtenerConfig("RIF", "");
-                _txtOllama.Text  = DatabaseService.ObtenerConfig("OllamaModelo", "llama3");
+                _txtOllama.Text  = DatabaseService.ObtenerConfig("OllamaModelo", "gemma4:31b-cloud");
             }
             catch (Exception ex)
             {
@@ -272,7 +272,7 @@ namespace SistemaGestion
                     return;
                 }
                 if (string.IsNullOrWhiteSpace(_txtOllama.Text))
-                    _txtOllama.Text = "llama3";
+                    _txtOllama.Text = "gemma4:31b-cloud";
 
                 DatabaseService.GuardarConfig("NombreEmpresa", _txtEmpresa.Text.Trim());
                 DatabaseService.GuardarConfig("RIF",           _txtRIF.Text.Trim());
