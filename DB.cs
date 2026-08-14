@@ -151,11 +151,19 @@ namespace SistemaGestion
 
     public class Abono
     {
-        public int      NumAbono   { get; set; }
-        public string   NumeroF    { get; set; }
-        public DateTime Fecha      { get; set; }
-        public decimal  Monto      { get; set; }
-        public string   Cliente    { get; set; }
+        public int      NumAbono          { get; set; }
+        public string   NumeroF           { get; set; }
+        public DateTime Fecha             { get; set; }
+        public decimal  Monto             { get; set; }
+        public string   Cliente           { get; set; }
+        // ── v28: campos extendidos ─────────────────────────────────────────
+        public string   MetodoPago        { get; set; } = "Efectivo";
+        public string   Referencia        { get; set; } = "";
+        public string   NombreRemitente   { get; set; } = "";
+        public string   RutaComprobante   { get; set; } = "";
+        public string   Observaciones     { get; set; } = "";
+        public int      IdCuentaReceptora { get; set; }
+        public string   Estado            { get; set; } = "Confirmado";
     }
 
     public class TbMolde
@@ -1286,7 +1294,7 @@ namespace SistemaGestion
         // Nunca se modifica una migracion existente: si hay un error se agrega
         // una nueva migracion que lo corrija.
         // Version actual del esquema en codigo: 7
-        public  const int SCHEMA_VERSION = 27;  // v27: PrecioUnit en DetallesFactura
+        public  const int SCHEMA_VERSION = 28;  // v28: Abonos extendidos + ComprobantesFactura + CuentasReceptoras
 
         private static void MigrarEsquema(SqliteConnection conn)
         {
@@ -1900,6 +1908,12 @@ namespace SistemaGestion
                             (SELECT i.Precio FROM Inventario i WHERE i.Codigo = DetallesFactura.Codigo), 0)
                         WHERE PrecioUnit = 0 OR PrecioUnit IS NULL");
                     SetSchemaVersion(conn, tx, 27);
+                }
+
+                // ── v28: Abonos extendidos + ComprobantesFactura + CuentasReceptoras + PinBot
+                if (versionActual < 28)
+                {
+                    MigrarV28(conn, tx);
                 }
 
                 tx.Commit();
