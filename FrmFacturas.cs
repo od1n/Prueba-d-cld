@@ -669,7 +669,7 @@ CargarDatos();
             Text            = f == null ? "Nueva Factura"
                 : soloLectura ? "Detalle Factura"
                 : "Editar Factura " + f.NumeroF;
-            Size            = new Size(900, 680);
+            Size            = new Size(900, 720);
             StartPosition   = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.Sizable;
             MaximizeBox     = MinimizeBox = false;
@@ -688,8 +688,9 @@ CargarDatos();
             var panelIzq = new Panel
             {
                 Location = new Point(0, 42),
-                Size     = new Size(360, 370),
-                BackColor= Color.FromArgb(240, 244, 250)
+                Size     = new Size(380, 460),
+                BackColor= Color.FromArgb(240, 244, 250),
+                AutoScroll = true
             };
 
             int y = 10;
@@ -798,7 +799,7 @@ CargarDatos();
             cmbFormaPago.SelectedIndex = 0;
             panelIzq.Controls.Add(cmbFormaPago); y += 32;
 
-            Lbl("Desc. global (%):", y); numDescuento = Num(y, 100);       y += 32;
+            Lbl("Descuento (%):", y);   numDescuento = Num(y, 100);       y += 32;
             _ivaPctSistema = decimal.TryParse(
                 DatabaseService.ObtenerConfig("IVA_Porcentaje", "16"), out var _ipv) ? _ipv : 16m;
             Lbl("IVA %:", y);
@@ -879,7 +880,7 @@ CargarDatos();
                 BackColor = Color.FromArgb(220, 230, 245),
                 ForeColor = Color.FromArgb(40, 60, 140),
                 Padding = new Padding(8, 0, 8, 0),
-                Location = new Point(8, 422),   // justo debajo de los dos paneles
+                Location = new Point(8, 510),   // justo debajo de los dos paneles
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
             void RefrescarTipoDoc()
@@ -912,8 +913,8 @@ CargarDatos();
             // ── Panel derecho: lineas de productos ────────────────────────
             var panelDer = new Panel
             {
-                Location  = new Point(362, 42),
-                Size      = new Size(520, 370),
+                Location  = new Point(384, 42),
+                Size      = new Size(498, 460),
                 BackColor = Color.FromArgb(245, 248, 255)
             };
 
