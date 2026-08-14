@@ -416,25 +416,63 @@ namespace SistemaGestion
                     : string.Join(", ", _data.Alertas.Select(a =>
                         $"{a.Categoria} ({a.Texto})"));
 
+                // Contexto temporal
+                var ahora = DateTime.Now;
+                string horaCtx = ahora.Hour < 9 ? "inicio de jornada (antes de las 9am)"
+                    : ahora.Hour < 12 ? "mañana"
+                    : ahora.Hour < 15 ? "mediodía"
+                    : "tarde";
+                string diaSemana = ahora.ToString("dddd", System.Globalization.CultureInfo.GetCultureInfo("es"));
+
+                // Ventas mensuales históricas (tendencia real)
+                var ventasMens = _data.VentasMensuales;
+                string histVentas = ventasMens.Count > 0
+                    ? string.Join(", ", ventasMens.Select(v => $"{v.lbl}: ${v.val:N0}"))
+                    : "sin datos históricos";
+                decimal promedioMensual = ventasMens.Count > 0
+                    ? ventasMens.Where(v => v.val > 0).DefaultIfEmpty().Average(v => v.val)
+                    : 0;
+
+                // Días transcurridos y proyección del mes
+                int diasMes = DateTime.DaysInMonth(ahora.Year, ahora.Month);
+                int diasTranscurridos = ahora.Day;
+                decimal proyeccionMes = diasTranscurridos > 0
+                    ? _data.VentasMes / diasTranscurridos * diasMes
+                    : 0;
+
+                // Top productos (resumen corto)
+                string topProd = _data.TopProductos.Count > 0
+                    ? string.Join(", ", _data.TopProductos.Take(5).Select(p => $"{p.lbl} ({p.val:N0} uds)"))
+                    : "sin datos";
+
+                // Estado de facturación
+                var ef = _data.EstadoFacturas;
+                string estadoFact = ef.Count > 0
+                    ? string.Join(", ", ef.Select(e => $"{e.lbl}: {e.val:N0}"))
+                    : "sin datos";
+
                 var prompt =
-                    $"Eres un asistente de negocios para una empresa venezolana llamada \"{empresa}\". " +
-                    $"Analiza los siguientes indicadores clave (KPIs) del día de hoy y proporciona " +
-                    $"un análisis conciso en español con recomendaciones prácticas.\n\n" +
-                    $"KPIs actuales:\n" +
-                    $"- Ventas del día: $ {_data.VentasHoy:N2}\n" +
-                    $"- Ventas del mes: $ {_data.VentasMes:N2}\n" +
-                    $"- Facturas pendientes de cobro: {_data.FacturasPendientes}\n" +
-                    $"- Productos con stock bajo: {_data.StockBajo}\n" +
-                    $"- Cuentas por cobrar vencidas: $ {_data.CxCSaldo:N2}\n" +
-                    $"- Tasa BCV: {(_data.TasaBCV > 0 ? _data.TasaBCV.ToString("N2") + " Bs/USD" : "no disponible")}\n" +
-                    $"- Tasa paralelo: {(_data.TasaParalelo > 0 ? _data.TasaParalelo.ToString("N2") + " Bs/USD" : "no disponible")}\n" +
-                    $"- Alertas activas: {alertasTxt}\n\n" +
-                    $"Proporciona:\n" +
-                    $"1. Diagnóstico breve del estado actual (2-3 oraciones)\n" +
-                    $"2. Las 2-3 acciones más urgentes para hoy\n" +
-                    $"3. Un punto positivo si lo hay\n\n" +
-                    $"Sé directo, práctico y usa el contexto venezolano (dólares como moneda de referencia). " +
-                    $"Máximo 180 palabras.";
+                    $"Eres un analista de negocios para \"{empresa}\", una empresa MANUFACTURERA venezolana " +
+                    $"(fábrica de plásticos). Es {diaSemana}, {horaCtx}, día {diasTranscurridos} de {diasMes} del mes.\n\n" +
+                    $"CONTEXTO IMPORTANTE:\n" +
+                    $"- Es manufactura: es NORMAL que algunos días no haya ventas directas. La producción es continua pero las ventas son por pedidos.\n" +
+                    $"- Las cuentas por cobrar son parte normal del negocio B2B (se vende a crédito a otros negocios).\n" +
+                    $"- Si es inicio de jornada y las ventas del día son $0, NO es alarmante.\n\n" +
+                    $"DATOS HOY:\n" +
+                    $"- Ventas hoy: ${_data.VentasHoy:N2} | Ventas acumuladas mes: ${_data.VentasMes:N2}\n" +
+                    $"- Proyección cierre de mes: ${proyeccionMes:N2} | Promedio mensual histórico: ${promedioMensual:N2}\n" +
+                    $"- Facturas pendientes cobro: {_data.FacturasPendientes} | CxC vencidas: ${_data.CxCSaldo:N2}\n" +
+                    $"- Stock bajo mínimo: {_data.StockBajo} productos\n" +
+                    $"- Tasa BCV: {(_data.TasaBCV > 0 ? _data.TasaBCV.ToString("N2") : "n/d")} | Paralelo: {(_data.TasaParalelo > 0 ? _data.TasaParalelo.ToString("N2") : "n/d")}\n" +
+                    $"- Alertas: {alertasTxt}\n\n" +
+                    $"TENDENCIA MENSUAL (últimos 12 meses): {histVentas}\n" +
+                    $"ESTADO FACTURAS MES: {estadoFact}\n" +
+                    $"TOP PRODUCTOS AÑO: {topProd}\n\n" +
+                    $"Analiza la TENDENCIA del negocio (no solo el dato de hoy). Proporciona:\n" +
+                    $"1. Estado general del negocio basado en la tendencia (2-3 oraciones)\n" +
+                    $"2. 2-3 acciones concretas y prácticas\n" +
+                    $"3. Un aspecto positivo si lo hay\n\n" +
+                    $"Sé equilibrado, no alarmista. Usa dólares como referencia. Máximo 200 palabras.";
 
                 string respuesta = await OllamaService.GenerateAsync(modelo, prompt, 400);
                 _lblIATexto.Text = respuesta;
