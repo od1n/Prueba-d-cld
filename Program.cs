@@ -1,13 +1,29 @@
 using System;
+using System.Threading;
 using System.Windows.Forms;
 
 namespace SistemaGestion
 {
     static class Program
     {
+        private static Mutex? _instanciaMutex;
+
         [STAThread]
         static void Main()
         {
+            // ── Instancia única ─────────────────────────────────────────────
+            const string mutexId = "Global\\SistemaGestion_SingleInstance_EHP";
+            _instanciaMutex = new Mutex(true, mutexId, out bool esNueva);
+            if (!esNueva)
+            {
+                MessageBox.Show(
+                    "SistemaGestion ya está en ejecución.\n\n" +
+                    "Si no la ves, revisa la barra de tareas.",
+                    "SistemaGestion",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
             // Try/catch global: cualquier excepcion del arranque (antes de
             // Application.Run) muestra MessageBox con stack completo + escribe
             // a un log en %AppData%\SistemaGestion\arranque_error.log
