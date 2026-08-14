@@ -1,3 +1,4 @@
+#nullable enable
 // DB_Abonos.cs — Migración v28 + CRUD para Abonos extendidos,
 // ComprobantesFactura y CuentasReceptoras
 // Partial class de DatabaseService (mismo patrón que DB_CuentasPagar.cs)
