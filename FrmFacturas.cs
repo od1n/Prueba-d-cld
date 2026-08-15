@@ -848,15 +848,15 @@ CargarDatos();
             cmbFormaPago.SelectedIndex = 0;
             panelIzq.Controls.Add(cmbFormaPago);
 
-            // Botón para gestionar comprobantes de pago (visible si FormaPago != Contado)
+            // Botón comprobantes — junto al combo FormaPago (mismo patrón que "+" cliente)
             _btnComprobantes = new Button
             {
-                Text = "📎 Comprobantes", Size = new Size(120, 24),
-                Location = new Point(130, y + 26),
+                Text = "📎", Size = new Size(30, 24),
+                Location = new Point(354, y),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Color.FromArgb(30, 120, 180),
                 ForeColor = Color.White,
-                Font = new Font("Segoe UI", 8f, FontStyle.Bold),
+                Font = new Font("Segoe UI", 11f, FontStyle.Bold),
                 Cursor = Cursors.Hand,
                 Visible = false
             };
@@ -1650,18 +1650,17 @@ CargarDatos();
         private void ActualizarBotonComprobantes()
         {
             if (_btnComprobantes == null) return;
-            _btnComprobantes.Text = _comprobantesTemp.Count > 0
-                ? $"📎 Comprobantes ({_comprobantesTemp.Count})"
-                : "📎 Comprobantes";
-            _btnComprobantes.BackColor = _comprobantesTemp.Count > 0
+            bool tiene = _comprobantesTemp.Count > 0;
+            _btnComprobantes.Text = tiene ? $"📎{_comprobantesTemp.Count}" : "📎";
+            _btnComprobantes.BackColor = tiene
                 ? Color.FromArgb(16, 163, 127)   // verde = tiene datos
                 : Color.FromArgb(30, 120, 180);  // azul = vacío
 
-            // Actualizar visibilidad también (cubre caso soloLectura
+            // Actualizar visibilidad (cubre caso soloLectura
             // donde comprobantes se cargan después del evento FormaPago)
             bool esPago = cmbFormaPago.SelectedItem?.ToString() != "Contado";
             _btnComprobantes.Visible = _soloLectura
-                ? (_comprobantesTemp.Count > 0)
+                ? tiene
                 : esPago;
         }
 
