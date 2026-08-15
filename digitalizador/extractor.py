@@ -139,6 +139,32 @@ Responde ÚNICAMENTE con el JSON, sin explicaciones ni bloques de código:
   "observaciones": null
 }"""
 
+PROMPT_COMPROBANTE_PAGO = """Eres un asistente que extrae datos de comprobantes de pago (capturas de pantalla de transferencias bancarias, Zelle, pago móvil, depósitos).
+
+Los comprobantes provienen de bancos venezolanos (BDV, Provincial, Banesco, Mercantil) o servicios como Zelle.
+Extrae TODOS los datos visibles. Si un dato no es legible, pon null.
+
+- El monto puede estar en USD (Zelle) o bolívares (transferencias nacionales).
+- La referencia es el número de operación o confirmación.
+- El beneficiario/destinatario es la persona o empresa que RECIBE el pago.
+- El remitente/ordenante es la persona que ENVÍA el pago.
+
+Responde ÚNICAMENTE con el JSON, sin explicaciones ni bloques de código:
+{
+  "encontrado": true,
+  "tipo_pago": "Zelle" | "Transferencia" | "PagoMovil" | "Deposito" | "Cheque" | "Otro",
+  "banco_origen": null,
+  "banco_destino": null,
+  "monto": 0.0,
+  "moneda": "USD" | "VES",
+  "referencia": null,
+  "fecha": "DD/MM/YYYY",
+  "remitente": null,
+  "beneficiario": null,
+  "documento_beneficiario": null,
+  "observaciones": null
+}"""
+
 
 # ── Utilidades ────────────────────────────────────────────────────────────
 def _a_base64(imagen_bytes: bytes) -> str:
@@ -265,6 +291,9 @@ def extraer_factura(imagen_bytes: bytes, backend_override: str = "") -> dict:
 
 def extraer_factura_venta(imagen_bytes: bytes, backend_override: str = "") -> dict:
     return _extraer(imagen_bytes, PROMPT_FACTURA_VENTA, backend_override)
+
+def extraer_comprobante_pago(imagen_bytes: bytes, backend_override: str = "") -> dict:
+    return _extraer(imagen_bytes, PROMPT_COMPROBANTE_PAGO, backend_override)
 
 
 def modelo_disponible() -> bool:

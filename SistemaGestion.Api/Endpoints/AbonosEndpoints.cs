@@ -312,6 +312,120 @@ namespace SistemaGestion.Api.Endpoints
                 };
                 return Results.File(ruta, mime);
             }).RequireAuthorization();
+
+            // ── POST /api/facturas/{numeroF}/comprobantes ──────────────────
+            // Crea un ComprobanteFactura + Abono vinculado (multipart)
+            app.MapPost("/api/facturas/{numeroF}/comprobantes", async (HttpContext ctx, string numeroF) =>
+            {
+                if (!TokenService.PuedeVerCxC(ctx.User)) return Results.Forbid();
+
+                var form = await ctx.Request.ReadFormAsync();
+                string metodoPago  = form["metodoPago"].FirstOrDefault() ?? "Efectivo";
+                string montoStr    = form["monto"].FirstOrDefault() ?? "0";
+                string referencia  = form["referencia"].FirstOrDefault() ?? "";
+                string cuentaIdStr = form["idCuentaReceptora"].FirstOrDefault() ?? "0";
+                string obs         = form["observaciones"].FirstOrDefault() ?? "";
+                string cliente     = form["cliente"].FirstOrDefault() ?? "";
+
+                if (!decimal.TryParse(montoStr, System.Globalization.NumberStyles.Any,
+                    System.Globalization.CultureInfo.InvariantCulture, out decimal monto) || monto <= 0)
+                    return Results.BadRequest(new { error = "Monto inválido." });
+
+                int.TryParse(cuentaIdStr, out int idCuenta);
+
+                // Guardar imagen si viene
+                string rutaImagen = "";
+                var archivo = form.Files.GetFile("imagen");
+                if (archivo != null && archivo.Length > 0)
+                {
+                    if (archivo.Length > 15 * 1024 * 1024)
+                        return Results.BadRequest(new { error = "Imagen muy grande (máx 15 MB)." });
+
+                    string carpeta = Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                        "SistemaGestion", "comprobantes", "facturas",
+                        DateTime.Today.ToString("yyyy-MM"));
+                    Directory.CreateDirectory(carpeta);
+
+                    string ext = Path.GetExtension(archivo.FileName);
+                    string destino = Path.Combine(carpeta,
+                        $"{numeroF}_{metodoPago}_{DateTime.Now:HHmmss}{ext}");
+                    using (var fs = new FileStream(destino, FileMode.Create))
+                        await archivo.CopyToAsync(fs);
+                    rutaImagen = destino;
+                }
+
+                // Insertar ComprobanteFactura
+                using var c = Db.Conn();
+                var cmd = c.CreateCommand();
+                cmd.CommandText = @"
+                    INSERT INTO ComprobantesFactura
+                        (NumeroF, MetodoPago, Monto, Referencia, RutaImagen,
+                         IdCuentaReceptora, Fecha, Observaciones)
+                    VALUES ($nf, $mp, $mo, $ref, $ri, $icr, $fe, $obs)";
+                cmd.Parameters.AddWithValue("$nf",  numeroF);
+                cmd.Parameters.AddWithValue("$mp",  metodoPago);
+                cmd.Parameters.AddWithValue("$mo",  (double)monto);
+                cmd.Parameters.AddWithValue("$ref", referencia);
+                cmd.Parameters.AddWithValue("$ri",  rutaImagen);
+                cmd.Parameters.AddWithValue("$icr", idCuenta);
+                cmd.Parameters.AddWithValue("$fe",  DateTime.Today.ToString("yyyy-MM-dd"));
+                cmd.Parameters.AddWithValue("$obs", obs);
+                cmd.ExecuteNonQuery();
+
+                // Insertar Abono vinculado
+                var cmdA = c.CreateCommand();
+                cmdA.CommandText = @"
+                    INSERT INTO Abonos
+                        (NumeroF, Fecha, Monto, Cliente, MetodoPago, Referencia,
+                         NombreRemitente, RutaComprobante, Observaciones,
+                         IdCuentaReceptora, Estado)
+                    VALUES ($nf, $fe, $mo, $cl, $mp, $ref, '', $rc, $obs, $icr, 'Confirmado')";
+                cmdA.Parameters.AddWithValue("$nf",  numeroF);
+                cmdA.Parameters.AddWithValue("$fe",  DateTime.Today.ToString("yyyy-MM-dd"));
+                cmdA.Parameters.AddWithValue("$mo",  (double)monto);
+                cmdA.Parameters.AddWithValue("$cl",  cliente);
+                cmdA.Parameters.AddWithValue("$mp",  metodoPago);
+                cmdA.Parameters.AddWithValue("$ref", referencia);
+                cmdA.Parameters.AddWithValue("$rc",  rutaImagen);
+                cmdA.Parameters.AddWithValue("$obs", $"Comprobante factura {numeroF}");
+                cmdA.Parameters.AddWithValue("$icr", idCuenta);
+                cmdA.ExecuteNonQuery();
+
+                return Results.Ok(new { ok = true, metodo = metodoPago, monto });
+            }).RequireAuthorization().DisableAntiforgery();
+
+            // ── GET /api/facturas/{numeroF}/comprobantes ───────────────────
+            app.MapGet("/api/facturas/{numeroF}/comprobantes", (HttpContext ctx, string numeroF) =>
+            {
+                if (!TokenService.PuedeVerCxC(ctx.User)) return Results.Forbid();
+                using var c = Db.Conn();
+                var cmd = c.CreateCommand();
+                cmd.CommandText = @"
+                    SELECT cf.Id, cf.MetodoPago, cf.Monto, cf.Referencia,
+                           cf.IdCuentaReceptora, cf.Fecha, cf.Observaciones,
+                           COALESCE(cr.Nombre,'') as CuentaNombre
+                    FROM ComprobantesFactura cf
+                    LEFT JOIN CuentasReceptoras cr ON cr.Id = cf.IdCuentaReceptora
+                    WHERE cf.NumeroF = $nf
+                    ORDER BY cf.Fecha";
+                cmd.Parameters.AddWithValue("$nf", numeroF);
+                var list = new List<object>();
+                using var r = cmd.ExecuteReader();
+                while (r.Read())
+                    list.Add(new
+                    {
+                        id        = r.GetInt32(0),
+                        metodo    = Db.S(r, 1),
+                        monto     = Db.D(r, 2),
+                        referencia= Db.S(r, 3),
+                        idCuenta  = r.GetInt32(4),
+                        fecha     = Db.S(r, 5),
+                        obs       = Db.S(r, 6),
+                        cuenta    = Db.S(r, 7)
+                    });
+                return Results.Ok(list);
+            }).RequireAuthorization();
         }
     }
 

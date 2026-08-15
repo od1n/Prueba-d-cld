@@ -115,6 +115,8 @@ async def extraer(
             datos = extractor.extraer_factura_venta(contenido, backend_override=backend)
         elif tipo == "factura":
             datos = extractor.extraer_factura(contenido, backend_override=backend)
+        elif tipo == "comprobante_pago":
+            datos = extractor.extraer_comprobante_pago(contenido, backend_override=backend)
         else:
             datos = extractor.extraer_planilla(contenido, backend_override=backend)
         return JSONResponse({"ok": True, "datos": datos})

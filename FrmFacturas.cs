@@ -393,6 +393,49 @@ CargarDatos();
                         dlg.Lineas,
                         esNueva: true);
 
+                    // Guardar comprobantes de pago y crear abonos
+                    if (dlg.Comprobantes.Count > 0)
+                    {
+                        string carpeta = System.IO.Path.Combine(
+                            SecurityService.CarpetaDatos, "comprobantes", "facturas",
+                            DateTime.Today.ToString("yyyy-MM"));
+                        System.IO.Directory.CreateDirectory(carpeta);
+
+                        foreach (var cf in dlg.Comprobantes)
+                        {
+                            cf.NumeroF = dlg.Resultado.NumeroF;
+                            cf.Fecha   = dlg.Resultado.Fecha;
+
+                            // Copiar imagen al almacén si existe
+                            if (!string.IsNullOrWhiteSpace(cf.RutaImagen) &&
+                                System.IO.File.Exists(cf.RutaImagen))
+                            {
+                                string ext = System.IO.Path.GetExtension(cf.RutaImagen);
+                                string destino = System.IO.Path.Combine(carpeta,
+                                    $"{cf.NumeroF}_{cf.MetodoPago}_{DateTime.Now:HHmmss}{ext}");
+                                System.IO.File.Copy(cf.RutaImagen, destino, true);
+                                cf.RutaImagen = destino;
+                            }
+
+                            DatabaseService.InsertarComprobanteFactura(cf);
+
+                            // Crear abono vinculado
+                            DatabaseService.InsertarAbonoExtendido(new Abono
+                            {
+                                NumeroF           = cf.NumeroF,
+                                Fecha             = cf.Fecha,
+                                Monto             = cf.Monto,
+                                Cliente           = dlg.Resultado.Codigo,
+                                MetodoPago        = cf.MetodoPago,
+                                Referencia        = cf.Referencia,
+                                RutaComprobante   = cf.RutaImagen ?? "",
+                                IdCuentaReceptora = cf.IdCuentaReceptora,
+                                Observaciones     = $"Comprobante factura {cf.NumeroF}",
+                                Estado            = "Confirmado"
+                            });
+                        }
+                    }
+
                     // Auto-crear CxC si la factura es a crédito
                     if (dlg.Resultado.FormaDePago == "Credito")
                     {
@@ -654,6 +697,12 @@ CargarDatos();
         private decimal        _ivaCalculado = 0m;
         private List<Cliente>  _clientesFactura = new List<Cliente>();
 
+        // ── Comprobantes de pago ────────────────────────────────────────
+        private Button         _btnComprobantes;
+        private List<ComprobanteFactura> _comprobantesTemp = new List<ComprobanteFactura>();
+        private List<string>   _rutasImagenOrigen = new List<string>(); // rutas originales del file dialog
+        public  List<ComprobanteFactura> Comprobantes => _comprobantesTemp;
+
         // Grid de lineas
         private DataGridView   dgvLineas;
         private Label          lblTotalLineas;
@@ -797,7 +846,38 @@ CargarDatos();
             };
             cmbFormaPago.Items.AddRange(new object[] { "Contado", "Credito", "Cheque", "Transferencia", "Mixto" });
             cmbFormaPago.SelectedIndex = 0;
-            panelIzq.Controls.Add(cmbFormaPago); y += 32;
+            panelIzq.Controls.Add(cmbFormaPago);
+
+            // Botón para gestionar comprobantes de pago (visible si FormaPago != Contado)
+            _btnComprobantes = new Button
+            {
+                Text = "📎 Comprobantes", Size = new Size(120, 24),
+                Location = new Point(130, y + 26),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(30, 120, 180),
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 8f, FontStyle.Bold),
+                Cursor = Cursors.Hand,
+                Visible = false
+            };
+            _btnComprobantes.FlatAppearance.BorderSize = 0;
+            new ToolTip().SetToolTip(_btnComprobantes,
+                "Adjuntar comprobantes de pago (transferencias, Zelle, pago móvil)");
+            _btnComprobantes.Click += (s, e) => AbrirComprobantes();
+            panelIzq.Controls.Add(_btnComprobantes);
+
+            cmbFormaPago.SelectedIndexChanged += (s, e) =>
+            {
+                bool esPago = cmbFormaPago.SelectedItem?.ToString() != "Contado";
+                if (_btnComprobantes == null) return;
+                // En modo lectura: mostrar solo si hay comprobantes
+                // En modo edición: mostrar si forma de pago no es contado
+                _btnComprobantes.Visible = _soloLectura
+                    ? (_comprobantesTemp.Count > 0)
+                    : esPago;
+            };
+
+            y += 32;
 
             Lbl("Descuento (%):", y);   numDescuento = Num(y, 100);       y += 32;
             _ivaPctSistema = decimal.TryParse(
@@ -1061,6 +1141,14 @@ CargarDatos();
                 txtDestinoExp.Text         = f.DestinoExportacion ?? "";
                 lblDestinoExp.Visible      = f.EsExportacion;
                 txtDestinoExp.Visible      = f.EsExportacion;
+
+                // Cargar comprobantes existentes
+                try
+                {
+                    _comprobantesTemp = DatabaseService.ObtenerComprobantesFactura(f.NumeroF);
+                    ActualizarBotonComprobantes();
+                }
+                catch { /* tabla puede no existir aún */ }
             }
 
             // Cargar lineas existentes
@@ -1354,8 +1442,16 @@ CargarDatos();
                 $"  Descuento ({numDescuento.Value}%): -{descMonto:C2}\n" +
                 $"  IVA ({pctIva}%):      {_ivaCalculado:C2}\n" +
                 $"  ─────────────────\n" +
-                $"  TOTAL:          {numTotal.Value:C2}\n\n" +
-                $"¿Confirmar y guardar?";
+                $"  TOTAL:          {numTotal.Value:C2}\n";
+            if (_comprobantesTemp.Count > 0)
+            {
+                decimal totalComp = _comprobantesTemp.Sum(c => c.Monto);
+                resumen += $"\n── Comprobantes ({_comprobantesTemp.Count}) ──\n";
+                foreach (var c in _comprobantesTemp)
+                    resumen += $"  {c.MetodoPago}  {c.Monto:C2}  Ref: {c.Referencia}\n";
+                resumen += $"  Total comprobantes: {totalComp:C2}\n";
+            }
+            resumen += "\n¿Confirmar y guardar?";
 
             var confirmar = MessageBox.Show(this, resumen,
                 "Confirmar factura", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
@@ -1547,6 +1643,373 @@ CargarDatos();
             // Seleccionar el nuevo cliente en el combo
             if (!string.IsNullOrWhiteSpace(nuevoCodigo))
                 cmbCliente.SelectedValue = nuevoCodigo;
+        }
+
+        // ── Helpers comprobantes ──────────────────────────────────────────
+
+        private void ActualizarBotonComprobantes()
+        {
+            if (_btnComprobantes == null) return;
+            _btnComprobantes.Text = _comprobantesTemp.Count > 0
+                ? $"📎 Comprobantes ({_comprobantesTemp.Count})"
+                : "📎 Comprobantes";
+            _btnComprobantes.BackColor = _comprobantesTemp.Count > 0
+                ? Color.FromArgb(16, 163, 127)   // verde = tiene datos
+                : Color.FromArgb(30, 120, 180);  // azul = vacío
+
+            // Actualizar visibilidad también (cubre caso soloLectura
+            // donde comprobantes se cargan después del evento FormaPago)
+            bool esPago = cmbFormaPago.SelectedItem?.ToString() != "Contado";
+            _btnComprobantes.Visible = _soloLectura
+                ? (_comprobantesTemp.Count > 0)
+                : esPago;
+        }
+
+        private void AbrirComprobantes()
+        {
+            using var dlg = new DlgComprobantesFactura(_comprobantesTemp, _rutasImagenOrigen, _soloLectura);
+            if (dlg.ShowDialog(this) == DialogResult.OK)
+            {
+                _comprobantesTemp  = dlg.ComprobantesResultado;
+                _rutasImagenOrigen = dlg.RutasImagenResultado;
+                ActualizarBotonComprobantes();
+            }
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    //  DIALOGO GESTIONAR COMPROBANTES DE FACTURA
+    // ══════════════════════════════════════════════════════════════════════════
+    public class DlgComprobantesFactura : Form
+    {
+        public List<ComprobanteFactura> ComprobantesResultado { get; private set; } = new();
+        public List<string> RutasImagenResultado { get; private set; } = new();
+
+        private DataGridView dgv;
+        private List<ComprobanteFactura> _items;
+        private List<string> _rutas;
+        private readonly bool _soloLectura;
+
+        public DlgComprobantesFactura(
+            List<ComprobanteFactura> actuales,
+            List<string> rutasOrigen,
+            bool soloLectura)
+        {
+            _soloLectura = soloLectura;
+            _items = actuales.Select(c => new ComprobanteFactura
+            {
+                Id = c.Id, NumeroF = c.NumeroF, MetodoPago = c.MetodoPago,
+                Monto = c.Monto, Referencia = c.Referencia, RutaImagen = c.RutaImagen,
+                IdCuentaReceptora = c.IdCuentaReceptora, Fecha = c.Fecha,
+                Observaciones = c.Observaciones
+            }).ToList();
+            _rutas = new List<string>(rutasOrigen);
+
+            Text = "Comprobantes de Pago";
+            Size = new Size(700, 420);
+            StartPosition = FormStartPosition.CenterParent;
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            MaximizeBox = MinimizeBox = false;
+            BackColor = Color.FromArgb(240, 244, 250);
+
+            // ── Banner ──
+            var banner = new Panel { Dock = DockStyle.Top, Height = 40,
+                BackColor = Color.FromArgb(30, 120, 180) };
+            banner.Controls.Add(new Label
+            {
+                Text = "Comprobantes de Pago", ForeColor = Color.White,
+                Font = new Font("Segoe UI", 10f, FontStyle.Bold),
+                AutoSize = true, Location = new Point(12, 10)
+            });
+
+            // ── Grid ──
+            dgv = new DataGridView
+            {
+                Location = new Point(8, 50), Size = new Size(668, 240),
+                ReadOnly = true, AllowUserToAddRows = false,
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
+                BackgroundColor = Color.White, BorderStyle = BorderStyle.FixedSingle,
+                RowHeadersVisible = false, Font = new Font("Segoe UI", 9f),
+                RowTemplate = { Height = 28 }
+            };
+            dgv.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(30, 120, 180);
+            dgv.ColumnHeadersDefaultCellStyle.ForeColor = Color.White;
+            dgv.ColumnHeadersDefaultCellStyle.Font = new Font("Segoe UI", 9f, FontStyle.Bold);
+            dgv.EnableHeadersVisualStyles = false;
+
+            dgv.Columns.Add(new DataGridViewTextBoxColumn { Name = "Metodo", HeaderText = "Método", FillWeight = 20 });
+            dgv.Columns.Add(new DataGridViewTextBoxColumn { Name = "Monto", HeaderText = "Monto", FillWeight = 15 });
+            dgv.Columns.Add(new DataGridViewTextBoxColumn { Name = "Referencia", HeaderText = "Referencia", FillWeight = 20 });
+            dgv.Columns.Add(new DataGridViewTextBoxColumn { Name = "Cuenta", HeaderText = "Cuenta", FillWeight = 25 });
+            dgv.Columns.Add(new DataGridViewTextBoxColumn { Name = "Imagen", HeaderText = "Comprobante", FillWeight = 15 });
+
+            CargarGrid();
+
+            dgv.CellDoubleClick += (s, e) =>
+            {
+                if (e.RowIndex < 0 || e.RowIndex >= _items.Count) return;
+                var cf = _items[e.RowIndex];
+                string ruta = e.RowIndex < _rutas.Count ? _rutas[e.RowIndex] : cf.RutaImagen;
+                if (!string.IsNullOrWhiteSpace(ruta) && System.IO.File.Exists(ruta))
+                {
+                    try { System.Diagnostics.Process.Start(
+                        new System.Diagnostics.ProcessStartInfo(ruta) { UseShellExecute = true }); }
+                    catch { }
+                }
+            };
+
+            // ── Botones ──
+            int by = 300;
+            if (!soloLectura)
+            {
+                var btnAgregar = new Button
+                {
+                    Text = "+ Agregar", Location = new Point(8, by), Size = new Size(120, 30),
+                    BackColor = Color.FromArgb(40, 140, 80), ForeColor = Color.White,
+                    FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9f, FontStyle.Bold),
+                    Cursor = Cursors.Hand
+                };
+                btnAgregar.FlatAppearance.BorderSize = 0;
+                btnAgregar.Click += (s, e) => AgregarComprobante();
+                Controls.Add(btnAgregar);
+
+                var btnQuitar = new Button
+                {
+                    Text = "Quitar", Location = new Point(136, by), Size = new Size(90, 30),
+                    BackColor = Color.FromArgb(180, 40, 40), ForeColor = Color.White,
+                    FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9f, FontStyle.Bold),
+                    Cursor = Cursors.Hand
+                };
+                btnQuitar.FlatAppearance.BorderSize = 0;
+                btnQuitar.Click += (s, e) =>
+                {
+                    if (dgv.CurrentRow == null) return;
+                    int idx = dgv.CurrentRow.Index;
+                    if (idx >= 0 && idx < _items.Count)
+                    {
+                        _items.RemoveAt(idx);
+                        if (idx < _rutas.Count) _rutas.RemoveAt(idx);
+                        CargarGrid();
+                    }
+                };
+                Controls.Add(btnQuitar);
+            }
+
+            // ── Footer ──
+            var btnOk = new Button
+            {
+                Text = soloLectura ? "Cerrar" : "Aceptar",
+                Location = new Point(460, 340), Size = new Size(100, 32),
+                BackColor = Color.FromArgb(30, 130, 70), ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9.5f, FontStyle.Bold)
+            };
+            btnOk.FlatAppearance.BorderSize = 0;
+            btnOk.Click += (s, e) =>
+            {
+                ComprobantesResultado = _items;
+                RutasImagenResultado = _rutas;
+                DialogResult = soloLectura ? DialogResult.Cancel : DialogResult.OK;
+                Close();
+            };
+
+            var btnCancelar = new Button
+            {
+                Text = "Cancelar", DialogResult = DialogResult.Cancel,
+                Location = new Point(570, 340), Size = new Size(100, 32),
+                FlatStyle = FlatStyle.Flat, Visible = !soloLectura
+            };
+
+            Controls.AddRange(new Control[] { banner, dgv, btnOk, btnCancelar });
+
+            // Total label
+            var lblTotal = new Label
+            {
+                Location = new Point(240, by + 6), AutoSize = true,
+                Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(30, 80, 150)
+            };
+            void RefrescarTotal() => lblTotal.Text =
+                $"Total: {_items.Sum(c => c.Monto):C2}  ({_items.Count} comprobante{(_items.Count != 1 ? "s" : "")})";
+            RefrescarTotal();
+            dgv.RowsAdded += (s, e) => RefrescarTotal();
+            dgv.RowsRemoved += (s, e) => RefrescarTotal();
+            Controls.Add(lblTotal);
+        }
+
+        private void CargarGrid()
+        {
+            var cuentas = DatabaseService.ObtenerCuentasReceptoras(soloActivas: false);
+            dgv.Rows.Clear();
+            foreach (var c in _items)
+            {
+                string nombreCta = cuentas.FirstOrDefault(ct => ct.Id == c.IdCuentaReceptora)?.Nombre ?? "";
+                bool tieneImg = !string.IsNullOrWhiteSpace(c.RutaImagen);
+                dgv.Rows.Add(c.MetodoPago, c.Monto.ToString("C2"), c.Referencia,
+                    nombreCta, tieneImg ? "Ver" : "—");
+            }
+        }
+
+        private void AgregarComprobante()
+        {
+            var cuentas = DatabaseService.ObtenerCuentasReceptoras();
+
+            using var dlg = new Form
+            {
+                Text = "Nuevo Comprobante",
+                Size = new Size(460, 440),
+                StartPosition = FormStartPosition.CenterParent,
+                FormBorderStyle = FormBorderStyle.FixedDialog,
+                MaximizeBox = false, MinimizeBox = false,
+                BackColor = Color.FromArgb(240, 244, 250),
+                Font = new Font("Segoe UI", 9.5f)
+            };
+
+            int y = 15;
+            Label MkL(string t)
+            {
+                var l = new Label { Text = t, AutoSize = true,
+                    Location = new Point(12, y + 3),
+                    Font = new Font("Segoe UI", 9f, FontStyle.Bold) };
+                dlg.Controls.Add(l);
+                return l;
+            }
+
+            MkL("Método:");
+            var cmbMetodo = new ComboBox
+            {
+                Location = new Point(140, y), Size = new Size(280, 24),
+                DropDownStyle = ComboBoxStyle.DropDownList
+            };
+            cmbMetodo.Items.AddRange(new object[] {
+                "Zelle", "Transferencia", "PagoMovil", "Efectivo",
+                "Cheque", "Deposito", "Otro" });
+            cmbMetodo.SelectedIndex = 0;
+            dlg.Controls.Add(cmbMetodo); y += 34;
+
+            MkL("Monto:");
+            var numMonto = new NumericUpDown
+            {
+                Location = new Point(140, y), Size = new Size(280, 24),
+                Maximum = 9999999, DecimalPlaces = 2
+            };
+            dlg.Controls.Add(numMonto); y += 34;
+
+            MkL("Referencia:");
+            var txtRef = new TextBox { Location = new Point(140, y), Size = new Size(280, 24) };
+            dlg.Controls.Add(txtRef); y += 34;
+
+            MkL("Cuenta:");
+            var cmbCuenta = new ComboBox
+            {
+                Location = new Point(140, y), Size = new Size(280, 24),
+                DropDownStyle = ComboBoxStyle.DropDownList
+            };
+            cmbCuenta.Items.Add("(ninguna)");
+            foreach (var ct in cuentas) cmbCuenta.Items.Add(ct.Nombre);
+            cmbCuenta.SelectedIndex = 0;
+            dlg.Controls.Add(cmbCuenta); y += 34;
+
+            MkL("Observaciones:");
+            var txtObs = new TextBox
+            {
+                Location = new Point(140, y), Size = new Size(280, 40), Multiline = true
+            };
+            dlg.Controls.Add(txtObs); y += 50;
+
+            MkL("Comprobante:");
+            string rutaImagen = "";
+            var pic = new PictureBox
+            {
+                Location = new Point(140, y), Size = new Size(160, 100),
+                SizeMode = PictureBoxSizeMode.Zoom,
+                BorderStyle = BorderStyle.FixedSingle,
+                BackColor = Color.White
+            };
+            var btnImg = new Button
+            {
+                Text = "Seleccionar...", Location = new Point(310, y),
+                Size = new Size(110, 28),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(60, 130, 190),
+                ForeColor = Color.White
+            };
+            btnImg.FlatAppearance.BorderSize = 0;
+            btnImg.Click += (s, e) =>
+            {
+                using var ofd = new OpenFileDialog
+                {
+                    Title = "Seleccionar comprobante de pago",
+                    Filter = "Imágenes|*.jpg;*.jpeg;*.png;*.bmp;*.gif|Todos|*.*"
+                };
+                if (ofd.ShowDialog() == DialogResult.OK)
+                {
+                    rutaImagen = ofd.FileName;
+                    try { pic.Image = Image.FromFile(rutaImagen); }
+                    catch { pic.Image = null; }
+                }
+            };
+            dlg.Controls.AddRange(new Control[] { pic, btnImg }); y += 110;
+
+            var btnGuardar = new Button
+            {
+                Text = "Agregar", Location = new Point(140, y), Size = new Size(120, 32),
+                BackColor = Color.FromArgb(30, 130, 70), ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9.5f, FontStyle.Bold)
+            };
+            btnGuardar.FlatAppearance.BorderSize = 0;
+            var btnCancel = new Button
+            {
+                Text = "Cancelar", DialogResult = DialogResult.Cancel,
+                Location = new Point(270, y), Size = new Size(100, 32),
+                FlatStyle = FlatStyle.Flat
+            };
+
+            btnGuardar.Click += (s, e) =>
+            {
+                if (numMonto.Value <= 0)
+                {
+                    MessageBox.Show("El monto debe ser mayor a cero.", "Validación",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+                string metodo = cmbMetodo.SelectedItem?.ToString() ?? "Efectivo";
+                if (metodo != "Efectivo" && string.IsNullOrWhiteSpace(rutaImagen))
+                {
+                    var resp = MessageBox.Show(
+                        "No ha adjuntado comprobante. Para pagos electrónicos " +
+                        "se recomienda adjuntar imagen.\n\n¿Continuar sin comprobante?",
+                        "Sin comprobante", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                    if (resp != DialogResult.Yes) return;
+                }
+
+                int idCuenta = 0;
+                if (cmbCuenta.SelectedIndex > 0)
+                    idCuenta = cuentas[cmbCuenta.SelectedIndex - 1].Id;
+
+                dlg.Tag = new ComprobanteFactura
+                {
+                    MetodoPago = metodo,
+                    Monto = numMonto.Value,
+                    Referencia = txtRef.Text.Trim(),
+                    IdCuentaReceptora = idCuenta,
+                    Fecha = DateTime.Today,
+                    Observaciones = txtObs.Text.Trim(),
+                    RutaImagen = rutaImagen
+                };
+                dlg.DialogResult = DialogResult.OK;
+            };
+
+            dlg.Controls.AddRange(new Control[] { btnGuardar, btnCancel });
+            dlg.AcceptButton = btnGuardar;
+            dlg.CancelButton = btnCancel;
+
+            if (dlg.ShowDialog(this) == DialogResult.OK && dlg.Tag is ComprobanteFactura cf)
+            {
+                _items.Add(cf);
+                _rutas.Add(cf.RutaImagen ?? "");
+                CargarGrid();
+            }
         }
     }
 

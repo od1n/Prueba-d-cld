@@ -8,6 +8,7 @@ let itemsFactura = [];
 let timerBusqFact = null;
 let timerBusqCli  = null;
 let timerBusqArt  = null;
+let comprobantesFactura = []; // {metodo, monto, referencia, idCuenta, nombreCuenta, obs, archivo}
 
 // -- Render principal -----------------------------------------------------
 async function render() {
@@ -262,6 +263,7 @@ async function cargarIvaConfig() {
 
 function abrirNueva() {
     itemsFactura = [];
+    comprobantesFactura = [];
     const hoy = new Date().toISOString().slice(0,10);
     const drawer = document.getElementById('drawerForm');
     drawer.innerHTML = `
@@ -330,6 +332,13 @@ function abrirNueva() {
       <label class="form-label">Observaciones</label>
       <textarea id="fObs" class="input-field" rows="2"></textarea>
     </div>
+    <div id="seccionComprobantes" style="display:none;margin-bottom:16px">
+      <div class="section-header" style="display:flex;justify-content:space-between;align-items:center">
+        <span>Comprobantes de Pago</span>
+        <button class="btn btn-sm btn-primary" onclick="abrirFormComprobante()" style="padding:2px 10px;font-size:12px">+ Agregar</button>
+      </div>
+      <div id="listaComprobantes" class="text-dim text-sm" style="padding:4px 0">Sin comprobantes.</div>
+    </div>
     <div style="display:flex;gap:8px;flex-direction:column">
       <button class="btn btn-primary btn-full" id="btnGuardarFact" onclick="guardarFactura()">Guardar factura</button>
       <button class="btn btn-ghost btn-full" onclick="closeModal('modalForm')">Cancelar</button>
@@ -350,6 +359,9 @@ function onFormaPagoChange() {
         const inp = document.getElementById('fDiasCredito');
         if (inp) inp.value = dias;
     } else { wrap.style.display = 'none'; }
+    // Mostrar/ocultar sección de comprobantes
+    const sec = document.getElementById('seccionComprobantes');
+    if (sec) sec.style.display = (fp !== 'Contado') ? 'block' : 'none';
 }
 
 // -- Autocomplete clientes ------------------------------------------------
@@ -604,12 +616,145 @@ async function confirmarGuardarFactura() {
     if (btn) { btn.disabled=true; btn.textContent='Guardando...'; }
     try {
         const resp = await apiPost('/api/facturas', body);
+        // Subir comprobantes si los hay
+        if (comprobantesFactura.length > 0 && resp.numeroF) {
+            await subirComprobantesFactura(resp.numeroF, body.codigoCliente);
+        }
         closeModal('modalForm');
         await cargarFacturas();
-        alert('Factura '+(resp.numeroF||'')+' creada. Total: $'+(resp.total||0).toFixed(2));
+        const nComp = comprobantesFactura.length;
+        alert('Factura '+(resp.numeroF||'')+' creada. Total: $'+(resp.total||0).toFixed(2)
+            + (nComp ? `\n${nComp} comprobante(s) registrado(s).` : ''));
     } catch(err) {
         if (btn) { btn.disabled=false; btn.textContent='Guardar factura'; }
         alert('Error: '+err.message);
+    }
+}
+
+// -- Comprobantes de pago (factura) ----------------------------------------
+let _cuentasCache = null;
+async function cargarCuentasComprobante() {
+    if (_cuentasCache) return _cuentasCache;
+    try { _cuentasCache = await apiGet('/api/abonos/cuentas') || []; }
+    catch { _cuentasCache = []; }
+    return _cuentasCache;
+}
+
+function renderListaComprobantes() {
+    const div = document.getElementById('listaComprobantes');
+    if (!div) return;
+    if (!comprobantesFactura.length) {
+        div.innerHTML = `<div class="text-dim text-sm" style="padding:4px 0">Sin comprobantes.</div>`;
+        return;
+    }
+    div.innerHTML = comprobantesFactura.map((c,i) => `
+        <div class="card" style="padding:8px 12px;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <strong>${esh(c.metodo)}</strong> — ${formatUSD(c.monto)}
+            ${c.referencia ? `<span class="text-dim"> Ref: ${esh(c.referencia)}</span>` : ''}
+            ${c.nombreCuenta ? `<br><span class="text-dim text-sm">${esh(c.nombreCuenta)}</span>` : ''}
+          </div>
+          <div style="display:flex;align-items:center;gap:6px">
+            ${c.archivo ? '<span style="color:var(--verde)">📎</span>' : ''}
+            <button style="background:none;border:none;color:var(--rojo);cursor:pointer;font-size:14pt;padding:2px 6px"
+              onclick="quitarComprobante(${i})">&#10005;</button>
+          </div>
+        </div>`).join('');
+}
+
+function quitarComprobante(idx) {
+    comprobantesFactura.splice(idx, 1);
+    renderListaComprobantes();
+}
+
+async function abrirFormComprobante() {
+    const cuentas = await cargarCuentasComprobante();
+    const opsCuenta = cuentas.map(c => `<option value="${c.id}">${esh(c.nombre)}</option>`).join('');
+    const modalId = 'modalComprobante';
+    let ex = document.getElementById(modalId);
+    if (ex) ex.remove();
+    const ov = document.createElement('div');
+    ov.id = modalId;
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px';
+    ov.innerHTML = `
+    <div style="background:var(--fondo,#1e1e2e);border:1px solid var(--borde,#333);border-radius:10px;padding:24px;width:400px;max-width:95vw">
+      <div style="font-size:16px;font-weight:700;margin-bottom:16px">Nuevo Comprobante</div>
+      <div class="form-group mb-8">
+        <label class="form-label">Método de pago</label>
+        <select id="cpMetodo" class="input-field">
+          <option>Zelle</option><option>Transferencia</option><option>PagoMovil</option>
+          <option>Efectivo</option><option>Cheque</option><option>Deposito</option><option>Otro</option>
+        </select>
+      </div>
+      <div class="form-grid-2 mb-8">
+        <div class="form-group">
+          <label class="form-label">Monto</label>
+          <input id="cpMonto" type="number" class="input-field" min="0.01" step="0.01" placeholder="0.00">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Referencia</label>
+          <input id="cpRef" class="input-field" placeholder="Nro. operación">
+        </div>
+      </div>
+      <div class="form-group mb-8">
+        <label class="form-label">Cuenta receptora</label>
+        <select id="cpCuenta" class="input-field">
+          <option value="0">(ninguna)</option>${opsCuenta}
+        </select>
+      </div>
+      <div class="form-group mb-8">
+        <label class="form-label">Observaciones</label>
+        <input id="cpObs" class="input-field" placeholder="Opcional">
+      </div>
+      <div class="form-group mb-12">
+        <label class="form-label">Imagen del comprobante</label>
+        <input id="cpImagen" type="file" accept="image/*" class="input-field" style="padding:6px">
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost" style="flex:1" onclick="document.getElementById('${modalId}').remove()">Cancelar</button>
+        <button class="btn btn-primary" style="flex:1" onclick="confirmarComprobante()">Agregar</button>
+      </div>
+    </div>`;
+    document.body.appendChild(ov);
+    ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+}
+
+function confirmarComprobante() {
+    const monto = parseFloat(document.getElementById('cpMonto')?.value) || 0;
+    if (monto <= 0) { alert('El monto debe ser mayor a cero.'); return; }
+    const metodo = document.getElementById('cpMetodo')?.value || 'Efectivo';
+    const ref = document.getElementById('cpRef')?.value?.trim() || '';
+    const ctaSel = document.getElementById('cpCuenta');
+    const idCuenta = parseInt(ctaSel?.value) || 0;
+    const nombreCuenta = ctaSel?.selectedIndex > 0 ? ctaSel.options[ctaSel.selectedIndex].text : '';
+    const obs = document.getElementById('cpObs')?.value?.trim() || '';
+    const fileInput = document.getElementById('cpImagen');
+    const archivo = fileInput?.files?.[0] || null;
+
+    if (metodo !== 'Efectivo' && !archivo) {
+        if (!confirm('No adjuntó comprobante. Para pagos electrónicos se recomienda. ¿Continuar?')) return;
+    }
+
+    comprobantesFactura.push({ metodo, monto, referencia: ref, idCuenta, nombreCuenta, obs, archivo });
+    document.getElementById('modalComprobante')?.remove();
+    renderListaComprobantes();
+}
+
+async function subirComprobantesFactura(numeroF, codigoCliente) {
+    for (const c of comprobantesFactura) {
+        const fd = new FormData();
+        fd.append('metodoPago', c.metodo);
+        fd.append('monto', c.monto.toString());
+        fd.append('referencia', c.referencia);
+        fd.append('idCuentaReceptora', c.idCuenta.toString());
+        fd.append('observaciones', c.obs);
+        fd.append('cliente', codigoCliente);
+        if (c.archivo) fd.append('imagen', c.archivo);
+        try {
+            await fetch(`/api/facturas/${encodeURIComponent(numeroF)}/comprobantes`, {
+                method: 'POST', body: fd, credentials: 'include'
+            });
+        } catch (err) { console.error('Error subiendo comprobante:', err); }
     }
 }
 
