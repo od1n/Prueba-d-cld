@@ -149,6 +149,13 @@ builder.Services.AddRateLimiter(options =>
         o.Window      = TimeSpan.FromMinutes(5);  //   cada 5 minutos
         o.QueueLimit  = 0;
     });
+    // WhatsApp bot — PIN validation (anti brute-force)
+    options.AddFixedWindowLimiter("wa-pin", o =>
+    {
+        o.PermitLimit = 15;                      // 15 intentos
+        o.Window      = TimeSpan.FromMinutes(1); //   por minuto
+        o.QueueLimit  = 0;
+    });
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
 });
 
@@ -318,6 +325,7 @@ app.MapNominaEndpoints();
 app.MapConfigEndpoints();
 app.MapCamarasEndpoints();
 app.MapAbonosEndpoints();
+app.MapWhatsAppEndpoints();
 app.MapGet("/", ctx => { ctx.Response.Redirect("/index.html"); return Task.CompletedTask; });
 
 Console.WriteLine("[API] Portal móvil corriendo:");

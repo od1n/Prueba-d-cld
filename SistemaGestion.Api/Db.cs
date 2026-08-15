@@ -37,7 +37,8 @@ namespace SistemaGestion.Api
                     "ALTER TABLE Inventario ADD COLUMN Activo INTEGER NOT NULL DEFAULT 1",
                     "ALTER TABLE Clientes ADD COLUMN Email TEXT DEFAULT ''",
                     "ALTER TABLE Clientes ADD COLUMN Contacto TEXT DEFAULT ''",
-                    "ALTER TABLE DetallesFactura ADD COLUMN PrecioUnit REAL DEFAULT 0"
+                    "ALTER TABLE DetallesFactura ADD COLUMN PrecioUnit REAL DEFAULT 0",
+                    "ALTER TABLE Clientes ADD COLUMN PinBot TEXT DEFAULT ''"
                 };
                 foreach (var sql in fixes)
                 {
