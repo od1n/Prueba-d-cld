@@ -196,6 +196,7 @@ function renderTopbar(titulo) {
 }
 
 function renderNav(activa) {
+    const _rolNav = (Auth.getUser() || {}).rol || '';
     const items = [
         { id: 'dashboard',  icon: '◉',  label: 'Inicio',   href: '/pages/dashboard.html' },
         { id: 'inventario', icon: '▦',  label: 'Stock',    href: '/pages/inventario.html' },
@@ -209,10 +210,11 @@ function renderNav(activa) {
         { id: 'produccion', icon: '🏭', label: 'Producción', href: '/pages/digitalizador.html' },
         { id: 'camaras',    icon: '📷', label: 'Cámaras',    href: '/pages/camaras.html' },
         { id: 'abonos',     icon: '💳', label: 'Abonos',     href: '/pages/abonos.html' },
+        { id: 'contenido',  icon: '📣', label: 'Redes',      href: '/pages/contenido.html' },
     ];
     return `
     <nav class="bottom-nav" role="navigation" aria-label="Navegación principal">
-        ${items.map(i => `
+        ${items.filter(i => _rolNav !== 'Redes' || i.id === 'contenido').map(i => `
             <a href="${i.href}" class="nav-btn ${activa === i.id ? 'active' : ''}"
                ${activa === i.id ? 'aria-current="page"' : ''}>
                 <span class="icon" aria-hidden="true">${i.icon}</span>
@@ -252,3 +254,16 @@ document.addEventListener('keydown', e => {
 });
 
 // ── Kardex helpers ────────────────────────────────────────
+
+
+// ── Rol "Redes": confinar la navegacion al area de contenido ─────────────
+(function () {
+    try {
+        var u = Auth.getUser();
+        if (u && u.rol === 'Redes') {
+            var p = window.location.pathname;
+            var permitido = p.endsWith('/contenido.html') || p.endsWith('/index.html') || p === '/';
+            if (!permitido) window.location.replace('/pages/contenido.html');
+        }
+    } catch (e) {}
+})();

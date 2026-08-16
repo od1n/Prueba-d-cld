@@ -120,5 +120,19 @@ namespace SistemaGestion.Api.Auth
             ObtenerRol(u) is "Admin" or "Ventas";
         public static bool PuedeEscribirProduccion(ClaimsPrincipal u) =>
             ObtenerRol(u) is "Admin" or "Almacen";
+
+        // ── Estudio de Contenido (redes sociales) ─────────────────────────
+        /// <summary>Pertenece al area de Redes (o Admin): puede entrar al modulo.</summary>
+        public static bool PuedeAccederContenido(ClaimsPrincipal u) =>
+            ObtenerRol(u) is "Admin" or "Redes";
+        /// <summary>Rol dedicado "Redes": SOLO tiene acceso al area de contenido.</summary>
+        public static bool EsSoloRedes(ClaimsPrincipal u) =>
+            ObtenerRol(u) == "Redes";
+        /// <summary>Puede crear/editar ideas, posts y marcas (Admin o Redes).</summary>
+        public static bool EsRedes(ClaimsPrincipal u) =>
+            ObtenerRol(u) is "Admin" or "Redes";
+        /// <summary>Puede aprobar/publicar contenido (checkpoint humano, solo Admin).</summary>
+        public static bool PuedeAprobarContenido(ClaimsPrincipal u) =>
+            ObtenerRol(u) is "Admin";
     }
 }

@@ -263,6 +263,67 @@ app.Use(async (ctx, next) =>
 
 app.UseAuthorization();
 
+// ── Estudio de Contenido: acceso externo (tunel) y rol "Redes" ─────────────
+//  El tunel Cloudflare expone la API como SG_PUBLIC_HOST. Desde afuera SOLO
+//  se permite el area de contenido + login + el API del bot; el resto del ERP
+//  queda restringido a la red local. Ademas, el rol "Redes" solo puede usar
+//  el area de contenido, entre desde donde entre.
+var sgPublicHost = Environment.GetEnvironmentVariable("SG_PUBLIC_HOST"); // ej: api-sg.hato-pascher.com
+
+static bool RutaContenidoPermitida(string p) =>
+    p.StartsWith("/api/contenido", StringComparison.OrdinalIgnoreCase) ||
+    p.StartsWith("/api/wa",        StringComparison.OrdinalIgnoreCase) ||
+    p.StartsWith("/api/login",     StringComparison.OrdinalIgnoreCase) ||
+    p.StartsWith("/api/logout",    StringComparison.OrdinalIgnoreCase) ||
+    p.StartsWith("/api/me",        StringComparison.OrdinalIgnoreCase) ||
+    p.Contains("password",  StringComparison.OrdinalIgnoreCase) ||
+    p.Contains("contrasena", StringComparison.OrdinalIgnoreCase);
+
+app.Use(async (ctx, next) =>
+{
+    var path  = ctx.Request.Path.Value ?? "";
+    bool esApi = path.StartsWith("/api/", StringComparison.OrdinalIgnoreCase);
+    bool autenticado = ctx.User?.Identity?.IsAuthenticated == true;
+
+    // (1) Peticiones que entran por el host publico del tunel: solo area de
+    //     contenido + auth + bot. El resto del ERP nunca sale de la LAN.
+    bool esExterno = !string.IsNullOrEmpty(sgPublicHost)
+        && string.Equals(ctx.Request.Host.Host, sgPublicHost, StringComparison.OrdinalIgnoreCase);
+    if (esExterno && esApi && !RutaContenidoPermitida(path))
+    {
+        ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+        await ctx.Response.WriteAsJsonAsync(new { error = "Este modulo solo esta disponible en la red local." });
+        return;
+    }
+
+    // (2) El area de contenido: solo Admin o Redes (los hooks de n8n usan
+    //     X-Internal-Token y se validan dentro del endpoint).
+    if (path.StartsWith("/api/contenido", StringComparison.OrdinalIgnoreCase)
+        && !path.StartsWith("/api/contenido/hook", StringComparison.OrdinalIgnoreCase))
+    {
+        if (!autenticado)
+        { ctx.Response.StatusCode = StatusCodes.Status401Unauthorized; return; }
+        if (!SistemaGestion.Api.Auth.TokenService.PuedeAccederContenido(ctx.User))
+        {
+            ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await ctx.Response.WriteAsJsonAsync(new { error = "Acceso restringido al area de Redes." });
+            return;
+        }
+    }
+
+    // (3) Rol "Redes": solo puede tocar el area de contenido (y auth). Nada mas del API.
+    if (esApi && autenticado
+        && SistemaGestion.Api.Auth.TokenService.EsSoloRedes(ctx.User)
+        && !RutaContenidoPermitida(path))
+    {
+        ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+        await ctx.Response.WriteAsJsonAsync(new { error = "Tu usuario solo tiene acceso al area de Redes." });
+        return;
+    }
+
+    await next();
+});
+
 // Inicializar BD — misma ruta que el sistema de escritorio.
 // Prioridad:
 //   1) SG_DB_PATH  — ruta absoluta explícita (producción / red compartida)
@@ -292,6 +353,9 @@ try
 
     // Sembrar valores legales predeterminados si no existen.
     Db.EnsureConfigLegal();
+
+    // Asegurar tablas del módulo Estudio de Contenido (redes sociales).
+    DbContenido.EnsureContenido();
 
     // Limpieza inicial de sesiones expiradas hace > 24h.
     var limpiadas = SistemaGestion.Api.Auth.SesionesActivas.LimpiarExpiradas();
@@ -326,6 +390,7 @@ app.MapConfigEndpoints();
 app.MapCamarasEndpoints();
 app.MapAbonosEndpoints();
 app.MapWhatsAppEndpoints();
+app.MapContenidoEndpoints();
 app.MapGet("/", ctx => { ctx.Response.Redirect("/index.html"); return Task.CompletedTask; });
 
 Console.WriteLine("[API] Portal móvil corriendo:");
