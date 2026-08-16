@@ -153,6 +153,7 @@ namespace SistemaGestion.Api
 
                 SembrarMarcasBase(c);
                 SembrarConfigBase(c);
+                AsegurarGuiaMarcas(c);
             }
             catch (Exception ex)
             {
@@ -197,6 +198,43 @@ namespace SistemaGestion.Api
                 "Cercano, practico e industrial. Enfoque en servicio, calidad y disponibilidad para clientes locales en Venezuela. Espanol neutro.",
                 pilares,
                 "#plasticos #villadecura #aragua #industria #hatopascher");
+        }
+
+        // ── Identidad de marca CRITICA para los prompts ──────────────────────
+        //  Se inyecta en cada prompt de texto e imagen (campo GuiaEstilo).
+        //  Regla clave EHP Saddles: el producto es fuste de POLIETILENO (HDPE),
+        //  NUNCA de madera (la madera es la competencia).
+        private const string GUIA_EHP =
+            "PRODUCTO: fustes (arboles de montura) fabricados en POLIETILENO DE ALTA DENSIDAD (HDPE), " +
+            "plastico moldeado; livianos, resistentes y modernos. " +
+            "REGLA CRITICA para imagenes y videos: NUNCA mostrar fustes ni arboles de montura de MADERA " +
+            "(la madera es la competencia); mostrar siempre el fuste PLASTICO HDPE. " +
+            "Solo se permite madera si es explicitamente para CONTRASTAR plastico vs madera. " +
+            "Evitar taller de carpinteria/madera como protagonista; preferir el producto plastico limpio, " +
+            "uso ecuestre real o entorno de fabrica moderna. " +
+            "Tono artesanal-tecnico, confianza y durabilidad, orgullo hecho en Venezuela desde 1983.";
+
+        private const string GUIA_PLASTICOS =
+            "Fabrica de productos plasticos en Villa de Cura, Aragua. Estetica industrial, practica y cercana. " +
+            "Enfoque en calidad, servicio y disponibilidad para clientes locales. Espanol neutro.";
+
+        /// <summary>
+        /// Rellena GuiaEstilo de las marcas base SOLO si esta vacia (idempotente,
+        /// no pisa ediciones futuras del usuario). Auto-cura instalaciones ya sembradas.
+        /// </summary>
+        private static void AsegurarGuiaMarcas(SqliteConnection c)
+        {
+            void Fijar(string nombre, string guia)
+            {
+                using var cmd = c.CreateCommand();
+                cmd.CommandText = @"UPDATE Marcas SET GuiaEstilo = $g
+                    WHERE Nombre = $n AND (GuiaEstilo IS NULL OR TRIM(GuiaEstilo) = '')";
+                cmd.Parameters.AddWithValue("$g", guia);
+                cmd.Parameters.AddWithValue("$n", nombre);
+                cmd.ExecuteNonQuery();
+            }
+            Fijar("EHP Saddles", GUIA_EHP);
+            Fijar("El Hato Pascher Plasticos", GUIA_PLASTICOS);
         }
 
         /// <summary>Siembra la configuración de motores de IA (referencias, no claves).</summary>

@@ -629,6 +629,7 @@ namespace SistemaGestion.Api.Endpoints
                 var dir = Path.Combine(RutaContenidoDir(), req.PostId.ToString());
                 Directory.CreateDirectory(dir);
                 int orden = 0;
+                string? primerB64 = null, primerMime = null;
                 if (req.Assets != null)
                 {
                     using (var del = c.CreateCommand())
@@ -646,6 +647,7 @@ namespace SistemaGestion.Api.Endpoints
                         var full = Path.Combine(dir, file);
                         try { await File.WriteAllBytesAsync(full, Convert.FromBase64String(LimpiarBase64(a.DataBase64!))); }
                         catch { orden--; continue; }
+                        if (primerB64 == null && (a.Tipo ?? "imagen") == "imagen") { primerB64 = a.DataBase64; primerMime = a.Mime ?? "image/png"; }
                         using var cmd = c.CreateCommand();
                         cmd.CommandText = @"INSERT INTO PostAssets (PostId, Orden, Tipo, RutaArchivo, Origen, ModeloGen, PromptGen, EsFinal)
                                             VALUES ($p, $o, $t, $rt, 'ia', $mo, $pr, 1)";
@@ -659,6 +661,18 @@ namespace SistemaGestion.Api.Endpoints
                     }
                 }
 
+                // Verificacion de material: la marca es fuste PLASTICO; nunca madera.
+                string? advertencia = null;
+                if (primerB64 != null && !string.IsNullOrEmpty(GeminiKey()))
+                {
+                    try
+                    {
+                        if (await DetectaMaderaAsync(primerB64, primerMime ?? "image/png"))
+                            advertencia = "\u26a0 Verificacion IA: la imagen podria mostrar MADERA (la marca es fuste de plastico HDPE). Regenera o revisa antes de aprobar.";
+                    }
+                    catch { }
+                }
+
                 using (var upd = c.CreateCommand())
                 {
                     upd.CommandText = @"UPDATE Posts SET
@@ -666,13 +680,14 @@ namespace SistemaGestion.Api.Endpoints
                             CaptionEn = COALESCE($cen, CaptionEn),
                             Hashtags  = COALESCE($ht, Hashtags),
                             ModeloUsado = COALESCE($mo, ModeloUsado),
-                            Estado = 'borrador', MensajeError = NULL,
+                            Estado = 'borrador', MensajeError = $err,
                             FechaActualizacion = datetime('now','localtime')
                         WHERE Id=$id";
                     upd.Parameters.AddWithValue("$ces", (object?)req.Caption?.Es ?? DBNull.Value);
                     upd.Parameters.AddWithValue("$cen", (object?)req.Caption?.En ?? DBNull.Value);
                     upd.Parameters.AddWithValue("$ht", (object?)(req.Hashtags != null ? string.Join(" ", req.Hashtags) : null) ?? DBNull.Value);
                     upd.Parameters.AddWithValue("$mo", (object?)req.Modelo ?? DBNull.Value);
+                    upd.Parameters.AddWithValue("$err", (object?)advertencia ?? DBNull.Value);
                     upd.Parameters.AddWithValue("$id", req.PostId);
                     upd.ExecuteNonQuery();
                 }
@@ -795,6 +810,38 @@ namespace SistemaGestion.Api.Endpoints
                 return resp.IsSuccessStatusCode ? (true, null) : (false, $"n8n respondió {(int)resp.StatusCode}.");
             }
             catch (Exception ex) { return (false, ex.Message); }
+        }
+
+        private static string GeminiKey() =>
+            Environment.GetEnvironmentVariable("SG_GEMINI_KEY", EnvironmentVariableTarget.Machine)
+            ?? Environment.GetEnvironmentVariable("SG_GEMINI_KEY") ?? "";
+
+        // Gemini Vision: ¿la imagen muestra un fuste/arbol de montura de MADERA? true = si.
+        private static async Task<bool> DetectaMaderaAsync(string base64, string mime)
+        {
+            var key = GeminiKey();
+            if (string.IsNullOrEmpty(key)) return false;
+            var data = LimpiarBase64(base64);
+            var body = new
+            {
+                contents = new[] { new { parts = new object[] {
+                    new { text = "Analiza la imagen de una marca que fabrica fustes/arboles de montura de PLASTICO (polietileno). " +
+                                 "El arbol/fuste (estructura base de la silla) o el taller que se ve, ¿es principalmente de MADERA? " +
+                                 "Responde UNICAMENTE 'SI' o 'NO'. Ante la duda o si no hay madera clara, responde 'NO'." },
+                    new { inlineData = new { mimeType = string.IsNullOrEmpty(mime) ? "image/png" : mime, data } }
+                } } }
+            };
+            var url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent";
+            using var reqMsg = new HttpRequestMessage(HttpMethod.Post, url)
+            { Content = new StringContent(System.Text.Json.JsonSerializer.Serialize(body), System.Text.Encoding.UTF8, "application/json") };
+            reqMsg.Headers.Add("x-goog-api-key", key);
+            var resp = await _http.SendAsync(reqMsg);
+            if (!resp.IsSuccessStatusCode) return false;
+            var txt = await resp.Content.ReadAsStringAsync();
+            using var doc = System.Text.Json.JsonDocument.Parse(txt);
+            var ans = doc.RootElement.GetProperty("candidates")[0].GetProperty("content").GetProperty("parts")[0].GetProperty("text").GetString() ?? "";
+            ans = ans.Trim().ToUpperInvariant();
+            return ans.StartsWith("SI") || ans.StartsWith("YES");
         }
 
         private static object? LeerMarcaDict(int marcaId)
