@@ -1,0 +1,238 @@
+{
+  "name": "Contenido — Generar Post (IA)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "contenido-post",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "c1-0001-4000-8000-000000000001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "contenido-post"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const b = $input.first().json.body || $input.first().json;\nconst marca = b.marca || {};\nconst idea = b.idea || {};\nconst conIngles = (marca.idiomas || 'es').indexOf('en') >= 0;\nconst captionPrompt = `Eres community manager de \"${marca.nombre}\".\\n`\n  + `Voz/tono: ${marca.voz || ''}. Guia de estilo: ${marca.guiaEstilo || ''}.\\n`\n  + `Tema del post: \"${idea.titulo}\". ${idea.descripcion || ''}\\n`\n  + `Escribe el caption para Instagram/Facebook, atractivo y fiel a la marca.\\n`\n  + (conIngles ? 'Incluye tambien version en ingles.\\n' : '')\n  + `Sugiere de 8 a 15 hashtags (incluye si aplican: ${marca.hashtagsBase || ''}).\\n`\n  + `Responde SOLO JSON: {\"es\":\"...\",` + (conIngles ? ` \"en\":\"...\",` : ``) + ` \"hashtags\":[\"#...\"]}.`;\nconst imagePrompt = `${b.promptImagen || idea.titulo}. Estilo de marca: ${marca.guiaEstilo || ''}. Alta calidad, apto para redes, formato cuadrado 1:1.`;\nreturn [{ json: { captionPrompt, imagePrompt, jobId: b.jobId, postId: b.postId, callbackUrl: b.callbackUrl } }];"
+      },
+      "id": "c1-0001-4000-8000-000000000002",
+      "name": "Preparar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-goog-api-key",
+              "value": "TU_GEMINI_KEY_AQUI"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ contents:[{parts:[{text: $json.captionPrompt}]}], generationConfig:{ temperature:0.8, responseMimeType:'application/json' } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "c1-0001-4000-8000-000000000003",
+      "name": "Gemini Caption",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        640,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const prep = $('Preparar').first().json;\nlet text=''; try { text = $json.candidates[0].content.parts[0].text || ''; } catch(e){}\nlet cap={}; try { cap = JSON.parse(text); } catch(e){ const m=text.match(/\\{[\\s\\S]*\\}/); if(m){ try{cap=JSON.parse(m[0]);}catch(e2){} } }\nconst hashtags = Array.isArray(cap.hashtags) ? cap.hashtags : [];\nreturn [{ json: { es: cap.es||cap.ES||'', en: cap.en||cap.EN||'', hashtags, imagePrompt: prep.imagePrompt, jobId: prep.jobId, postId: prep.postId, callbackUrl: prep.callbackUrl } }];"
+      },
+      "id": "c1-0001-4000-8000-000000000004",
+      "name": "Parsear Caption",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        840,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-goog-api-key",
+              "value": "TU_GEMINI_KEY_AQUI"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ contents:[{parts:[{text: $('Parsear Caption').first().json.imagePrompt}]}], generationConfig:{ responseModalities:['IMAGE'] } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "c1-0001-4000-8000-000000000005",
+      "name": "Gemini Imagen",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1040,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const cap = $('Parsear Caption').first().json;\nlet dataBase64=''; let mime='image/png';\ntry {\n  const parts = $json.candidates[0].content.parts || [];\n  const img = parts.find(p => p.inlineData || p.inline_data);\n  if (img) { const d = img.inlineData || img.inline_data; dataBase64 = d.data; mime = d.mimeType || d.mime_type || 'image/png'; }\n} catch(e) {}\nconst assets = dataBase64 ? [{ orden:1, tipo:'imagen', dataBase64, mime, modelo:'gemini-2.5-flash-image', prompt: cap.imagePrompt }] : [];\nreturn [{ json: { _callbackUrl: cap.callbackUrl, jobId: cap.jobId, postId: cap.postId, estado: assets.length ? 'ok' : 'error', caption: { es: cap.es, en: cap.en }, hashtags: cap.hashtags, assets, modelo: 'gemini-2.5-flash', error: assets.length ? null : 'No se genero imagen' } }];"
+      },
+      "id": "c1-0001-4000-8000-000000000006",
+      "name": "Armar Callback",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json._callbackUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Internal-Token",
+              "value": "TU_SG_INTERNAL_TOKEN_AQUI"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jobId:$json.jobId, postId:$json.postId, estado:$json.estado, caption:$json.caption, hashtags:$json.hashtags, assets:$json.assets, modelo:$json.modelo, error:$json.error }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "c1-0001-4000-8000-000000000007",
+      "name": "Callback API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1440,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Preparar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar": {
+      "main": [
+        [
+          {
+            "node": "Gemini Caption",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Caption": {
+      "main": [
+        [
+          {
+            "node": "Parsear Caption",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parsear Caption": {
+      "main": [
+        [
+          {
+            "node": "Gemini Imagen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Imagen": {
+      "main": [
+        [
+          {
+            "node": "Armar Callback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Armar Callback": {
+      "main": [
+        [
+          {
+            "node": "Callback API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0
+}

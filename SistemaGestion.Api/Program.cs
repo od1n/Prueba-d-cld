@@ -303,7 +303,7 @@ app.Use(async (ctx, next) =>
     {
         if (!autenticado)
         { ctx.Response.StatusCode = StatusCodes.Status401Unauthorized; return; }
-        if (!SistemaGestion.Api.Auth.TokenService.PuedeAccederContenido(ctx.User))
+        if (!SistemaGestion.Api.Auth.TokenService.PuedeAccederContenido(ctx.User!))
         {
             ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
             await ctx.Response.WriteAsJsonAsync(new { error = "Acceso restringido al area de Redes." });
@@ -313,7 +313,7 @@ app.Use(async (ctx, next) =>
 
     // (3) Rol "Redes": solo puede tocar el area de contenido (y auth). Nada mas del API.
     if (esApi && autenticado
-        && SistemaGestion.Api.Auth.TokenService.EsSoloRedes(ctx.User)
+        && SistemaGestion.Api.Auth.TokenService.EsSoloRedes(ctx.User!)
         && !RutaContenidoPermitida(path))
     {
         ctx.Response.StatusCode = StatusCodes.Status403Forbidden;

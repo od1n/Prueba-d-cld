@@ -1,5 +1,9 @@
 using Microsoft.Data.Sqlite;
 using SistemaGestion.Api.Auth;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading.Tasks;
 
 // ══════════════════════════════════════════════════════════════════════════
 //  ContenidoEndpoints — Estudio de Contenido (redes sociales)
@@ -482,6 +486,214 @@ namespace SistemaGestion.Api.Endpoints
                     lista.Add(new { clave = Db.S(r, 0), valor = Db.S(r, 1), descripcion = Db.S(r, 2) });
                 return Results.Ok(lista);
             }).RequireAuthorization();
+
+            // ════════════════════ GENERACIÓN CON IA (n8n) ════════════════════
+
+            // Dispara WF1 (generar ideas). El resultado llega por /hook/ideas.
+            app.MapPost("/api/contenido/ideas/generar", async (HttpContext ctx, GenerarIdeasReq req) =>
+            {
+                if (!TokenService.EsRedes(ctx.User)) return Results.Forbid();
+                if (req.MarcaId <= 0) return Results.BadRequest(new { error = "MarcaId requerido." });
+
+                var marca = LeerMarcaDict(req.MarcaId);
+                if (marca is null) return Results.NotFound(new { error = "Marca no encontrada." });
+
+                var payload = new
+                {
+                    jobId = Guid.NewGuid().ToString("N"),
+                    tipo = "generar_ideas",
+                    marca,
+                    pilares = req.Pilares ?? Array.Empty<string>(),
+                    cantidad = req.Cantidad is > 0 and <= 15 ? req.Cantidad!.Value : 5,
+                    usarBase = req.UsarBase ?? true,
+                    callbackUrl = CallbackUrl("/api/contenido/hook/ideas")
+                };
+                var (ok, err) = await PostearN8n("contenido-ideas", payload);
+                return ok ? Results.Json(new { ok = true }, statusCode: 202)
+                          : Results.Problem(err ?? "No se pudo contactar a n8n.", statusCode: 502);
+            }).RequireAuthorization();
+
+            // Callback de WF1: inserta las ideas generadas (auth X-Internal-Token).
+            app.MapPost("/api/contenido/hook/ideas", (HttpContext ctx, HookIdeasReq req) =>
+            {
+                if (!TokenValidoInterno(ctx)) return Results.Json(new { error = "No autorizado." }, statusCode: 401);
+                if (req.MarcaId <= 0 || req.Ideas is null) return Results.BadRequest(new { error = "Datos inválidos." });
+
+                int n = 0;
+                using var c = Db.Conn();
+                foreach (var idea in req.Ideas)
+                {
+                    if (string.IsNullOrWhiteSpace(idea.Titulo)) continue;
+                    using var cmd = c.CreateCommand();
+                    cmd.CommandText = @"INSERT INTO IdeasContenido (MarcaId, Titulo, Descripcion, Pilar, Origen, Estado)
+                                        VALUES ($m, $t, $d, $p, 'ia', 'nueva')";
+                    cmd.Parameters.AddWithValue("$m", req.MarcaId);
+                    cmd.Parameters.AddWithValue("$t", idea.Titulo!.Trim());
+                    cmd.Parameters.AddWithValue("$d", (object?)idea.Descripcion ?? DBNull.Value);
+                    cmd.Parameters.AddWithValue("$p", (object?)idea.Pilar ?? DBNull.Value);
+                    cmd.ExecuteNonQuery();
+                    n++;
+                }
+                return Results.Ok(new { insertadas = n });
+            });
+
+            // Dispara WF2 (generar post completo). El resultado llega por /hook/resultado.
+            app.MapPost("/api/contenido/posts/{id:int}/generar", async (int id, HttpContext ctx, GenerarPostReq req) =>
+            {
+                if (!TokenService.EsRedes(ctx.User)) return Results.Forbid();
+
+                using var c = Db.Conn();
+                string ideaTitulo = "", ideaDesc = "", ideaPilar = "", formato = "imagen";
+                int marcaId = 0;
+                using (var cmd = c.CreateCommand())
+                {
+                    cmd.CommandText = @"SELECT p.MarcaId, p.Formato, i.Titulo, i.Descripcion, i.Pilar
+                                        FROM Posts p LEFT JOIN IdeasContenido i ON i.Id = p.IdeaId
+                                        WHERE p.Id = $id";
+                    cmd.Parameters.AddWithValue("$id", id);
+                    using var r = cmd.ExecuteReader();
+                    if (!r.Read()) return Results.NotFound(new { error = "Post no encontrado." });
+                    marcaId = Db.I(r, 0);
+                    formato = string.IsNullOrWhiteSpace(Db.S(r, 1)) ? "imagen" : Db.S(r, 1);
+                    ideaTitulo = Db.S(r, 2); ideaDesc = Db.S(r, 3); ideaPilar = Db.S(r, 4);
+                }
+                var marca = LeerMarcaDict(marcaId);
+                if (marca is null) return Results.NotFound(new { error = "Marca no encontrada." });
+
+                var jobId = Guid.NewGuid().ToString("N");
+                var promptImagen = string.IsNullOrWhiteSpace(req.PromptImagen)
+                    ? $"{ideaTitulo}. {ideaDesc}".Trim() : req.PromptImagen!;
+                var fmt = string.IsNullOrWhiteSpace(req.Formato) ? formato : req.Formato!;
+
+                using (var upd = c.CreateCommand())
+                {
+                    upd.CommandText = @"UPDATE Posts SET Estado='generando', JobId=$j, PromptImagen=$pi, Formato=$f,
+                                        MensajeError=NULL, FechaActualizacion=datetime('now','localtime') WHERE Id=$id";
+                    upd.Parameters.AddWithValue("$j", jobId);
+                    upd.Parameters.AddWithValue("$pi", promptImagen);
+                    upd.Parameters.AddWithValue("$f", fmt);
+                    upd.Parameters.AddWithValue("$id", id);
+                    upd.ExecuteNonQuery();
+                }
+
+                var payload = new
+                {
+                    jobId, postId = id, tipo = "generar_post", marca,
+                    idea = new { titulo = ideaTitulo, descripcion = ideaDesc, pilar = ideaPilar },
+                    formato = fmt, promptImagen,
+                    nImagenes = req.NImagenes is > 0 and <= 6 ? req.NImagenes!.Value : 1,
+                    callbackUrl = CallbackUrl("/api/contenido/hook/resultado")
+                };
+                var (ok, err) = await PostearN8n("contenido-post", payload);
+                if (!ok)
+                {
+                    using var e = c.CreateCommand();
+                    e.CommandText = "UPDATE Posts SET Estado='borrador', MensajeError=$e WHERE Id=$id";
+                    e.Parameters.AddWithValue("$e", err ?? "No se pudo contactar a n8n.");
+                    e.Parameters.AddWithValue("$id", id);
+                    e.ExecuteNonQuery();
+                    return Results.Problem(err ?? "No se pudo contactar a n8n.", statusCode: 502);
+                }
+                return Results.Json(new { ok = true, jobId }, statusCode: 202);
+            }).RequireAuthorization();
+
+            // Callback de WF2: guarda caption, hashtags y assets (imagen base64).
+            app.MapPost("/api/contenido/hook/resultado", async (HttpContext ctx, HookResultadoReq req) =>
+            {
+                if (!TokenValidoInterno(ctx)) return Results.Json(new { error = "No autorizado." }, statusCode: 401);
+                if (req.PostId <= 0) return Results.BadRequest(new { error = "postId requerido." });
+
+                using var c = Db.Conn();
+                string jobActual = "";
+                using (var cmd = c.CreateCommand())
+                {
+                    cmd.CommandText = "SELECT COALESCE(JobId,'') FROM Posts WHERE Id=$id";
+                    cmd.Parameters.AddWithValue("$id", req.PostId);
+                    var v = cmd.ExecuteScalar();
+                    if (v is null) return Results.NotFound(new { error = "Post no encontrado." });
+                    jobActual = v.ToString() ?? "";
+                }
+                if (!string.IsNullOrEmpty(req.JobId) && !string.IsNullOrEmpty(jobActual) && req.JobId != jobActual)
+                    return Results.BadRequest(new { error = "jobId no coincide." });
+
+                if (req.Estado == "error")
+                {
+                    using var e = c.CreateCommand();
+                    e.CommandText = "UPDATE Posts SET Estado='borrador', MensajeError=$m WHERE Id=$id";
+                    e.Parameters.AddWithValue("$m", req.Error ?? "Error en la generación.");
+                    e.Parameters.AddWithValue("$id", req.PostId);
+                    e.ExecuteNonQuery();
+                    return Results.Ok(new { ok = true });
+                }
+
+                var dir = Path.Combine(RutaContenidoDir(), req.PostId.ToString());
+                Directory.CreateDirectory(dir);
+                int orden = 0;
+                if (req.Assets != null)
+                {
+                    using (var del = c.CreateCommand())
+                    {
+                        del.CommandText = "DELETE FROM PostAssets WHERE PostId=$id AND Origen='ia'";
+                        del.Parameters.AddWithValue("$id", req.PostId);
+                        del.ExecuteNonQuery();
+                    }
+                    foreach (var a in req.Assets)
+                    {
+                        if (string.IsNullOrWhiteSpace(a.DataBase64)) continue;
+                        orden++;
+                        var ext = (a.Mime ?? "image/png").Contains("jpeg") ? "jpg" : "png";
+                        var file = $"{orden}-{Guid.NewGuid():N}.{ext}";
+                        var full = Path.Combine(dir, file);
+                        try { await File.WriteAllBytesAsync(full, Convert.FromBase64String(LimpiarBase64(a.DataBase64!))); }
+                        catch { orden--; continue; }
+                        using var cmd = c.CreateCommand();
+                        cmd.CommandText = @"INSERT INTO PostAssets (PostId, Orden, Tipo, RutaArchivo, Origen, ModeloGen, PromptGen, EsFinal)
+                                            VALUES ($p, $o, $t, $rt, 'ia', $mo, $pr, 1)";
+                        cmd.Parameters.AddWithValue("$p", req.PostId);
+                        cmd.Parameters.AddWithValue("$o", orden);
+                        cmd.Parameters.AddWithValue("$t", a.Tipo ?? "imagen");
+                        cmd.Parameters.AddWithValue("$rt", full);
+                        cmd.Parameters.AddWithValue("$mo", (object?)a.Modelo ?? DBNull.Value);
+                        cmd.Parameters.AddWithValue("$pr", (object?)a.Prompt ?? DBNull.Value);
+                        cmd.ExecuteNonQuery();
+                    }
+                }
+
+                using (var upd = c.CreateCommand())
+                {
+                    upd.CommandText = @"UPDATE Posts SET
+                            CaptionEs = COALESCE($ces, CaptionEs),
+                            CaptionEn = COALESCE($cen, CaptionEn),
+                            Hashtags  = COALESCE($ht, Hashtags),
+                            ModeloUsado = COALESCE($mo, ModeloUsado),
+                            Estado = 'borrador', MensajeError = NULL,
+                            FechaActualizacion = datetime('now','localtime')
+                        WHERE Id=$id";
+                    upd.Parameters.AddWithValue("$ces", (object?)req.Caption?.Es ?? DBNull.Value);
+                    upd.Parameters.AddWithValue("$cen", (object?)req.Caption?.En ?? DBNull.Value);
+                    upd.Parameters.AddWithValue("$ht", (object?)(req.Hashtags != null ? string.Join(" ", req.Hashtags) : null) ?? DBNull.Value);
+                    upd.Parameters.AddWithValue("$mo", (object?)req.Modelo ?? DBNull.Value);
+                    upd.Parameters.AddWithValue("$id", req.PostId);
+                    upd.ExecuteNonQuery();
+                }
+                return Results.Ok(new { ok = true, assets = orden });
+            });
+
+            // Servir un asset (imagen/video) para vista previa — protegido por el gate de rol.
+            app.MapGet("/api/contenido/posts/{id:int}/asset/{assetId:int}", (int id, int assetId) =>
+            {
+                using var c = Db.Conn();
+                using var cmd = c.CreateCommand();
+                cmd.CommandText = "SELECT RutaArchivo FROM PostAssets WHERE Id=$a AND PostId=$p";
+                cmd.Parameters.AddWithValue("$a", assetId);
+                cmd.Parameters.AddWithValue("$p", id);
+                var v = cmd.ExecuteScalar();
+                var ruta = v?.ToString() ?? "";
+                if (string.IsNullOrEmpty(ruta) || !File.Exists(ruta)) return Results.NotFound();
+                var ext = Path.GetExtension(ruta).ToLowerInvariant();
+                var mime = ext is ".jpg" or ".jpeg" ? "image/jpeg" : ext == ".mp4" ? "video/mp4" : "image/png";
+                return Results.File(File.ReadAllBytes(ruta), mime);
+            }).RequireAuthorization();
         }
 
         // ── Helpers ────────────────────────────────────────────────────────
@@ -529,6 +741,78 @@ namespace SistemaGestion.Api.Endpoints
         private static bool EsTransicionValida(string actual, string nuevo)
             => Transiciones.TryGetValue(actual, out var permitidos)
                && Array.IndexOf(permitidos, nuevo) >= 0;
+
+        // ── Helpers de generación IA (n8n) ───────────────────────────────────
+        private static readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(20) };
+
+        private static bool TokenValidoInterno(HttpContext ctx)
+        {
+            var token = Environment.GetEnvironmentVariable("SG_INTERNAL_TOKEN") ?? "";
+            if (string.IsNullOrEmpty(token)) return false;
+            var h = ctx.Request.Headers["X-Internal-Token"].FirstOrDefault();
+            return !string.IsNullOrEmpty(h) && string.Equals(h, token, StringComparison.Ordinal);
+        }
+
+        private static string CallbackUrl(string path)
+        {
+            var host = Environment.GetEnvironmentVariable("SG_PUBLIC_HOST");
+            var baseUrl = !string.IsNullOrWhiteSpace(host)
+                ? $"https://{host}"
+                : (Environment.GetEnvironmentVariable("SG_CALLBACK_BASE") ?? "https://api-sg.hato-pascher.com");
+            return baseUrl.TrimEnd('/') + path;
+        }
+
+        private static string RutaContenidoDir()
+        {
+            var env = Environment.GetEnvironmentVariable("SG_CONTENIDO_DIR");
+            if (!string.IsNullOrWhiteSpace(env)) return env;
+            var db = Environment.GetEnvironmentVariable("SG_DB_PATH", EnvironmentVariableTarget.Machine)
+                     ?? Environment.GetEnvironmentVariable("SG_DB_PATH");
+            var baseDir = !string.IsNullOrWhiteSpace(db) ? Path.GetDirectoryName(db)! : AppContext.BaseDirectory;
+            return Path.Combine(baseDir, "contenido");
+        }
+
+        private static string LimpiarBase64(string s)
+        {
+            var i = s.IndexOf("base64,", StringComparison.OrdinalIgnoreCase);
+            return i >= 0 ? s.Substring(i + 7) : s;
+        }
+
+        private static async Task<(bool ok, string? err)> PostearN8n(string webhookPath, object payload)
+        {
+            var baseUrl = Environment.GetEnvironmentVariable("SG_N8N_WEBHOOK_BASE");
+            if (string.IsNullOrWhiteSpace(baseUrl))
+                return (false, "SG_N8N_WEBHOOK_BASE no configurada.");
+            var url = baseUrl.TrimEnd('/') + "/webhook/" + webhookPath;
+            try
+            {
+                var json = System.Text.Json.JsonSerializer.Serialize(payload);
+                using var reqMsg = new HttpRequestMessage(HttpMethod.Post, url)
+                { Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json") };
+                var token = Environment.GetEnvironmentVariable("SG_INTERNAL_TOKEN") ?? "";
+                if (!string.IsNullOrEmpty(token)) reqMsg.Headers.Add("X-Internal-Token", token);
+                var resp = await _http.SendAsync(reqMsg);
+                return resp.IsSuccessStatusCode ? (true, null) : (false, $"n8n respondió {(int)resp.StatusCode}.");
+            }
+            catch (Exception ex) { return (false, ex.Message); }
+        }
+
+        private static object? LeerMarcaDict(int marcaId)
+        {
+            using var c = Db.Conn();
+            using var cmd = c.CreateCommand();
+            cmd.CommandText = @"SELECT Id, Nombre, Handle, Idiomas, VozTono, GuiaEstilo, HashtagsBase, Pilares
+                                FROM Marcas WHERE Id=$id";
+            cmd.Parameters.AddWithValue("$id", marcaId);
+            using var r = cmd.ExecuteReader();
+            if (!r.Read()) return null;
+            return new
+            {
+                id = Db.I(r, 0), nombre = Db.S(r, 1), handle = Db.S(r, 2),
+                idiomas = Db.S(r, 3), voz = Db.S(r, 4), guiaEstilo = Db.S(r, 5),
+                hashtagsBase = Db.S(r, 6), pilares = Db.S(r, 7)
+            };
+        }
     }
 
     // ── DTOs (request bodies) ─────────────────────────────────────────────
@@ -546,4 +830,14 @@ namespace SistemaGestion.Api.Endpoints
         bool? PrimerComentarioHashtags, string? FechaProgramada);
     record ContEstadoReq(string Estado);
     record ContRechazoReq(string? Nota);
+
+    // DTOs de generación IA
+    record GenerarIdeasReq(int MarcaId, string[]? Pilares, int? Cantidad, bool? UsarBase);
+    record GenerarPostReq(string? Formato, string? PromptImagen, int? NImagenes);
+    record HookIdeaItem(string? Titulo, string? Descripcion, string? Pilar);
+    record HookIdeasReq(int MarcaId, HookIdeaItem[]? Ideas);
+    record CaptionDto(string? Es, string? En);
+    record HookAssetItem(int? Orden, string? Tipo, string? DataBase64, string? Mime, string? Modelo, string? Prompt);
+    record HookResultadoReq(string? JobId, int PostId, string? Estado, CaptionDto? Caption,
+        string[]? Hashtags, HookAssetItem[]? Assets, string? Modelo, string? Error);
 }

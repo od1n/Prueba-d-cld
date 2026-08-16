@@ -1,0 +1,169 @@
+{
+  "name": "Contenido — Generar Ideas (IA)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "contenido-ideas",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "c0-0001-4000-8000-000000000001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "contenido-ideas"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const b = $input.first().json.body || $input.first().json;\nconst marca = b.marca || {};\nconst pilares = (b.pilares && b.pilares.length) ? b.pilares.join(', ') : (marca.pilares || '');\nconst cantidad = b.cantidad || 5;\nconst prompt = `Eres estratega de contenido de redes sociales para la marca \"${marca.nombre}\".\\n`\n  + `Voz/tono: ${marca.voz || ''}.\\n`\n  + `Guia de estilo: ${marca.guiaEstilo || ''}.\\n`\n  + `Pilares disponibles: ${pilares}.\\n`\n  + `Genera ${cantidad} ideas de publicaciones para Instagram/Facebook, variadas y accionables.\\n`\n  + `Responde SOLO un arreglo JSON, sin texto extra, de objetos {\"titulo\",\"descripcion\",\"pilar\"}.\\n`\n  + `titulo: corto y atractivo. descripcion: 1-2 frases. pilar: uno de los pilares.`;\nreturn [{ json: { prompt, marcaId: marca.id, callbackUrl: b.callbackUrl } }];"
+      },
+      "id": "c0-0001-4000-8000-000000000002",
+      "name": "Preparar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-goog-api-key",
+              "value": "TU_GEMINI_KEY_AQUI"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ contents:[{parts:[{text: $json.prompt}]}], generationConfig:{ temperature:0.9, responseMimeType:'application/json' } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "c0-0001-4000-8000-000000000003",
+      "name": "Gemini Ideas",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const prep = $('Preparar').first().json;\nlet text=''; try { text = $json.candidates[0].content.parts[0].text || ''; } catch(e){}\nlet ideas=[]; try { ideas = JSON.parse(text); } catch(e){ const m=text.match(/\\[[\\s\\S]*\\]/); if(m){ try{ideas=JSON.parse(m[0]);}catch(e2){} } }\nif(!Array.isArray(ideas)) ideas=[];\nideas = ideas.slice(0,15).map(i => ({ titulo: i.titulo||i.title||'', descripcion: i.descripcion||i.description||'', pilar: i.pilar||i.pillar||'' })).filter(i => i.titulo);\nreturn [{ json: { marcaId: prep.marcaId, ideas } }];"
+      },
+      "id": "c0-0001-4000-8000-000000000004",
+      "name": "Parsear",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Preparar').first().json.callbackUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Internal-Token",
+              "value": "TU_SG_INTERNAL_TOKEN_AQUI"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ marcaId: $json.marcaId, ideas: $json.ideas }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "c0-0001-4000-8000-000000000005",
+      "name": "Callback API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1120,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Preparar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar": {
+      "main": [
+        [
+          {
+            "node": "Gemini Ideas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Ideas": {
+      "main": [
+        [
+          {
+            "node": "Parsear",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parsear": {
+      "main": [
+        [
+          {
+            "node": "Callback API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0
+}
