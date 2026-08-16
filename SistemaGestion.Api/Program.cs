@@ -152,8 +152,8 @@ builder.Services.AddRateLimiter(options =>
     // WhatsApp bot — PIN validation (anti brute-force)
     options.AddFixedWindowLimiter("wa-pin", o =>
     {
-        o.PermitLimit = 15;                      // 15 intentos
-        o.Window      = TimeSpan.FromMinutes(1); //   por minuto
+        o.PermitLimit = 5;                        // 5 intentos
+        o.Window      = TimeSpan.FromMinutes(15); //   cada 15 minutos
         o.QueueLimit  = 0;
     });
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;

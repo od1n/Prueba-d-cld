@@ -118,6 +118,7 @@ namespace SistemaGestion
                 NombreCompleto = u.NombreCompleto,
                 NombreUsuario  = u.NombreUsuario,
                 Roles          = u.RolesDescripcion,
+                PinBot         = u.TienePinBot ? "Si" : "—",
                 Estado         = u.Activo ? "Activo" : "Inactivo",
                 UltimoAcceso   = u.UltimoAcceso.HasValue
                     ? u.UltimoAcceso.Value.ToString("dd/MM/yyyy HH:mm")
@@ -129,8 +130,8 @@ namespace SistemaGestion
             if (dgv.Columns.Count > 0)
             {
                 var anchos = new Dictionary<string, int> {
-                    ["Id"]=40, ["NombreCompleto"]=220, ["NombreUsuario"]=130,
-                    ["Roles"]=220, ["Estado"]=80, ["UltimoAcceso"]=140,
+                    ["Id"]=40, ["NombreCompleto"]=200, ["NombreUsuario"]=120,
+                    ["Roles"]=180, ["PinBot"]=50, ["Estado"]=70, ["UltimoAcceso"]=130,
                     ["FechaCreacion"]=100 };
                 foreach (DataGridViewColumn col in dgv.Columns)
                     if (anchos.TryGetValue(col.Name, out int w)) col.Width = w;
@@ -266,13 +267,15 @@ namespace SistemaGestion
         private CheckBox      chkVentas, chkAlmacen, chkContabilidad;
         private CheckBox      chkActivo;
         private Label         lblRolesError;
+        private Label         lblPinEstado;
+        private Button        btnGenerarPin, btnRevocarPin;
         private bool          _esNuevo;
 
         public DlgUsuario(Usuario usuarioExistente)
         {
             _esNuevo = usuarioExistente == null;
             Text = _esNuevo ? "Nuevo Usuario" : "Editar Usuario";
-            Size = new Size(480, 520);
+            Size = new Size(480, 620);
             StartPosition   = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = MinimizeBox = false;
@@ -364,6 +367,55 @@ namespace SistemaGestion
                 Text = "" };
             Controls.Add(lblRolesError); y += 22;
 
+            // ── PIN de Bot (solo para Admin/Ventas, solo Admin puede gestionar) ──
+            var lblPinTitle = new Label {
+                Text = "PIN Bot WhatsApp:",
+                Location = new Point(15, y), AutoSize = true,
+                Font = new Font("Segoe UI", 9f, FontStyle.Bold) };
+            Controls.Add(lblPinTitle); y += 24;
+
+            var panelPin = new Panel {
+                Location = new Point(15, y), Size = new Size(430, 42),
+                BorderStyle = BorderStyle.FixedSingle,
+                BackColor = Color.FromArgb(245, 250, 245) };
+
+            lblPinEstado = new Label {
+                Text = "Sin PIN asignado",
+                Location = new Point(12, 12), AutoSize = true,
+                Font = new Font("Segoe UI", 9f) };
+
+            btnGenerarPin = new Button {
+                Text = _esNuevo ? "Generar PIN" : "Regenerar PIN",
+                Location = new Point(220, 8), Size = new Size(110, 26),
+                BackColor = Color.FromArgb(60, 100, 180), ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 8f, FontStyle.Bold),
+                Cursor = Cursors.Hand };
+            btnGenerarPin.FlatAppearance.BorderSize = 0;
+            btnGenerarPin.Click += (s, e) => GenerarPin();
+
+            btnRevocarPin = new Button {
+                Text = "Revocar",
+                Location = new Point(336, 8), Size = new Size(80, 26),
+                BackColor = Color.FromArgb(180, 60, 60), ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 8f, FontStyle.Bold),
+                Cursor = Cursors.Hand,
+                Visible = false };
+            btnRevocarPin.FlatAppearance.BorderSize = 0;
+            btnRevocarPin.Click += (s, e) => RevocarPin();
+
+            panelPin.Controls.AddRange(new Control[] { lblPinEstado, btnGenerarPin, btnRevocarPin });
+            Controls.Add(panelPin);
+
+            // Solo Admin puede gestionar PINs, y solo para roles Admin/Ventas
+            bool esAdminActual = Sesion.Rol == "Admin";
+            panelPin.Enabled = esAdminActual;
+            if (!esAdminActual)
+                lblPinEstado.Text = "(solo Admin puede gestionar PINs)";
+
+            y += 50;
+
             // ── Activo ───────────────────────────────────────────────────
             chkActivo = new CheckBox {
                 Text = "Usuario activo",
@@ -402,7 +454,6 @@ namespace SistemaGestion
                 if (usuarioExistente.EsAdmin)
                 {
                     chkAdmin.Checked = true;
-                    // El CheckedChanged lo deshabilitará automáticamente
                 }
                 else
                 {
@@ -411,13 +462,111 @@ namespace SistemaGestion
                     chkContabilidad.Checked = usuarioExistente.TieneRol("Contabilidad");
                 }
 
-                // Proteger Admin: no puede cambiar su propio nombre de usuario
-                // ni desactivarse desde aquí (se hace en FrmUsuarios.ToggleActivo)
                 if (usuarioExistente.EsAdmin)
                     chkActivo.Enabled = false;
 
-                // Guardar referencia al usuario original para mantener el Id y PasswordHash
+                // Estado del PIN
+                if (usuarioExistente.TienePinBot)
+                {
+                    lblPinEstado.Text = "PIN activo";
+                    lblPinEstado.ForeColor = Color.FromArgb(20, 90, 50);
+                    btnRevocarPin.Visible = true;
+                    btnGenerarPin.Text = "Regenerar PIN";
+                }
+
+                // PIN solo disponible para Admin/Ventas
+                bool rolPermitePin = DatabaseService.PuedeAsignarPinBot(
+                    usuarioExistente.Rol ?? "");
+                if (!rolPermitePin && esAdminActual)
+                {
+                    panelPin.Enabled = false;
+                    lblPinEstado.Text = "Solo roles Admin/Ventas pueden tener PIN";
+                }
+
                 Usuario = usuarioExistente;
+            }
+        }
+
+        private void GenerarPin()
+        {
+            if (_esNuevo)
+            {
+                MessageBox.Show("Primero guarde el usuario. Luego podrá generar el PIN.",
+                    "PIN", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            // Verificar que el rol actual permite PIN
+            var roles = ObtenerRolesSeleccionados();
+            string rolActual = roles.Count > 0 ? roles[0] : Usuario?.Rol ?? "";
+            if (!DatabaseService.PuedeAsignarPinBot(rolActual))
+            {
+                MessageBox.Show("Solo usuarios con rol Admin o Ventas pueden tener PIN.",
+                    "PIN", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            string accion = Usuario.TienePinBot ? "regenerar" : "generar";
+            if (MessageBox.Show(
+                $"¿Desea {accion} el PIN de bot para '{Usuario.NombreCompleto}'?\n\n" +
+                "El PIN anterior quedará invalidado.",
+                "Confirmar", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+                return;
+
+            try
+            {
+                string pinPlano = DatabaseService.GenerarPinBot(Usuario.Id);
+
+                // Actualizar modelo local
+                Usuario.PinBotHash = "(actualizado)"; // No guardamos el hash localmente
+                Usuario.PinBotIntentos = 0;
+                Usuario.PinBotBloqueadoHasta = null;
+
+                lblPinEstado.Text = "PIN activo";
+                lblPinEstado.ForeColor = Color.FromArgb(20, 90, 50);
+                btnRevocarPin.Visible = true;
+                btnGenerarPin.Text = "Regenerar PIN";
+
+                MessageBox.Show(
+                    $"PIN generado exitosamente:\n\n" +
+                    $"    {pinPlano}\n\n" +
+                    $"Comuníquelo al operador de forma segura.\n" +
+                    $"Este PIN NO se puede recuperar. Si se olvida, genere uno nuevo.",
+                    "PIN Generado", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error al generar PIN: {ex.Message}",
+                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void RevocarPin()
+        {
+            if (_esNuevo || Usuario == null) return;
+
+            if (MessageBox.Show(
+                $"¿Desea revocar el PIN de bot de '{Usuario.NombreCompleto}'?\n\n" +
+                "El operador ya no podrá usar el bot de WhatsApp.",
+                "Revocar PIN", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+                return;
+
+            try
+            {
+                DatabaseService.RevocarPinBot(Usuario.Id);
+                Usuario.PinBotHash = "";
+                Usuario.PinBotIntentos = 0;
+                Usuario.PinBotBloqueadoHasta = null;
+
+                lblPinEstado.Text = "Sin PIN asignado";
+                lblPinEstado.ForeColor = SystemColors.ControlText;
+                btnRevocarPin.Visible = false;
+                btnGenerarPin.Text = "Generar PIN";
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error al revocar PIN: {ex.Message}",
+                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 

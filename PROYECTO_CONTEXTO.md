@@ -193,6 +193,7 @@ Prueba d cld/
 - Restricción a red local (IPs privadas/loopback)
 - Revocación de tokens por jti
 - Autorización por rol en endpoints de escritura (RequireRoleFilter): Admin para Nómina, Admin/Contabilidad para Compras y Egresos, Admin/Ventas para Facturas, Admin/Almacen para Producción
+- PIN de bot para operadores WhatsApp: PBKDF2-SHA256 (mismo formato v2:SALT:HASH), 6 dígitos, bloqueo tras 5 intentos por 30 min, rate limiting 5/15min por IP
 - System prompt del asistente IA hardcodeado server-side (no controlable por el cliente)
 - Claves de cámaras cifradas con AES-256-CBC (SG_CAM_KEY, variable de entorno Machine scope) — reemplaza DPAPI para permitir descifrado cross-machine
 - Tokens y credenciales: NO se hardcodean en archivos trackeados por git. Usar variables de entorno Machine scope
@@ -210,6 +211,9 @@ Prueba d cld/
 | Config legal | `FrmConfigLegal.cs` / `ConfigEndpoints.cs` |
 | Auth/login | `AuthEndpoints.cs` + `Auth/TokenService.cs` |
 | Dashboard KPIs/charts | `FrmDashboardV2.cs` — KPIs, charts custom-painted (GDI+), tasas BCV/PAR |
+| Bot WhatsApp (n8n) | `n8n-workflows/whatsapp-bot.json` |
+| Endpoints WhatsApp API | `SistemaGestion.Api/Endpoints/WhatsAppEndpoints.cs` |
+| Abonos + PIN Bot | `DB_Abonos.cs` |
 | BD schema + migraciones | `DB.cs` (WinForms) / `Db.cs` + `DB_Deploy.cs` (API) |
 | Respaldos | `BackupService.cs` + `SecurityService.cs` |
 | Cámaras (WinForms) | `DB_Camaras.cs` + `DlgCamara.cs` + `FrmCamarasAdmin.cs` |
@@ -316,6 +320,9 @@ IPs: .100, .106, .109, .110, .112, .113, .114. Firmware V5.3.8 eliminó RTSP, si
 | `SG_INTERNAL_TOKEN` | OLIMPO (Machine), SERVO (sg-env.cmd) | Token para comunicación API↔digitalizador. Debe coincidir en API y digitalizador |
 | `SG_DIG_URL` | SERVO (sg-env.cmd) | URL del digitalizador en OLIMPO: `http://192.168.68.132:8080`. No necesario en OLIMPO (default localhost) |
 | `SG_CAM_KEY` | OLIMPO, SERVO | Clave AES-256 para cifrar claves de cámaras (base64) |
+| `SG_SMTP_EMAIL` | OLIMPO (sg-env.cmd) | Email remitente para pedidos WhatsApp (Gmail con App Password) |
+| `SG_SMTP_PASS` | OLIMPO (sg-env.cmd) | App Password de Gmail para SMTP |
+| `SG_PEDIDO_EMAIL` | OLIMPO (sg-env.cmd) | Email destino para notificaciones de pedidos |
 
 Todas se configuran con `[Environment]::SetEnvironmentVariable("NOMBRE", "valor", "Machine")`. NUNCA hardcodear en archivos trackeados por git.
 
@@ -347,3 +354,68 @@ Si aparece una BD en ruta distinta a `C:\SistemaGestion\sistema_gestion.db` en O
 - NUNCA debe haber más de una BD. Si aparece alguna en AppData o en otra ruta, es un error
 - NUNCA hardcodear secrets (tokens, claves, credenciales) en archivos trackeados por git
 - Secrets van en variables de entorno Machine scope
+
+---
+
+## 17. Bot WhatsApp (Evolution API + n8n)
+
+### Arquitectura
+- **Evolution API**: instancia `jacques-seguimiento` en EasyPanel (VPS externo)
+- **n8n**: orquestador de workflows, también en EasyPanel
+- **Cloudflare Tunnel**: `api-sg.hato-pascher.com` → OLIMPO localhost:5443 (HTTPS)
+- **Flujo**: WhatsApp → Evolution API → webhook n8n → API SistemaGestion (via Cloudflare Tunnel) → respuesta al usuario
+
+### Comandos del bot (atajos numéricos 1-5)
+| Atajo | Comando | Descripción |
+|---|---|---|
+| 1 | `catalogo` | Lista productos activos con precio |
+| 2 | `buscar [texto]` | Buscar producto por nombre/código |
+| 3 | `precio [código]` | Detalle y precio de un producto |
+| 4 | `estado [PIN] [CLIENTE]` | Estado de cuenta (requiere PIN de operador) |
+| 5 | `pedido Nombre, Tel, productos` | Registra pedido y envía email |
+
+### PIN de operador (v29)
+- Solo usuarios con rol Admin o Ventas pueden tener PIN asignado
+- El Admin genera/regenera PINs desde FrmUsuarios → Editar usuario
+- PIN de 6 dígitos numéricos, almacenado como PBKDF2-SHA256 (formato v2:SALT:HASH)
+- Bloqueo tras 5 intentos fallidos por 30 minutos
+- Rate limiting: 5 intentos cada 15 minutos por IP
+- Si el operador olvida el PIN, el Admin genera uno nuevo (no hay recuperación automática)
+- El PIN se muestra UNA SOLA VEZ al generarlo
+
+### Endpoints WhatsApp API (auth: X-Internal-Token, sin JWT)
+| Endpoint | Método | Descripción |
+|---|---|---|
+| `/api/wa/catalogo?q=` | GET | Catálogo de productos |
+| `/api/wa/producto/{codigo}` | GET | Detalle de un producto |
+| `/api/wa/validar-pin` | POST | Valida PIN de operador |
+| `/api/wa/estado-cuenta` | POST | Estado de cuenta (PIN + código cliente) |
+| `/api/wa/abonos` | POST | Historial de abonos (PIN + código cliente) |
+| `/api/wa/pedido?nombre=&tel=&items=&wa=` | GET | Registra pedido y envía email |
+
+### Cloudflare Tunnel
+- Dominio: `hato-pascher.com` (Cloudflare DNS)
+- Túnel: `api-sg` → `https://localhost:5443` en OLIMPO
+- Servicio cloudflared: corre como servicio Windows en OLIMPO
+- Zero Trust: plan Free, sin políticas de acceso adicionales
+- El túnel permite que n8n (VPS externo) llegue a la API local de OLIMPO
+
+### n8n Workflow
+- Archivo: `n8n-workflows/whatsapp-bot.json`
+- Importar en n8n como workflow nuevo
+- Configurar: reemplazar `TU_SG_INTERNAL_TOKEN_AQUI` con el valor real de `SG_INTERNAL_TOKEN`
+- Webhook: Evolution API envía eventos `messages.upsert` al webhook de n8n
+
+---
+
+## 18. Estado actual del sistema (2026-08-16)
+
+### Versiones
+- **SCHEMA_VERSION**: 29 (v29: PinBot en Usuarios para operadores)
+- **Migraciones**: v1→v29 aplicadas incrementalmente
+
+### Pendientes
+- Probar flujo de pedido: enviar "pedido Juan, 0414-123, 2 TUB001" al bot y verificar email
+- Probar digitalización OCR desde SERVO (reiniciar API con sg-env.cmd actualizado)
+- Asignar PINs a operadores desde FrmUsuarios (primer deploy con v29)
+- Reimportar workflow n8n actualizado (whatsapp-bot.json con soporte POST para estado-cuenta)

@@ -1294,7 +1294,7 @@ namespace SistemaGestion
         // Nunca se modifica una migracion existente: si hay un error se agrega
         // una nueva migracion que lo corrija.
         // Version actual del esquema en codigo: 7
-        public  const int SCHEMA_VERSION = 28;  // v28: Abonos extendidos + ComprobantesFactura + CuentasReceptoras
+        public  const int SCHEMA_VERSION = 29;  // v29: PinBot en Usuarios (operadores)
 
         private static void MigrarEsquema(SqliteConnection conn)
         {
@@ -1914,6 +1914,18 @@ namespace SistemaGestion
                 if (versionActual < 28)
                 {
                     MigrarV28(conn, tx);
+                }
+
+                // ── v29: PinBot en Usuarios (operadores autorizados)
+                if (versionActual < 29)
+                {
+                    AlterTableSafe(conn, tx,
+                        "ALTER TABLE Usuarios ADD COLUMN PinBotHash TEXT DEFAULT ''");
+                    AlterTableSafe(conn, tx,
+                        "ALTER TABLE Usuarios ADD COLUMN PinBotIntentos INTEGER NOT NULL DEFAULT 0");
+                    AlterTableSafe(conn, tx,
+                        "ALTER TABLE Usuarios ADD COLUMN PinBotBloqueadoHasta TEXT");
+                    SetSchemaVersion(conn, tx, 29);
                 }
 
                 tx.Commit();
@@ -3511,7 +3523,10 @@ namespace SistemaGestion
             // Columnas explícitas para no depender del orden de SELECT *
             cmd.CommandText = @"SELECT Id,NombreUsuario,NombreCompleto,PasswordHash,Rol,
                                         Activo,FechaCreacion,UltimoAcceso,
-                                        RequiereCambioPassword,IntentosHoy,BloqueadoHasta
+                                        RequiereCambioPassword,IntentosHoy,BloqueadoHasta,
+                                        COALESCE(PinBotHash,''),
+                                        COALESCE(PinBotIntentos,0),
+                                        PinBotBloqueadoHasta
                                  FROM Usuarios ORDER BY NombreCompleto";
             using var r = cmd.ExecuteReader();
             while (r.Read())
@@ -3528,6 +3543,9 @@ namespace SistemaGestion
                     RequiereCambioPassword= r.IsDBNull(8) ? false : r.GetInt32(8) == 1,
                     IntentosHoy           = r.IsDBNull(9) ? 0 : r.GetInt32(9),
                     BloqueadoHasta        = r.IsDBNull(10) ? null : DateTime.Parse(r.GetString(10)),
+                    PinBotHash            = r.GetString(11),
+                    PinBotIntentos        = r.GetInt32(12),
+                    PinBotBloqueadoHasta  = r.IsDBNull(13) ? null : DateTime.Parse(r.GetString(13)),
                 });
             return list;
         }
@@ -3538,8 +3556,9 @@ namespace SistemaGestion
             var cmd = c.CreateCommand();
             cmd.CommandText = @"INSERT INTO Usuarios
                 (NombreUsuario,NombreCompleto,PasswordHash,Rol,Activo,FechaCreacion,
-                 RequiereCambioPassword,IntentosHoy,BloqueadoHasta)
-                VALUES ($u,$nc,$ph,$r,$a,$fc,$rcp,0,NULL)";
+                 RequiereCambioPassword,IntentosHoy,BloqueadoHasta,
+                 PinBotHash,PinBotIntentos,PinBotBloqueadoHasta)
+                VALUES ($u,$nc,$ph,$r,$a,$fc,$rcp,0,NULL,$pbh,0,NULL)";
             cmd.Parameters.AddWithValue("$u",   u.NombreUsuario);
             cmd.Parameters.AddWithValue("$nc",  u.NombreCompleto);
             cmd.Parameters.AddWithValue("$ph",  u.PasswordHash);
@@ -3547,6 +3566,7 @@ namespace SistemaGestion
             cmd.Parameters.AddWithValue("$a",   u.Activo ? 1 : 0);
             cmd.Parameters.AddWithValue("$fc",  u.FechaCreacion.ToString("yyyy-MM-dd HH:mm:ss"));
             cmd.Parameters.AddWithValue("$rcp", u.RequiereCambioPassword ? 1 : 0);
+            cmd.Parameters.AddWithValue("$pbh", u.PinBotHash ?? "");
             cmd.ExecuteNonQuery();
             cmd.CommandText = "SELECT last_insert_rowid()";
             u.Id = (int)(long)cmd.ExecuteScalar();
@@ -6114,6 +6134,16 @@ namespace SistemaGestion
         public int    IntentosHoy            { get; set; }
         /// <summary>Si no null, el usuario está bloqueado hasta esta fecha/hora.</summary>
         public DateTime? BloqueadoHasta      { get; set; }
+
+        // ── PinBot (operador WhatsApp) ──────────────────────────────────
+        /// <summary>Hash PBKDF2 del PIN de bot (vacío = sin PIN asignado).</summary>
+        public string PinBotHash             { get; set; } = "";
+        /// <summary>Intentos fallidos consecutivos de PIN.</summary>
+        public int    PinBotIntentos         { get; set; }
+        /// <summary>Si no null, el PIN está bloqueado hasta esta fecha/hora.</summary>
+        public DateTime? PinBotBloqueadoHasta { get; set; }
+        /// <summary>True si el usuario tiene un PIN de bot asignado.</summary>
+        public bool TienePinBot => !string.IsNullOrEmpty(PinBotHash);
 
         // ── Helpers de rol ───────────────────────────────────────────────
         /// <summary>True si el usuario tiene rol Admin.</summary>

@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.RateLimiting;
+using System.Linq;
 using System.Net;
 using System.Net.Mail;
 
@@ -8,9 +9,9 @@ using System.Net.Mail;
 //
 // GET  /api/wa/catalogo?q=texto          → catálogo de productos (búsqueda)
 // GET  /api/wa/producto/{codigo}         → detalle de un producto
-// POST /api/wa/validar-pin              → valida PIN de cliente, devuelve info
-// GET  /api/wa/estado-cuenta?pin=&tel=  → estado de cuenta del cliente
-// GET  /api/wa/abonos?pin=&tel=         → historial de abonos del cliente
+// POST /api/wa/validar-pin              → valida PIN de operador, devuelve info
+// POST /api/wa/estado-cuenta            → estado de cuenta de un cliente (requiere PIN operador)
+// POST /api/wa/abonos                   → historial de abonos (requiere PIN operador)
 // GET  /api/wa/pedido?nombre=&tel=&items=&wa= → registra pedido y envía email
 
 namespace SistemaGestion.Api.Endpoints
@@ -106,9 +107,10 @@ namespace SistemaGestion.Api.Endpoints
                 });
             });
 
-            // ── 3. Validar PIN de cliente ───────────────────────────────────
-            // POST /api/wa/validar-pin   body: {"pin":"1234", "telefono":"0414..."}
-            // Devuelve datos básicos del cliente si el PIN es correcto.
+            // ── 3. Validar PIN de operador ─────────────────────────────────
+            // POST /api/wa/validar-pin   body: {"pin":"123456"}
+            // Valida PIN de un operador autorizado (Admin/Ventas).
+            // Hash PBKDF2, bloqueo tras 5 intentos fallidos por 30 min.
             app.MapPost("/api/wa/validar-pin", (HttpContext ctx, PinRequest req) =>
             {
                 if (!TokenValido(ctx))
@@ -117,43 +119,39 @@ namespace SistemaGestion.Api.Endpoints
                 if (string.IsNullOrWhiteSpace(req.Pin))
                     return Results.BadRequest(new { error = "PIN requerido." });
 
-                var codigoCliente = BuscarClientePorPin(req.Pin, req.Telefono);
-                if (codigoCliente == null)
-                    return Results.Json(new { valido = false, error = "PIN incorrecto o no asignado." },
-                        statusCode: 200);
-
-                // Obtener datos básicos del cliente
-                using var c   = Db.Conn();
-                using var cmd = c.CreateCommand();
-                cmd.CommandText = "SELECT Descripcion, CiRif FROM Clientes WHERE Codigo = $cod";
-                cmd.Parameters.AddWithValue("$cod", codigoCliente);
-                using var r = cmd.ExecuteReader();
-                if (!r.Read())
-                    return Results.Json(new { valido = false, error = "Cliente no encontrado." },
+                var (operador, error) = ValidarPinOperador(req.Pin);
+                if (operador == null)
+                    return Results.Json(new { valido = false, error = error ?? "PIN incorrecto." },
                         statusCode: 200);
 
                 return Results.Ok(new
                 {
-                    valido  = true,
-                    codigo  = codigoCliente,
-                    nombre  = Db.S(r, 0),
-                    ciRif   = Db.S(r, 1)
+                    valido        = true,
+                    operadorId    = operador.Id,
+                    operador      = operador.NombreCompleto,
+                    usuario       = operador.NombreUsuario,
+                    rol           = operador.Rol
                 });
             }).RequireRateLimiting("wa-pin");
 
             // ── 4. Estado de cuenta ─────────────────────────────────────────
-            // GET /api/wa/estado-cuenta?pin=1234&tel=0414...
-            app.MapGet("/api/wa/estado-cuenta", (HttpContext ctx, string pin, string? tel) =>
+            // POST /api/wa/estado-cuenta   body: {"pin":"123456","codigoCliente":"CLI001"}
+            // Requiere PIN de operador válido + código de cliente.
+            app.MapPost("/api/wa/estado-cuenta", (HttpContext ctx, EstadoCuentaRequest req) =>
             {
                 if (!TokenValido(ctx))
                     return Results.Json(new { error = "No autorizado." }, statusCode: 401);
 
-                if (string.IsNullOrWhiteSpace(pin))
+                if (string.IsNullOrWhiteSpace(req.Pin))
                     return Results.BadRequest(new { error = "PIN requerido." });
 
-                var codigoCliente = BuscarClientePorPin(pin, tel);
-                if (codigoCliente == null)
-                    return Results.Json(new { error = "PIN incorrecto." }, statusCode: 403);
+                var (operador, error) = ValidarPinOperador(req.Pin);
+                if (operador == null)
+                    return Results.Json(new { error = error ?? "PIN incorrecto." }, statusCode: 403);
+
+                var codigoCliente = req.CodigoCliente;
+                if (string.IsNullOrWhiteSpace(codigoCliente))
+                    return Results.BadRequest(new { error = "Código de cliente requerido." });
 
                 using var c = Db.Conn();
 
@@ -225,7 +223,9 @@ namespace SistemaGestion.Api.Endpoints
 
                 return Results.Ok(new
                 {
-                    cliente = new { codigo = codigoCliente, nombre, ciRif },
+                    operadorId = operador.Id,
+                    operador   = operador.NombreCompleto,
+                    cliente    = new { codigo = codigoCliente, nombre, ciRif },
                     saldoFavor,
                     totalAbonos,
                     totalDeuda,
@@ -234,20 +234,24 @@ namespace SistemaGestion.Api.Endpoints
             });
 
             // ── 5. Historial de abonos ──────────────────────────────────────
-            // GET /api/wa/abonos?pin=1234&tel=0414...&ultimos=10
-            app.MapGet("/api/wa/abonos", (HttpContext ctx, string pin, string? tel, int? ultimos) =>
+            // POST /api/wa/abonos   body: {"pin":"123456","codigoCliente":"CLI001","ultimos":10}
+            app.MapPost("/api/wa/abonos", (HttpContext ctx, AbonosRequest req) =>
             {
                 if (!TokenValido(ctx))
                     return Results.Json(new { error = "No autorizado." }, statusCode: 401);
 
-                if (string.IsNullOrWhiteSpace(pin))
+                if (string.IsNullOrWhiteSpace(req.Pin))
                     return Results.BadRequest(new { error = "PIN requerido." });
 
-                var codigoCliente = BuscarClientePorPin(pin, tel);
-                if (codigoCliente == null)
-                    return Results.Json(new { error = "PIN incorrecto." }, statusCode: 403);
+                var (operador, error) = ValidarPinOperador(req.Pin);
+                if (operador == null)
+                    return Results.Json(new { error = error ?? "PIN incorrecto." }, statusCode: 403);
 
-                int limite = Math.Clamp(ultimos ?? 20, 1, 100);
+                var codigoCliente = req.CodigoCliente;
+                if (string.IsNullOrWhiteSpace(codigoCliente))
+                    return Results.BadRequest(new { error = "Código de cliente requerido." });
+
+                int limite = Math.Clamp(req.Ultimos ?? 20, 1, 100);
 
                 using var c   = Db.Conn();
                 using var cmd = c.CreateCommand();
@@ -362,41 +366,94 @@ namespace SistemaGestion.Api.Endpoints
             });
         }
 
-        // ── Buscar cliente por PIN (replica lógica de DB_Abonos.ValidarPinBot) ──
-        private static string? BuscarClientePorPin(string pin, string? telefono)
+        // ── Validar PIN de operador (PBKDF2 + bloqueo) ────────────────────
+        private static (OperadorInfo? op, string? error) ValidarPinOperador(string pin)
         {
+            const int MAX_INTENTOS = 5;
+            const int BLOQUEO_MINS = 30;
+
+            if (string.IsNullOrWhiteSpace(pin) || pin.Length != 6 || !pin.All(char.IsDigit))
+                return (null, "PIN inválido.");
+
             using var c   = Db.Conn();
             using var cmd = c.CreateCommand();
             cmd.CommandText = @"
-                SELECT Codigo, Descripcion, Telefono, COALESCE(Telefono2,'')
-                FROM Clientes
-                WHERE PinBot = $pin AND PinBot != ''";
-            cmd.Parameters.AddWithValue("$pin", pin);
+                SELECT Id, NombreUsuario, NombreCompleto, Rol, PinBotHash,
+                       COALESCE(PinBotIntentos,0), PinBotBloqueadoHasta
+                FROM Usuarios
+                WHERE Activo = 1
+                  AND COALESCE(PinBotHash,'') != ''
+                  AND (Rol = 'Admin' OR Rol = 'Ventas')";
 
-            var candidatos = new List<(string cod, string nombre, string tel1, string tel2)>();
-            using var r = cmd.ExecuteReader();
-            while (r.Read())
-                candidatos.Add((Db.S(r, 0), Db.S(r, 1), Db.S(r, 2), Db.S(r, 3)));
-
-            if (candidatos.Count == 0) return null;
-            if (candidatos.Count == 1) return candidatos[0].cod;
-
-            // Desambiguar por teléfono si hay múltiples clientes con el mismo PIN
-            if (!string.IsNullOrEmpty(telefono))
+            var candidatos = new List<(int id, string user, string nombre, string rol,
+                                       string hash, int intentos, DateTime? bloqueado)>();
+            using (var r = cmd.ExecuteReader())
             {
-                var limpio = telefono.Replace("+", "").Replace(" ", "").Replace("-", "");
-                var match = candidatos.FirstOrDefault(c =>
-                    c.tel1.Replace("+", "").Replace(" ", "").Replace("-", "").Contains(limpio) ||
-                    c.tel2.Replace("+", "").Replace(" ", "").Replace("-", "").Contains(limpio) ||
-                    c.nombre.ToUpper().Contains(telefono.ToUpper()));
-                if (match.cod != null) return match.cod;
+                while (r.Read())
+                {
+                    candidatos.Add((
+                        r.GetInt32(0), Db.S(r, 1), Db.S(r, 2), Db.S(r, 3), Db.S(r, 4),
+                        r.GetInt32(5),
+                        r.IsDBNull(6) ? null : DateTime.Parse(r.GetString(6))
+                    ));
+                }
             }
 
-            // Si no se puede desambiguar, devolver el primero
-            return candidatos[0].cod;
+            if (candidatos.Count == 0)
+                return (null, "No hay operadores configurados.");
+
+            foreach (var op in candidatos)
+            {
+                if (op.bloqueado.HasValue && op.bloqueado.Value > DateTime.Now)
+                    continue;
+
+                bool correcto = Db.VerificarPinBot(pin, op.hash);
+                if (correcto)
+                {
+                    using var cmdOk = c.CreateCommand();
+                    cmdOk.CommandText = @"UPDATE Usuarios
+                        SET PinBotIntentos = 0, PinBotBloqueadoHasta = NULL
+                        WHERE Id = $id";
+                    cmdOk.Parameters.AddWithValue("$id", op.id);
+                    cmdOk.ExecuteNonQuery();
+
+                    return (new OperadorInfo(op.id, op.user, op.nombre, op.rol), null);
+                }
+            }
+
+            // Incrementar intentos en todos los no bloqueados
+            foreach (var op in candidatos)
+            {
+                if (op.bloqueado.HasValue && op.bloqueado.Value > DateTime.Now) continue;
+                int nuevos = op.intentos + 1;
+                using var cmdF = c.CreateCommand();
+                if (nuevos >= MAX_INTENTOS)
+                {
+                    cmdF.CommandText = @"UPDATE Usuarios
+                        SET PinBotIntentos = $i, PinBotBloqueadoHasta = $h WHERE Id = $id";
+                    cmdF.Parameters.AddWithValue("$h",
+                        DateTime.Now.AddMinutes(BLOQUEO_MINS).ToString("yyyy-MM-dd HH:mm:ss"));
+                }
+                else
+                {
+                    cmdF.CommandText = @"UPDATE Usuarios
+                        SET PinBotIntentos = $i WHERE Id = $id";
+                }
+                cmdF.Parameters.AddWithValue("$i", nuevos);
+                cmdF.Parameters.AddWithValue("$id", op.id);
+                cmdF.ExecuteNonQuery();
+            }
+
+            bool bloqueado = candidatos.Any(op => (op.intentos + 1) >= MAX_INTENTOS);
+            return (null, bloqueado
+                ? $"PIN incorrecto. Bloqueado por {BLOQUEO_MINS} minutos."
+                : "PIN incorrecto.");
         }
     }
 
     // ── DTOs ─────────────────────────────────────────────────────────────────
-    record PinRequest(string Pin, string? Telefono);
+    record PinRequest(string Pin);
+    record EstadoCuentaRequest(string Pin, string CodigoCliente);
+    record AbonosRequest(string Pin, string CodigoCliente, int? Ultimos);
+    record OperadorInfo(int Id, string NombreUsuario, string NombreCompleto, string Rol);
 }

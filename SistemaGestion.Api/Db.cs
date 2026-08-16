@@ -38,7 +38,10 @@ namespace SistemaGestion.Api
                     "ALTER TABLE Clientes ADD COLUMN Email TEXT DEFAULT ''",
                     "ALTER TABLE Clientes ADD COLUMN Contacto TEXT DEFAULT ''",
                     "ALTER TABLE DetallesFactura ADD COLUMN PrecioUnit REAL DEFAULT 0",
-                    "ALTER TABLE Clientes ADD COLUMN PinBot TEXT DEFAULT ''"
+                    "ALTER TABLE Clientes ADD COLUMN PinBot TEXT DEFAULT ''",
+                    "ALTER TABLE Usuarios ADD COLUMN PinBotHash TEXT DEFAULT ''",
+                    "ALTER TABLE Usuarios ADD COLUMN PinBotIntentos INTEGER NOT NULL DEFAULT 0",
+                    "ALTER TABLE Usuarios ADD COLUMN PinBotBloqueadoHasta TEXT"
                 };
                 foreach (var sql in fixes)
                 {
@@ -90,6 +93,29 @@ namespace SistemaGestion.Api
             cmd.CommandText = "PRAGMA journal_mode=WAL; PRAGMA busy_timeout=3000; PRAGMA foreign_keys=ON;";
             cmd.ExecuteNonQuery();
             return conn;
+        }
+
+        // ── PBKDF2 verificación de PIN (mismo formato que contraseñas: "v2:SALT:HASH") ──
+        private const string HASH_PREFIX  = "v2";
+        private const int    PBKDF2_ITERS = 600_000;
+
+        /// <summary>Verifica un PIN contra un hash PBKDF2 almacenado.</summary>
+        public static bool VerificarPinBot(string pin, string hashAlmacenado)
+        {
+            if (string.IsNullOrEmpty(hashAlmacenado) || !hashAlmacenado.StartsWith(HASH_PREFIX + ":"))
+                return false;
+
+            var partes = hashAlmacenado.Split(':');
+            if (partes.Length != 3) return false;
+
+            var salt = Convert.FromHexString(partes[1]);
+            using var kdf = new System.Security.Cryptography.Rfc2898DeriveBytes(
+                pin, salt, PBKDF2_ITERS,
+                System.Security.Cryptography.HashAlgorithmName.SHA256);
+            var hashCalculado = kdf.GetBytes(32);
+
+            return System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
+                Convert.FromHexString(partes[2]), hashCalculado);
         }
 
         /// <summary>

@@ -349,63 +349,163 @@ namespace SistemaGestion
         }
 
         // ════════════════════════════════════════════════════════════════════
-        //  PinBot — Clientes
+        //  PinBot — Operadores (Usuarios autorizados)
+        //  Solo roles Admin y Ventas pueden tener PIN asignado.
+        //  PIN almacenado como hash PBKDF2 (mismo formato que contraseñas).
+        //  Bloqueo tras 5 intentos fallidos por 30 minutos.
         // ════════════════════════════════════════════════════════════════════
 
-        public static string? ObtenerPinBot(string codigoCliente)
+        private const int PIN_MAX_INTENTOS  = 5;
+        private const int PIN_BLOQUEO_MINS  = 30;
+        private const int PIN_LONGITUD      = 6;
+
+        /// <summary>Genera un PIN numérico aleatorio de 6 dígitos, lo hashea y lo guarda.
+        /// Devuelve el PIN en texto plano (mostrar UNA SOLA VEZ al Admin).</summary>
+        public static string GenerarPinBot(int usuarioId)
         {
+            // Generar PIN numérico criptográficamente aleatorio
+            var bytes = new byte[4];
+            System.Security.Cryptography.RandomNumberGenerator.Fill(bytes);
+            int num = Math.Abs(BitConverter.ToInt32(bytes, 0)) % 1_000_000;
+            string pin = num.ToString().PadLeft(PIN_LONGITUD, '0');
+
+            string hash = HashPassword(pin);  // PBKDF2
+
             using var c = Conn();
             var cmd = c.CreateCommand();
-            cmd.CommandText = "SELECT COALESCE(PinBot,'') FROM Clientes WHERE Codigo = $cod";
-            cmd.Parameters.AddWithValue("$cod", codigoCliente);
-            var r = cmd.ExecuteScalar();
-            var pin = r?.ToString() ?? "";
-            return string.IsNullOrEmpty(pin) ? null : pin;
+            cmd.CommandText = @"UPDATE Usuarios
+                SET PinBotHash = $h, PinBotIntentos = 0, PinBotBloqueadoHasta = NULL
+                WHERE Id = $id";
+            cmd.Parameters.AddWithValue("$h", hash);
+            cmd.Parameters.AddWithValue("$id", usuarioId);
+            cmd.ExecuteNonQuery();
+
+            return pin;
         }
 
-        public static void GuardarPinBot(string codigoCliente, string pin)
+        /// <summary>Revoca el PIN de un operador.</summary>
+        public static void RevocarPinBot(int usuarioId)
         {
             using var c = Conn();
             var cmd = c.CreateCommand();
-            cmd.CommandText = "UPDATE Clientes SET PinBot = $pin WHERE Codigo = $cod";
-            cmd.Parameters.AddWithValue("$pin", pin ?? "");
-            cmd.Parameters.AddWithValue("$cod", codigoCliente);
+            cmd.CommandText = @"UPDATE Usuarios
+                SET PinBotHash = '', PinBotIntentos = 0, PinBotBloqueadoHasta = NULL
+                WHERE Id = $id";
+            cmd.Parameters.AddWithValue("$id", usuarioId);
             cmd.ExecuteNonQuery();
         }
 
-        /// <summary>Valida un PIN de bot y devuelve el código del cliente, o null si no coincide.</summary>
-        public static string? ValidarPinBot(string pin, string? telefonoONombre = null)
+        /// <summary>
+        /// Valida un PIN de operador. Devuelve el Usuario si es correcto, null si falla.
+        /// Implementa bloqueo tras 5 intentos fallidos.
+        /// </summary>
+        public static (Usuario? operador, string? error) ValidarPinBotOperador(string pin)
         {
+            if (string.IsNullOrWhiteSpace(pin) || pin.Length != PIN_LONGITUD || !pin.All(char.IsDigit))
+                return (null, "PIN inválido.");
+
             using var c = Conn();
+
+            // Buscar todos los usuarios con PIN asignado, activos, y con rol Admin o Ventas
             var cmd = c.CreateCommand();
-            // Buscar por PIN exacto (puede haber más de un cliente con el mismo PIN,
-            // en ese caso usar teléfono como desambiguación)
             cmd.CommandText = @"
-                SELECT Codigo, Descripcion, Telefono, Telefono2
-                FROM Clientes
-                WHERE PinBot = $pin AND PinBot != ''";
-            cmd.Parameters.AddWithValue("$pin", pin);
-            using var r = cmd.ExecuteReader();
-            var candidatos = new List<(string cod, string nombre, string tel1, string tel2)>();
-            while (r.Read())
-                candidatos.Add((S(r, 0), S(r, 1), S(r, 2), S(r, 3)));
+                SELECT Id, NombreUsuario, NombreCompleto, Rol, PinBotHash,
+                       PinBotIntentos, PinBotBloqueadoHasta
+                FROM Usuarios
+                WHERE Activo = 1
+                  AND COALESCE(PinBotHash,'') != ''
+                  AND (Rol = 'Admin' OR Rol = 'Ventas')";
 
-            if (candidatos.Count == 0) return null;
-            if (candidatos.Count == 1) return candidatos[0].cod;
-
-            // Desambiguar por teléfono si hay múltiples
-            if (!string.IsNullOrEmpty(telefonoONombre))
+            var candidatos = new List<(int id, string user, string nombre, string rol,
+                                       string hash, int intentos, DateTime? bloqueado)>();
+            using (var r = cmd.ExecuteReader())
             {
-                var limpio = telefonoONombre.Replace("+", "").Replace(" ", "").Replace("-", "");
-                var match = candidatos.FirstOrDefault(c =>
-                    c.tel1.Replace("+", "").Replace(" ", "").Replace("-", "").Contains(limpio) ||
-                    c.tel2.Replace("+", "").Replace(" ", "").Replace("-", "").Contains(limpio) ||
-                    c.nombre.ToUpper().Contains(telefonoONombre.ToUpper()));
-                if (match.cod != null) return match.cod;
+                while (r.Read())
+                {
+                    candidatos.Add((
+                        r.GetInt32(0),
+                        S(r, 1), S(r, 2), S(r, 3), S(r, 4),
+                        r.IsDBNull(5) ? 0 : r.GetInt32(5),
+                        r.IsDBNull(6) ? null : DateTime.Parse(r.GetString(6))
+                    ));
+                }
             }
 
-            // Si no se puede desambiguar, devolver el primero
-            return candidatos[0].cod;
+            if (candidatos.Count == 0)
+                return (null, "No hay operadores con PIN configurado.");
+
+            // Verificar PIN contra cada candidato (PBKDF2 - tiempo constante)
+            foreach (var op in candidatos)
+            {
+                // ¿Está bloqueado?
+                if (op.bloqueado.HasValue && op.bloqueado.Value > DateTime.Now)
+                {
+                    var resta = (int)(op.bloqueado.Value - DateTime.Now).TotalMinutes + 1;
+                    // No revelar si el PIN es correcto durante el bloqueo
+                    continue;
+                }
+
+                bool correcto = VerificarPassword(pin, op.hash);
+
+                if (correcto)
+                {
+                    // Resetear intentos
+                    var cmdOk = c.CreateCommand();
+                    cmdOk.CommandText = @"UPDATE Usuarios
+                        SET PinBotIntentos = 0, PinBotBloqueadoHasta = NULL
+                        WHERE Id = $id";
+                    cmdOk.Parameters.AddWithValue("$id", op.id);
+                    cmdOk.ExecuteNonQuery();
+
+                    return (new Usuario
+                    {
+                        Id             = op.id,
+                        NombreUsuario  = op.user,
+                        NombreCompleto = op.nombre,
+                        Rol            = op.rol,
+                    }, null);
+                }
+            }
+
+            // PIN incorrecto: incrementar intentos de TODOS los candidatos no bloqueados
+            foreach (var op in candidatos)
+            {
+                if (op.bloqueado.HasValue && op.bloqueado.Value > DateTime.Now)
+                    continue;
+
+                int nuevosIntentos = op.intentos + 1;
+                var cmdFail = c.CreateCommand();
+                if (nuevosIntentos >= PIN_MAX_INTENTOS)
+                {
+                    var hasta = DateTime.Now.AddMinutes(PIN_BLOQUEO_MINS)
+                        .ToString("yyyy-MM-dd HH:mm:ss");
+                    cmdFail.CommandText = @"UPDATE Usuarios
+                        SET PinBotIntentos = $i, PinBotBloqueadoHasta = $h
+                        WHERE Id = $id";
+                    cmdFail.Parameters.AddWithValue("$h", hasta);
+                }
+                else
+                {
+                    cmdFail.CommandText = @"UPDATE Usuarios
+                        SET PinBotIntentos = $i
+                        WHERE Id = $id";
+                }
+                cmdFail.Parameters.AddWithValue("$i", nuevosIntentos);
+                cmdFail.Parameters.AddWithValue("$id", op.id);
+                cmdFail.ExecuteNonQuery();
+            }
+
+            // Verificar si alguno quedó bloqueado
+            bool algunoBloqueado = candidatos.Any(op =>
+                (op.intentos + 1) >= PIN_MAX_INTENTOS);
+
+            return (null, algunoBloqueado
+                ? $"PIN incorrecto. Demasiados intentos, bloqueado por {PIN_BLOQUEO_MINS} minutos."
+                : "PIN incorrecto.");
         }
+
+        /// <summary>Verifica si un usuario tiene rol válido para PIN de bot.</summary>
+        public static bool PuedeAsignarPinBot(string rol)
+            => rol == "Admin" || rol == "Ventas";
     }
 }
