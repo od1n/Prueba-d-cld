@@ -35,7 +35,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -82,7 +82,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image:generateContent",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -115,7 +115,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const cap = $('Parsear Caption').first().json;\nlet dataBase64=''; let mime='image/png';\ntry {\n  const parts = $json.candidates[0].content.parts || [];\n  const img = parts.find(p => p.inlineData || p.inline_data);\n  if (img) { const d = img.inlineData || img.inline_data; dataBase64 = d.data; mime = d.mimeType || d.mime_type || 'image/png'; }\n} catch(e) {}\nconst assets = dataBase64 ? [{ orden:1, tipo:'imagen', dataBase64, mime, modelo:'gemini-2.5-flash-image', prompt: cap.imagePrompt }] : [];\nreturn [{ json: { _callbackUrl: cap.callbackUrl, jobId: cap.jobId, postId: cap.postId, estado: assets.length ? 'ok' : 'error', caption: { es: cap.es, en: cap.en }, hashtags: cap.hashtags, assets, modelo: 'gemini-2.5-flash', error: assets.length ? null : 'No se genero imagen' } }];"
+        "jsCode": "const cap = $('Parsear Caption').first().json;\nlet dataBase64=''; let mime='image/png';\ntry {\n  const parts = $json.candidates[0].content.parts || [];\n  const img = parts.find(p => p.inlineData || p.inline_data);\n  if (img) { const d = img.inlineData || img.inline_data; dataBase64 = d.data; mime = d.mimeType || d.mime_type || 'image/png'; }\n} catch(e) {}\nconst assets = dataBase64 ? [{ orden:1, tipo:'imagen', dataBase64, mime, modelo:'gemini-3.1-flash-image', prompt: cap.imagePrompt }] : [];\nreturn [{ json: { _callbackUrl: cap.callbackUrl, jobId: cap.jobId, postId: cap.postId, estado: assets.length ? 'ok' : 'error', caption: { es: cap.es, en: cap.en }, hashtags: cap.hashtags, assets, modelo: 'gemini-flash-latest', error: assets.length ? null : 'No se genero imagen' } }];"
       },
       "id": "c1-0001-4000-8000-000000000006",
       "name": "Armar Callback",

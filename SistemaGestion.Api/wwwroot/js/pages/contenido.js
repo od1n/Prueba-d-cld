@@ -83,6 +83,7 @@ async function cargarIdeas() {
     const cont = document.getElementById('tabContent');
     try {
         const ideas = await apiGet(`/api/contenido/ideas?marca=${State.marcaId}`) || [];
+        State.ideas = ideas;
         const porEstado = { nueva: [], en_proceso: [], descartada: [] };
         ideas.forEach(i => (porEstado[i.estado] || porEstado.nueva).push(i));
         cont.innerHTML = `
@@ -212,7 +213,8 @@ window.reactivarIdea = async (id) => {
 // Crear post desde idea Y disparar generación IA
 window.crearPostDesdeIdea = async (ideaId) => {
     try {
-        const res = await apiPost('/api/contenido/posts', { marcaId: State.marcaId, ideaId, formato: 'imagen' });
+        const idea = (State.ideas || []).find(i => i.id === ideaId);
+        const res = await apiPost('/api/contenido/posts', { marcaId: State.marcaId, ideaId, titulo: idea ? idea.titulo : null, formato: 'imagen' });
         await apiPost(`/api/contenido/posts/${res.id}/generar`, {});
         showMsg('Generando post con IA… aparecerá en Posts.', 'ok');
         State.tab = 'posts'; renderContenido();
