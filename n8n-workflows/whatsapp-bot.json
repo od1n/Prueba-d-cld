@@ -1,0 +1,253 @@
+{
+  "name": "WhatsApp Bot — El Hato Pascher",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-bot",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "whatsapp-bot"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const items = $input.all();\nconst body = items[0].json.body || items[0].json;\n\n// Solo procesar messages.upsert\nconst event = body.event || '';\nif (event !== 'messages.upsert') {\n  return [{ json: { phone: '', respuesta: '', needsAPI: false, intent: '' } }];\n}\n\nconst data = body.data || {};\nconst key = data.key || {};\n\n// Ignorar mensajes propios y de grupos\nif (key.fromMe || (key.remoteJid || '').includes('@g.us')) {\n  return [{ json: { phone: '', respuesta: '', needsAPI: false, intent: '' } }];\n}\n\n// Extraer texto\nconst msg = data.message || {};\nconst text = (msg.conversation || (msg.extendedTextMessage && msg.extendedTextMessage.text) || '').trim();\nif (!text) {\n  return [{ json: { phone: '', respuesta: '', needsAPI: false, intent: '' } }];\n}\n\nconst phone = (key.remoteJid || '').replace('@s.whatsapp.net', '');\nlet comando = text.toLowerCase().trim();\nconst API = 'https://api-sg.hato-pascher.com';\n\n// Atajos num\\u00e9ricos: expandir n\\u00famero a comando\nconst atajos = { '1': 'catalogo', '2': 'buscar', '3': 'precio', '4': 'abono', '5': 'pedido' };\nconst partes = comando.split(/\\s+/);\nif (atajos[partes[0]]) {\n  partes[0] = atajos[partes[0]];\n  comando = partes.join(' ');\n}\n\nlet respuesta = '';\nlet needsAPI = false;\nlet apiUrl = '';\nlet intent = '';\nlet args = '';\n\nif (['menu', 'hola', 'ayuda', 'hi', 'hello', 'inicio', '0'].includes(comando)) {\n  intent = 'menu';\n  respuesta = '*\\ud83c\\udfed El Hato Pascher C.A.*\\n\\n' +\n    'Escribe el n\\u00famero o el comando:\\n\\n' +\n    '*1.* \\ud83d\\udce6 *catalogo* \\u2014 lista de productos\\n' +\n    '*2.* \\ud83d\\udd0d *buscar [texto]* \\u2014 buscar producto\\n' +\n    '*3.* \\ud83d\\udcb2 *precio [c\\u00f3digo]* \\u2014 precio de un producto\\n' +\n    '*4.* \\ud83d\\udcdd *abono [PIN]* \\u2014 consulta de cuenta (personal)\\n' +\n    '*5.* \\ud83d\\uded2 *pedido* \\u2014 hacer un pedido\\n\\n' +\n    '_Ejemplo: 2 slalon  \\u00f3  buscar slalon_';\n\n} else if (comando === 'catalogo' || comando === 'productos') {\n  intent = 'catalogo';\n  needsAPI = true;\n  apiUrl = API + '/api/wa/catalogo';\n\n} else if (comando.startsWith('buscar ')) {\n  intent = 'buscar';\n  args = comando.slice(7).trim();\n  if (!args) {\n    respuesta = 'Escribe qu\\u00e9 producto buscas.\\n_Ejemplo: 2 slalon_';\n  } else {\n    needsAPI = true;\n    apiUrl = API + '/api/wa/catalogo?q=' + encodeURIComponent(args);\n  }\n\n} else if (comando === 'buscar') {\n  intent = 'buscar';\n  respuesta = 'Escribe qu\\u00e9 producto buscas.\\n_Ejemplo: 2 slalon_';\n\n} else if (comando.startsWith('precio ')) {\n  intent = 'precio';\n  args = comando.slice(7).trim();\n  if (!args) {\n    respuesta = 'Escribe el c\\u00f3digo del producto.\\n_Ejemplo: 3 771000_';\n  } else {\n    needsAPI = true;\n    apiUrl = API + '/api/wa/producto/' + encodeURIComponent(args);\n  }\n\n} else if (comando === 'precio') {\n  intent = 'precio';\n  respuesta = 'Escribe el c\\u00f3digo del producto.\\n_Ejemplo: 3 771000_';\n\n} else if (comando.startsWith('abono ') || comando.startsWith('estado ') || comando.startsWith('pagos ') || comando.startsWith('abonos ')) {\n  intent = 'abono';\n  const prefijos = ['abono ', 'estado ', 'pagos ', 'abonos '];\n  const prefijo = prefijos.find(p => comando.startsWith(p));\n  args = comando.slice(prefijo.length).trim();\n  if (!args) {\n    respuesta = 'Escribe el PIN del cliente.\\n_Ejemplo: 4 1234_';\n  } else {\n    needsAPI = true;\n    apiUrl = API + '/api/wa/estado-cuenta?pin=' + encodeURIComponent(args) + '&tel=' + phone;\n  }\n\n} else if (['abono', 'estado', 'pagos', 'abonos'].includes(comando)) {\n  intent = 'abono';\n  respuesta = 'Escribe el PIN del cliente.\\n_Ejemplo: 4 1234_';\n\n} else if (comando === 'pedido') {\n  intent = 'pedido_ayuda';\n  respuesta = '*\\ud83d\\uded2 Realizar Pedido*\\n\\n' +\n    'Env\\u00eda tu pedido en un solo mensaje con este formato:\\n\\n' +\n    '*pedido Nombre, Tel\\u00e9fono, productos*\\n\\n' +\n    '_Ejemplo:_\\n' +\n    '_pedido Juan P\\u00e9rez, 0414-1234567, 2 TUB001, 5 SLA002, 1 CEM003_\\n\\n' +\n    'Puedes usar los c\\u00f3digos del *cat\\u00e1logo* (escribe 1).';\n\n} else if (comando.startsWith('pedido ')) {\n  intent = 'pedido';\n  // Parsear: pedido Nombre, Telefono, productos...\n  const contenido = text.slice(7).trim();\n  const segmentos = contenido.split(',').map(s => s.trim());\n  if (segmentos.length < 3) {\n    respuesta = 'Formato incorrecto.\\n\\n' +\n      'Usa: *pedido Nombre, Tel\\u00e9fono, productos*\\n' +\n      '_Ejemplo: pedido Juan, 0414-123, 2 TUB001, 5 SLA002_';\n  } else {\n    const nombre = segmentos[0];\n    const tel = segmentos[1];\n    const prods = segmentos.slice(2).join(', ');\n    needsAPI = true;\n    apiUrl = API + '/api/wa/pedido?nombre=' + encodeURIComponent(nombre) +\n      '&tel=' + encodeURIComponent(tel) +\n      '&items=' + encodeURIComponent(prods) +\n      '&wa=' + phone;\n    args = JSON.stringify({ nombre, tel, items: prods });\n  }\n\n} else {\n  intent = 'default';\n  respuesta = 'No entend\\u00ed \\\"' + text + '\\\".\\n\\nEscribe *menu* para ver las opciones.';\n}\n\nreturn [{ json: { phone, respuesta, needsAPI, apiUrl, intent, args } }];"
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000002",
+      "name": "Preparar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": ""
+          },
+          "conditions": [
+            {
+              "id": "cond-valid",
+              "leftValue": "={{ $json.phone }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000003",
+      "name": "Es Válido",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": ""
+          },
+          "conditions": [
+            {
+              "id": "cond-api",
+              "leftValue": "={{ $json.needsAPI }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000004",
+      "name": "Necesita API",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.apiUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Internal-Token",
+              "value": "TU_SG_INTERNAL_TOKEN_AQUI"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000005",
+      "name": "Llamar API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 200]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const items = $input.all();\nconst apiResp = items[0].json;\nconst prep = $('Preparar').first().json;\nconst intent = prep.intent;\n\nlet respuesta = '';\n\ntry {\n  if (intent === 'catalogo' || intent === 'buscar') {\n    const productos = apiResp.productos || [];\n    if (productos.length > 0) {\n      const titulo = intent === 'buscar'\n        ? '*\\ud83d\\udd0d Resultados para \\\"' + prep.args + '\\\"*'\n        : '*\\ud83d\\udce6 Cat\\u00e1logo de Productos*';\n      respuesta = titulo + '\\n\\n';\n      for (const p of productos) {\n        respuesta += '*' + p.codigo + '* \\u2014 ' + p.descripcion + '\\n';\n        respuesta += '   ' + (p.unidad ? p.unidad + ' \\u00b7 ' : '') + '$' + Number(p.precio).toFixed(2) + '\\n\\n';\n      }\n      respuesta += '_Escribe *3 [c\\u00f3digo]* para m\\u00e1s detalles o *5* para pedir_';\n    } else {\n      respuesta = intent === 'buscar'\n        ? 'No encontr\\u00e9 productos con \\\"' + prep.args + '\\\".\\nPrueba con otro t\\u00e9rmino.'\n        : 'No hay productos disponibles en este momento.';\n    }\n\n  } else if (intent === 'precio') {\n    if (apiResp.error) {\n      respuesta = 'Producto \\\"' + prep.args + '\\\" no encontrado.';\n    } else {\n      respuesta = '*\\ud83d\\udcb2 ' + apiResp.descripcion + '*\\n\\n' +\n        'C\\u00f3digo: ' + apiResp.codigo + '\\n' +\n        (apiResp.departamento ? 'Depto: ' + apiResp.departamento + '\\n' : '') +\n        (apiResp.unidad ? 'Unidad: ' + apiResp.unidad + '\\n' : '') +\n        'Precio: *$' + Number(apiResp.precio).toFixed(2) + '*';\n    }\n\n  } else if (intent === 'abono') {\n    if (apiResp.error) {\n      respuesta = '\\u26a0\\ufe0f ' + apiResp.error;\n    } else {\n      respuesta = '*\\ud83d\\udcdd Consulta de Cuenta*\\n' +\n        'Cliente: *' + apiResp.cliente.nombre + '*\\n' +\n        'RIF: ' + apiResp.cliente.ciRif + '\\n\\n';\n      const facturas = apiResp.facturasPendientes || [];\n      if (facturas.length > 0) {\n        respuesta += '*Facturas pendientes:*\\n';\n        for (const f of facturas) {\n          const venc = f.vencida ? ' \\u26a0\\ufe0f VENCIDA' : '';\n          respuesta += '\\u2022 ' + f.concepto + ': $' + Number(f.saldo).toFixed(2) + venc + '\\n';\n        }\n        respuesta += '\\n';\n      }\n      respuesta += '*Deuda total:* $' + Number(apiResp.totalDeuda).toFixed(2) + '\\n';\n      respuesta += '*Total abonos:* $' + Number(apiResp.totalAbonos).toFixed(2) + '\\n';\n      if (apiResp.saldoFavor > 0) {\n        respuesta += '*Saldo a favor:* $' + Number(apiResp.saldoFavor).toFixed(2) + '\\n';\n      }\n    }\n\n  } else if (intent === 'pedido') {\n    if (apiResp.error) {\n      respuesta = '\\u26a0\\ufe0f ' + apiResp.error;\n    } else {\n      const datos = JSON.parse(prep.args || '{}');\n      respuesta = '*\\u2705 Pedido recibido*\\n\\n' +\n        'Cliente: *' + (datos.nombre || '') + '*\\n' +\n        'Tel: ' + (datos.tel || '') + '\\n' +\n        'Productos: ' + (datos.items || '') + '\\n\\n' +\n        'Nuestro equipo de ventas se comunicar\\u00e1 contigo pronto.\\n' +\n        '_Escribe *menu* para volver al inicio._';\n    }\n\n  } else {\n    respuesta = 'Error procesando la solicitud.';\n  }\n} catch (e) {\n  respuesta = 'Ocurri\\u00f3 un error. Intenta de nuevo m\\u00e1s tarde.';\n}\n\nreturn [{ json: { respuesta } }];"
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000006",
+      "name": "Formatear",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://automatizacion-evolution-api.ru6xga.easypanel.host/message/sendText/jacques-seguimiento",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "35B911909B00-4803-BB0A-026CA20EB306"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ number: $('Preparar').item.json.phone, text: $json.respuesta }) }}",
+        "options": {}
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000007",
+      "name": "Enviar Respuesta",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1560, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://automatizacion-evolution-api.ru6xga.easypanel.host/message/sendText/jacques-seguimiento",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "35B911909B00-4803-BB0A-026CA20EB306"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ number: $json.phone, text: $json.respuesta }) }}",
+        "options": {}
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000008",
+      "name": "Enviar Menú",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 420]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Preparar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar": {
+      "main": [
+        [
+          {
+            "node": "Es Válido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Es Válido": {
+      "main": [
+        [
+          {
+            "node": "Necesita API",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Necesita API": {
+      "main": [
+        [
+          {
+            "node": "Llamar API",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Enviar Menú",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Llamar API": {
+      "main": [
+        [
+          {
+            "node": "Formatear",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formatear": {
+      "main": [
+        [
+          {
+            "node": "Enviar Respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0
+}

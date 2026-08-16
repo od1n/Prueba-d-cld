@@ -1,4 +1,6 @@
 using Microsoft.AspNetCore.RateLimiting;
+using System.Net;
+using System.Net.Mail;
 
 // WhatsAppEndpoints.cs — Endpoints para el bot de WhatsApp (n8n + Evolution API)
 // Auth: X-Internal-Token (mismo que digitalizador), sin JWT.
@@ -9,6 +11,7 @@ using Microsoft.AspNetCore.RateLimiting;
 // POST /api/wa/validar-pin              → valida PIN de cliente, devuelve info
 // GET  /api/wa/estado-cuenta?pin=&tel=  → estado de cuenta del cliente
 // GET  /api/wa/abonos?pin=&tel=         → historial de abonos del cliente
+// GET  /api/wa/pedido?nombre=&tel=&items=&wa= → registra pedido y envía email
 
 namespace SistemaGestion.Api.Endpoints
 {
@@ -42,21 +45,21 @@ namespace SistemaGestion.Api.Endpoints
                 if (!string.IsNullOrWhiteSpace(q))
                 {
                     cmd.CommandText = @"
-                        SELECT Codigo, Descripcion, Unidad, Precio, Existencia
+                        SELECT Codigo, Descripcion, Unidad, Precio
                         FROM Inventario
                         WHERE Activo = 1 AND Precio > 0
                           AND (Codigo LIKE $q OR Descripcion LIKE $q)
-                        ORDER BY Descripcion
+                        ORDER BY Codigo
                         LIMIT 30";
                     cmd.Parameters.AddWithValue("$q", $"%{q.Trim()}%");
                 }
                 else
                 {
                     cmd.CommandText = @"
-                        SELECT Codigo, Descripcion, Unidad, Precio, Existencia
+                        SELECT Codigo, Descripcion, Unidad, Precio
                         FROM Inventario
                         WHERE Activo = 1 AND Precio > 0
-                        ORDER BY Descripcion
+                        ORDER BY Codigo
                         LIMIT 30";
                 }
 
@@ -69,8 +72,7 @@ namespace SistemaGestion.Api.Endpoints
                         codigo      = Db.S(r, 0),
                         descripcion = Db.S(r, 1),
                         unidad      = Db.S(r, 2),
-                        precio      = Db.D(r, 3),
-                        disponible  = Db.D(r, 4) > 0
+                        precio      = Db.D(r, 3)
                     });
                 }
                 return Results.Ok(new { total = lista.Count, productos = lista });
@@ -86,8 +88,7 @@ namespace SistemaGestion.Api.Endpoints
                 using var c   = Db.Conn();
                 using var cmd = c.CreateCommand();
                 cmd.CommandText = @"
-                    SELECT Codigo, Descripcion, Departamento, Unidad,
-                           Precio, Existencia
+                    SELECT Codigo, Descripcion, Departamento, Unidad, Precio
                     FROM Inventario
                     WHERE Codigo = $cod AND Activo = 1";
                 cmd.Parameters.AddWithValue("$cod", codigo);
@@ -101,8 +102,7 @@ namespace SistemaGestion.Api.Endpoints
                     descripcion  = Db.S(r, 1),
                     departamento = Db.S(r, 2),
                     unidad       = Db.S(r, 3),
-                    precio       = Db.D(r, 4),
-                    disponible   = Db.D(r, 5) > 0
+                    precio       = Db.D(r, 4)
                 });
             });
 
@@ -278,6 +278,87 @@ namespace SistemaGestion.Api.Endpoints
                     });
                 }
                 return Results.Ok(new { total = lista.Count, abonos = lista });
+            });
+
+            // ── 6. Registrar pedido (envía email) ──────────────────────────────
+            // GET /api/wa/pedido?nombre=Juan&tel=0414-123&items=2xTUB001,5xSLA002&wa=58414...
+            app.MapGet("/api/wa/pedido", (HttpContext ctx, string nombre, string tel, string items, string? wa) =>
+            {
+                if (!TokenValido(ctx))
+                    return Results.Json(new { error = "No autorizado." }, statusCode: 401);
+
+                if (string.IsNullOrWhiteSpace(nombre) || string.IsNullOrWhiteSpace(items))
+                    return Results.BadRequest(new { error = "Nombre y productos son requeridos." });
+
+                var smtpUser = Environment.GetEnvironmentVariable("SG_SMTP_EMAIL") ?? "";
+                var smtpPass = Environment.GetEnvironmentVariable("SG_SMTP_PASS") ?? "";
+                var destino  = Environment.GetEnvironmentVariable("SG_PEDIDO_EMAIL") ?? "hatopascher@gmail.com";
+
+                // Formatear cuerpo del email
+                var ahora  = DateTime.Now.ToString("dd/MM/yyyy HH:mm");
+                var cuerpo = $"""
+                    NUEVO PEDIDO VÍA WHATSAPP
+                    ========================
+                    Fecha: {ahora}
+
+                    Cliente: {nombre}
+                    Teléfono: {tel}
+                    WhatsApp: {wa ?? "N/A"}
+
+                    Productos solicitados:
+                    {items.Replace(",", "\n")}
+
+                    ---
+                    Pedido recibido automáticamente desde el bot de WhatsApp.
+                    """;
+
+                if (string.IsNullOrEmpty(smtpUser) || string.IsNullOrEmpty(smtpPass))
+                {
+                    // Sin SMTP configurado: loguear y retornar OK
+                    Console.WriteLine($"[PEDIDO] Sin SMTP. Email pendiente:\n{cuerpo}");
+                    return Results.Ok(new
+                    {
+                        ok      = true,
+                        enviado = false,
+                        mensaje = "Pedido registrado. Email pendiente (SMTP no configurado).",
+                        nombre, tel, items
+                    });
+                }
+
+                try
+                {
+                    using var msg = new MailMessage(smtpUser, destino)
+                    {
+                        Subject = $"Pedido WhatsApp — {nombre} ({ahora})",
+                        Body    = cuerpo
+                    };
+                    using var smtp = new SmtpClient("smtp.gmail.com", 587)
+                    {
+                        Credentials           = new NetworkCredential(smtpUser, smtpPass),
+                        EnableSsl              = true,
+                        Timeout                = 10000
+                    };
+                    smtp.Send(msg);
+
+                    return Results.Ok(new
+                    {
+                        ok      = true,
+                        enviado = true,
+                        mensaje = "Pedido enviado por email.",
+                        nombre, tel, items
+                    });
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[PEDIDO] Error SMTP: {ex.Message}");
+                    return Results.Ok(new
+                    {
+                        ok      = true,
+                        enviado = false,
+                        mensaje = "Pedido registrado pero no se pudo enviar el email.",
+                        nombre, tel, items
+                    });
+                }
             });
         }
 
