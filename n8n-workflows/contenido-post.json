@@ -21,7 +21,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const b = $input.first().json.body || $input.first().json;\nconst marca = b.marca || {};\nconst idea = b.idea || {};\nconst conIngles = (marca.idiomas || 'es').indexOf('en') >= 0;\nconst captionPrompt = `Eres community manager de \"${marca.nombre}\".\\n`\n  + `Voz/tono: ${marca.voz || ''}. Guia de estilo: ${marca.guiaEstilo || ''}.\\n`\n  + `Tema del post: \"${idea.titulo}\". ${idea.descripcion || ''}\\n`\n  + `Escribe el caption para Instagram/Facebook, atractivo y fiel a la marca.\\n`\n  + (conIngles ? 'Incluye tambien version en ingles.\\n' : '')\n  + `Sugiere de 8 a 15 hashtags (incluye si aplican: ${marca.hashtagsBase || ''}).\\n`\n  + `Responde SOLO JSON: {\"es\":\"...\",` + (conIngles ? ` \"en\":\"...\",` : ``) + ` \"hashtags\":[\"#...\"]}.`;\nconst refs = Array.isArray(b.referencias) ? b.referencias : [];\nconst nota = refs.length ? 'Basate en las imagenes de referencia adjuntas del producto real (respeta material, forma y color). ' : '';\nconst imagePrompt = `${nota}${b.promptImagen || idea.titulo}. Estilo de marca: ${marca.guiaEstilo || ''}. Alta calidad, apto para redes, formato cuadrado 1:1.`;\nreturn [{ json: { captionPrompt, imagePrompt, referencias: refs, jobId: b.jobId, postId: b.postId, callbackUrl: b.callbackUrl } }];"
+        "jsCode": "const b = $input.first().json.body || $input.first().json;\nconst marca = b.marca || {};\nconst idea = b.idea || {};\nconst conIngles = (marca.idiomas || 'es').indexOf('en') >= 0;\nconst captionPrompt = `Eres community manager de \"${marca.nombre}\".\\n`\n  + `Voz/tono: ${marca.voz || ''}. Guia de estilo: ${marca.guiaEstilo || ''}.\\n`\n  + `Tema del post: \"${idea.titulo}\". ${idea.descripcion || ''}\\n`\n  + `Escribe el caption para Instagram/Facebook, atractivo y fiel a la marca.\\n`\n  + (conIngles ? 'Incluye tambien version en ingles.\\n' : '')\n  + `Sugiere de 8 a 15 hashtags (incluye si aplican: ${marca.hashtagsBase || ''}).\\n`\n  + `Responde SOLO JSON: {\"es\":\"...\",` + (conIngles ? ` \"en\":\"...\",` : ``) + ` \"hashtags\":[\"#...\"]}.`;\nconst refs = Array.isArray(b.referencias) ? b.referencias : [];\nconst nota = refs.length ? 'Basate FIELMENTE en las imagenes de referencia adjuntas: es el producto real, un fuste/arbol de montura de PLASTICO fabricado por la marca. Conserva su TEXTURA y acabado de superficie originales tal como se ven en las fotos, ademas de su material, forma, proporciones y color. Nunca lo representes en madera. ' : '';\nconst imagePrompt = `${nota}${b.promptImagen || idea.titulo}. Estilo de marca: ${marca.guiaEstilo || ''}. Alta calidad, apto para redes, formato cuadrado 1:1.`;\n// Construir el cuerpo de la peticion de imagen aqui (JS real) para evitar el parser de expresiones de n8n\nconst parts = [{ text: imagePrompt }];\nfor (const r of refs) { if (r && r.data) parts.push({ inlineData: { mimeType: r.mime || 'image/jpeg', data: r.data } }); }\nconst imageReqBody = JSON.stringify({ contents: [{ parts }], generationConfig: { responseModalities: ['IMAGE'] } });\nreturn [{ json: { captionPrompt, imagePrompt, imageReqBody, jobId: b.jobId, postId: b.postId, callbackUrl: b.callbackUrl } }];"
       },
       "id": "c1-0001-4000-8000-000000000002",
       "name": "Preparar",
@@ -93,8 +93,9 @@
           ]
         },
         "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ contents:[{ parts: [{text: $('Parsear Caption').first().json.imagePrompt}].concat(($('Preparar').first().json.referencias||[]).map(r => ({inlineData:{mimeType:r.mime,data:r.data}}))) }], generationConfig:{ responseModalities:['IMAGE'] } }) }}",
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $('Preparar').first().json.imageReqBody }}",
         "options": {
           "response": {
             "response": {

@@ -151,6 +151,7 @@ namespace SistemaGestion.Api
                     CREATE INDEX IF NOT EXISTS IX_Pub_Post          ON Publicaciones(PostId);";
                 cmd.ExecuteNonQuery();
 
+                MigrarColumnas(c);
                 SembrarMarcasBase(c);
                 SembrarConfigBase(c);
                 AsegurarGuiaMarcas(c);
@@ -159,6 +160,22 @@ namespace SistemaGestion.Api
             {
                 Console.WriteLine($"[API] WARN EnsureContenido: {ex.Message}");
             }
+        }
+
+        /// <summary>Agrega columnas nuevas a tablas existentes (idempotente).</summary>
+        private static void MigrarColumnas(SqliteConnection c)
+        {
+            void AddCol(string tabla, string col, string tipo)
+            {
+                try
+                {
+                    using var cmd = c.CreateCommand();
+                    cmd.CommandText = $"ALTER TABLE {tabla} ADD COLUMN {col} {tipo}";
+                    cmd.ExecuteNonQuery();
+                }
+                catch { /* la columna ya existe */ }
+            }
+            AddCol("Posts", "ModoGen", "TEXT");
         }
 
         /// <summary>Siembra las 2 marcas base solo si la tabla está vacía.</summary>

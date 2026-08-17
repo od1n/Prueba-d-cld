@@ -566,22 +566,28 @@ namespace SistemaGestion.Api.Endpoints
                 var promptImagen = string.IsNullOrWhiteSpace(req.PromptImagen)
                     ? $"{ideaTitulo}. {ideaDesc}".Trim() : req.PromptImagen!;
                 var fmt = string.IsNullOrWhiteSpace(req.Formato) ? formato : req.Formato!;
+                var modo = (req.Modo ?? "todo").Trim().ToLowerInvariant();
+                if (modo is not ("texto" or "imagen" or "todo")) modo = "todo";
 
                 using (var upd = c.CreateCommand())
                 {
                     upd.CommandText = @"UPDATE Posts SET Estado='generando', JobId=$j, PromptImagen=$pi, Formato=$f,
-                                        MensajeError=NULL, FechaActualizacion=datetime('now','localtime') WHERE Id=$id";
+                                        ModoGen=$modo, MensajeError=NULL, FechaActualizacion=datetime('now','localtime') WHERE Id=$id";
                     upd.Parameters.AddWithValue("$j", jobId);
                     upd.Parameters.AddWithValue("$pi", promptImagen);
                     upd.Parameters.AddWithValue("$f", fmt);
+                    upd.Parameters.AddWithValue("$modo", modo);
                     upd.Parameters.AddWithValue("$id", id);
                     upd.ExecuteNonQuery();
                 }
 
-                var referencias = LeerReferenciasParaPayload(marcaId, 3);
+                // Regenerar solo texto no requiere referencias (ahorra payload a n8n).
+                var referencias = modo == "texto"
+                    ? new List<object>()
+                    : LeerReferenciasParaPayload(marcaId, 4, req.Referencias);
                 var payload = new
                 {
-                    jobId, postId = id, tipo = "generar_post", marca, referencias,
+                    jobId, postId = id, tipo = "generar_post", marca, referencias, modo,
                     idea = new { titulo = ideaTitulo, descripcion = ideaDesc, pilar = ideaPilar },
                     formato = fmt, promptImagen,
                     nImagenes = req.NImagenes is > 0 and <= 6 ? req.NImagenes!.Value : 1,
@@ -607,15 +613,18 @@ namespace SistemaGestion.Api.Endpoints
                 if (req.PostId <= 0) return Results.BadRequest(new { error = "postId requerido." });
 
                 using var c = Db.Conn();
-                string jobActual = "";
+                string jobActual = "", modo = "todo";
                 using (var cmd = c.CreateCommand())
                 {
-                    cmd.CommandText = "SELECT COALESCE(JobId,'') FROM Posts WHERE Id=$id";
+                    cmd.CommandText = "SELECT COALESCE(JobId,''), COALESCE(NULLIF(ModoGen,''),'todo') FROM Posts WHERE Id=$id";
                     cmd.Parameters.AddWithValue("$id", req.PostId);
-                    var v = cmd.ExecuteScalar();
-                    if (v is null) return Results.NotFound(new { error = "Post no encontrado." });
-                    jobActual = v.ToString() ?? "";
+                    using var r = cmd.ExecuteReader();
+                    if (!r.Read()) return Results.NotFound(new { error = "Post no encontrado." });
+                    jobActual = Db.S(r, 0);
+                    modo = Db.S(r, 1);
                 }
+                bool aplicarTexto = modo != "imagen";
+                bool aplicarImagen = modo != "texto";
                 if (!string.IsNullOrEmpty(req.JobId) && !string.IsNullOrEmpty(jobActual) && req.JobId != jobActual)
                     return Results.BadRequest(new { error = "jobId no coincide." });
 
@@ -633,7 +642,7 @@ namespace SistemaGestion.Api.Endpoints
                 Directory.CreateDirectory(dir);
                 int orden = 0;
                 string? primerB64 = null, primerMime = null;
-                if (req.Assets != null)
+                if (req.Assets != null && aplicarImagen)
                 {
                     using (var del = c.CreateCommand())
                     {
@@ -683,13 +692,13 @@ namespace SistemaGestion.Api.Endpoints
                             CaptionEn = COALESCE($cen, CaptionEn),
                             Hashtags  = COALESCE($ht, Hashtags),
                             ModeloUsado = COALESCE($mo, ModeloUsado),
-                            Estado = 'borrador', MensajeError = $err,
+                            Estado = 'borrador', MensajeError = $err, ModoGen = NULL,
                             FechaActualizacion = datetime('now','localtime')
                         WHERE Id=$id";
-                    upd.Parameters.AddWithValue("$ces", (object?)req.Caption?.Es ?? DBNull.Value);
-                    upd.Parameters.AddWithValue("$cen", (object?)req.Caption?.En ?? DBNull.Value);
-                    upd.Parameters.AddWithValue("$ht", (object?)(req.Hashtags != null ? string.Join(" ", req.Hashtags) : null) ?? DBNull.Value);
-                    upd.Parameters.AddWithValue("$mo", (object?)req.Modelo ?? DBNull.Value);
+                    upd.Parameters.AddWithValue("$ces", aplicarTexto ? ((object?)req.Caption?.Es ?? DBNull.Value) : DBNull.Value);
+                    upd.Parameters.AddWithValue("$cen", aplicarTexto ? ((object?)req.Caption?.En ?? DBNull.Value) : DBNull.Value);
+                    upd.Parameters.AddWithValue("$ht", aplicarTexto ? ((object?)(req.Hashtags != null ? string.Join(" ", req.Hashtags) : null) ?? DBNull.Value) : DBNull.Value);
+                    upd.Parameters.AddWithValue("$mo", aplicarImagen ? ((object?)req.Modelo ?? DBNull.Value) : DBNull.Value);
                     upd.Parameters.AddWithValue("$err", (object?)advertencia ?? DBNull.Value);
                     upd.Parameters.AddWithValue("$id", req.PostId);
                     upd.ExecuteNonQuery();
@@ -754,6 +763,99 @@ namespace SistemaGestion.Api.Endpoints
                 if (!NombreRefSeguro(name)) return Results.NotFound();
                 var full = Path.Combine(RutaRefsDir(id), name);
                 if (File.Exists(full)) File.Delete(full);
+                return Results.Ok(new { ok = true });
+            }).RequireAuthorization();
+
+            // ════════════════ ASSETS DEL POST (carrusel / subida manual) ════════════════
+
+            // Subir una imagen manual como asset del post (para carrusel o reemplazo).
+            app.MapPost("/api/contenido/posts/{id:int}/assets", async (int id, HttpContext ctx, IFormFile file) =>
+            {
+                if (!TokenService.EsRedes(ctx.User)) return Results.Forbid();
+                if (file is null || file.Length == 0) return Results.BadRequest(new { error = "Archivo vacio." });
+                if (file.Length > 12 * 1024 * 1024) return Results.BadRequest(new { error = "Maximo 12 MB." });
+                var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
+                if (ext is not (".png" or ".jpg" or ".jpeg" or ".webp"))
+                    return Results.BadRequest(new { error = "Solo PNG, JPG o WEBP." });
+
+                using var c = Db.Conn();
+                int orden;
+                using (var q = c.CreateCommand())
+                {
+                    q.CommandText = "SELECT COUNT(*), COALESCE(MAX(Orden),0) FROM PostAssets WHERE PostId=$p";
+                    q.Parameters.AddWithValue("$p", id);
+                    using var chkPost = c.CreateCommand();
+                    chkPost.CommandText = "SELECT 1 FROM Posts WHERE Id=$p";
+                    chkPost.Parameters.AddWithValue("$p", id);
+                    if (chkPost.ExecuteScalar() is null) return Results.NotFound(new { error = "Post no encontrado." });
+                    using var r = q.ExecuteReader();
+                    r.Read();
+                    orden = Db.I2(r, 1) + 1;
+                }
+                var dir = Path.Combine(RutaContenidoDir(), id.ToString());
+                Directory.CreateDirectory(dir);
+                var outExt = ext == ".png" ? "png" : ext == ".webp" ? "webp" : "jpg";
+                var name = $"{orden}-{Guid.NewGuid():N}.{outExt}";
+                var full = Path.Combine(dir, name);
+                await using (var fs = File.Create(full)) await file.CopyToAsync(fs);
+
+                long newId;
+                using (var cmd = c.CreateCommand())
+                {
+                    cmd.CommandText = @"INSERT INTO PostAssets (PostId, Orden, Tipo, RutaArchivo, Origen, EsFinal)
+                                        VALUES ($p, $o, 'imagen', $rt, 'manual', 1);
+                                        SELECT last_insert_rowid();";
+                    cmd.Parameters.AddWithValue("$p", id);
+                    cmd.Parameters.AddWithValue("$o", orden);
+                    cmd.Parameters.AddWithValue("$rt", full);
+                    newId = Convert.ToInt64(cmd.ExecuteScalar());
+                }
+                return Results.Ok(new { id = newId, orden });
+            }).RequireAuthorization().DisableAntiforgery();
+
+            // Eliminar un asset (imagen) del post.
+            app.MapDelete("/api/contenido/posts/{id:int}/assets/{assetId:int}", (int id, int assetId, HttpContext ctx) =>
+            {
+                if (!TokenService.EsRedes(ctx.User)) return Results.Forbid();
+                using var c = Db.Conn();
+                string ruta;
+                using (var q = c.CreateCommand())
+                {
+                    q.CommandText = "SELECT RutaArchivo FROM PostAssets WHERE Id=$a AND PostId=$p";
+                    q.Parameters.AddWithValue("$a", assetId);
+                    q.Parameters.AddWithValue("$p", id);
+                    var v = q.ExecuteScalar();
+                    if (v is null) return Results.NotFound();
+                    ruta = v.ToString() ?? "";
+                }
+                using (var del = c.CreateCommand())
+                {
+                    del.CommandText = "DELETE FROM PostAssets WHERE Id=$a AND PostId=$p";
+                    del.Parameters.AddWithValue("$a", assetId);
+                    del.Parameters.AddWithValue("$p", id);
+                    del.ExecuteNonQuery();
+                }
+                try { if (!string.IsNullOrEmpty(ruta) && File.Exists(ruta)) File.Delete(ruta); } catch { }
+                return Results.Ok(new { ok = true });
+            }).RequireAuthorization();
+
+            // Reordenar los assets del post (nuevo orden por lista de ids).
+            app.MapPut("/api/contenido/posts/{id:int}/assets/orden", (int id, HttpContext ctx, ContOrdenReq req) =>
+            {
+                if (!TokenService.EsRedes(ctx.User)) return Results.Forbid();
+                if (req.Ids is null || req.Ids.Length == 0) return Results.BadRequest(new { error = "Ids requeridos." });
+                using var c = Db.Conn();
+                int orden = 0;
+                foreach (var aid in req.Ids)
+                {
+                    orden++;
+                    using var cmd = c.CreateCommand();
+                    cmd.CommandText = "UPDATE PostAssets SET Orden=$o WHERE Id=$a AND PostId=$p";
+                    cmd.Parameters.AddWithValue("$o", orden);
+                    cmd.Parameters.AddWithValue("$a", aid);
+                    cmd.Parameters.AddWithValue("$p", id);
+                    cmd.ExecuteNonQuery();
+                }
                 return Results.Ok(new { ok = true });
             }).RequireAuthorization();
         }
@@ -910,12 +1012,16 @@ namespace SistemaGestion.Api.Endpoints
         /// Lee hasta max imagenes de referencia, las REDIMENSIONA a ~1024 px JPEG
         /// (para que el payload a n8n sea liviano) y las devuelve como {mime, data(base64)}.
         /// </summary>
-        private static List<object> LeerReferenciasParaPayload(int marcaId, int max)
+        private static List<object> LeerReferenciasParaPayload(int marcaId, int max, string[]? seleccion = null)
         {
             var list = new List<object>();
             try
             {
-                foreach (var f in Directory.GetFiles(RutaRefsDir(marcaId)).OrderBy(x => x).Take(max))
+                var dir = RutaRefsDir(marcaId);
+                IEnumerable<string> archivos = (seleccion != null && seleccion.Length > 0)
+                    ? seleccion.Where(NombreRefSeguro).Select(n => Path.Combine(dir, n)).Where(File.Exists)
+                    : Directory.GetFiles(dir).OrderBy(x => x);
+                foreach (var f in archivos.Take(max))
                 {
                     var ext = Path.GetExtension(f).ToLowerInvariant();
                     if (ext is not (".png" or ".jpg" or ".jpeg" or ".webp")) continue;
@@ -979,10 +1085,11 @@ namespace SistemaGestion.Api.Endpoints
         bool? PrimerComentarioHashtags, string? FechaProgramada);
     record ContEstadoReq(string Estado);
     record ContRechazoReq(string? Nota);
+    record ContOrdenReq(int[]? Ids);
 
     // DTOs de generación IA
     record GenerarIdeasReq(int MarcaId, string[]? Pilares, int? Cantidad, bool? UsarBase);
-    record GenerarPostReq(string? Formato, string? PromptImagen, int? NImagenes);
+    record GenerarPostReq(string? Formato, string? PromptImagen, int? NImagenes, string? Modo, string[]? Referencias);
     record HookIdeaItem(string? Titulo, string? Descripcion, string? Pilar);
     record HookIdeasReq(int MarcaId, HookIdeaItem[]? Ideas);
     record CaptionDto(string? Es, string? En);

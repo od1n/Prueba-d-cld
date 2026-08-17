@@ -1,7 +1,8 @@
 // ═══════════════════════════════════════════════════════════════
-//  contenido.js — Estudio de Contenido (Fase 2)
-//  Selector de marca · Banco de ideas (+ generar IA) · Posts (+ generar IA)
-//  Detalle de post: imagen + caption ES/EN + hashtags + aprobación
+//  contenido.js — Estudio de Contenido (Fase 3)
+//  Marca · Ideas · Posts · Calendario editorial
+//  Post: carrusel (subir/reordenar/eliminar) · caption ES/EN · hashtags
+//  Generación IA: todo / solo texto / solo imagen · elegir referencias
 // ═══════════════════════════════════════════════════════════════
 if (!Auth.requireAuth()) { /* redirige */ }
 
@@ -12,6 +13,8 @@ const State = {
     marcaId: null,
     tab: 'ideas',
     pollActivo: false,
+    postActual: null,   // { id, assets } del post abierto (para reordenar)
+    calRef: null,       // Date del mes mostrado en el calendario
 };
 
 const PILARES = [
@@ -28,6 +31,9 @@ const ESTADO_LABEL = {
     aprobado: 'Aprobado', programado: 'Programado', publicado: 'Publicado',
     error: 'Error', archivado: 'Archivado',
 };
+
+const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio',
+    'Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
 function esAdmin() { return ((Auth.getUser() || {}).rol) === 'Admin'; }
 
@@ -65,14 +71,18 @@ function renderContenido() {
             <div class="seg">
                 <button class="seg-btn ${State.tab === 'ideas' ? 'active' : ''}" onclick="cambiarTab('ideas')">💡 Ideas</button>
                 <button class="seg-btn ${State.tab === 'posts' ? 'active' : ''}" onclick="cambiarTab('posts')">🗂️ Posts</button>
+                <button class="seg-btn ${State.tab === 'calendario' ? 'active' : ''}" onclick="cambiarTab('calendario')">📅 Calendario</button>
             </div>
         </div>
         <div id="tabContent"><div class="loading-msg"><div class="spinner"></div></div></div>
         <div class="modal-overlay" id="modalIdea"></div>
         <div class="modal-overlay" id="modalGen"></div>
         <div class="modal-overlay" id="modalPost"></div>
+        <div class="modal-overlay" id="modalGenPost"></div>
         <div class="modal-overlay" id="modalRefs"></div>`;
-    if (State.tab === 'ideas') cargarIdeas(); else cargarPosts();
+    if (State.tab === 'ideas') cargarIdeas();
+    else if (State.tab === 'posts') cargarPosts();
+    else cargarCalendario();
 }
 
 window.cambiarMarca = (v) => { State.marcaId = parseInt(v); renderContenido(); };
@@ -192,7 +202,6 @@ window.generarIdeas = async () => {
         });
         closeModal('modalGen');
         showMsg('Generando ideas con IA…', 'ok');
-        // Sondear la lista unas cuantas veces
         let tries = 0;
         const iv = setInterval(async () => {
             tries++;
@@ -212,12 +221,12 @@ window.reactivarIdea = async (id) => {
     catch (err) { showMsg(err.message, 'error'); }
 };
 
-// Crear post desde idea Y disparar generación IA
+// Crear post desde idea Y disparar generación IA (un clic, referencias por defecto)
 window.crearPostDesdeIdea = async (ideaId) => {
     try {
         const idea = (State.ideas || []).find(i => i.id === ideaId);
         const res = await apiPost('/api/contenido/posts', { marcaId: State.marcaId, ideaId, titulo: idea ? idea.titulo : null, formato: 'imagen' });
-        await apiPost(`/api/contenido/posts/${res.id}/generar`, {});
+        await apiPost(`/api/contenido/posts/${res.id}/generar`, { modo: 'todo' });
         showMsg('Generando post con IA… aparecerá en Posts.', 'ok');
         State.tab = 'posts'; renderContenido();
     } catch (err) { showMsg(err.message, 'error'); }
@@ -235,7 +244,6 @@ async function cargarPosts() {
         }
         cont.innerHTML = `<div class="mb-8"><span class="text-dim text-sm">${posts.length} post(s)</span></div>
             <div class="lista">${posts.map(tarjetaPost).join('')}</div>`;
-        // Sondeo automático mientras haya posts generándose
         const generando = posts.some(p => p.estado === 'generando');
         if (generando && !State.pollActivo) {
             State.pollActivo = true;
@@ -254,7 +262,7 @@ function tarjetaPost(p) {
             ${badgeEstado(p.estado)}
         </div>
         <div class="text-dim text-sm" style="margin-top:4px">
-            ${esh(p.formato)} · ${esh(p.plataformasDestino)} · ${p.numAssets} asset(s)
+            ${esh(p.formato)} · ${esh(p.plataformasDestino)} · ${p.numAssets} img
             ${p.fechaProgramada ? ' · 📅 ' + esh(p.fechaProgramada) : ''}
         </div>
         ${p.captionEs ? `<p class="text-dim text-sm" style="margin-top:4px">${esh((p.captionEs||'').slice(0,120))}${(p.captionEs||'').length>120?'…':''}</p>` : ''}
@@ -272,11 +280,23 @@ window.abrirPost = async (id) => {
     try { data = await apiGet(`/api/contenido/posts/${id}`); }
     catch (err) { modal.innerHTML = `<div class="modal-sheet"><div class="msg show error">${esh(err.message)}</div></div>`; return; }
     const p = data.post, assets = data.assets || [];
+    State.postActual = { id, assets };
     const conEn = (marcaActual().idiomas || 'es').indexOf('en') >= 0;
-    const imgs = assets.map(a =>
-        `<img src="/api/contenido/posts/${id}/asset/${a.id}" alt="asset"
-              style="width:100%;border-radius:8px;background:#111;margin-bottom:8px">`).join('')
-        || `<p class="text-dim text-sm">Sin imagen todavía.</p>`;
+    const cb = Date.now();
+    const imgs = assets.length ? assets.map((a, idx) => `
+        <div class="asset-item">
+            <div class="asset-bar">
+                <span class="text-dim text-sm">#${idx + 1}${a.origen === 'manual' ? ' · subida' : (a.modeloGen ? ' · IA' : '')}</span>
+                <span style="display:flex;gap:4px">
+                    <button class="btn btn-sm" onclick="moverAsset(${id},${a.id},-1)" ${idx === 0 ? 'disabled' : ''}>◀</button>
+                    <button class="btn btn-sm" onclick="moverAsset(${id},${a.id},1)" ${idx === assets.length - 1 ? 'disabled' : ''}>▶</button>
+                    <button class="btn btn-sm" onclick="eliminarAssetPost(${id},${a.id})" title="Eliminar">🗑</button>
+                </span>
+            </div>
+            <img src="/api/contenido/posts/${id}/asset/${a.id}?t=${cb}" alt="asset ${idx + 1}">
+        </div>`).join('')
+        : `<p class="text-dim text-sm">Sin imagen todavía.</p>`;
+    const fechaVal = (p.fechaProgramada || '').replace(' ', 'T').slice(0, 16);
     const puedeAprobar = esAdmin();
     modal.innerHTML = `
       <div class="modal-sheet" style="max-width:640px">
@@ -286,18 +306,26 @@ window.abrirPost = async (id) => {
         </div>
         <div class="msg" id="msgPost"></div>
         ${p.mensajeError ? `<div class="msg show error">${esh(p.mensajeError)}</div>` : ''}
-        ${imgs}
+        <div class="carrusel">${imgs}</div>
+        <div class="asset-add">
+            <input type="file" id="assetFile" accept="image/png,image/jpeg,image/webp">
+            <button class="btn btn-sm" id="btnAsset" onclick="subirAssetPost(${id})">＋ Agregar imagen</button>
+        </div>
         <div class="input-group"><label class="input-label">Caption (ES)</label>
             <textarea class="input-field" id="pCapEs" rows="4">${esh(p.captionEs || '')}</textarea></div>
         ${conEn ? `<div class="input-group"><label class="input-label">Caption (EN)</label>
             <textarea class="input-field" id="pCapEn" rows="4">${esh(p.captionEn || '')}</textarea></div>` : ''}
         <div class="input-group"><label class="input-label">Hashtags</label>
             <input class="input-field" id="pHash" value="${eshA(p.hashtags || '')}"></div>
-        <div class="input-group"><label class="input-label">Programar (opcional)</label>
-            <input class="input-field" id="pFecha" type="datetime-local"></div>
+        <div class="input-group"><label class="input-label">Programar publicación (opcional)</label>
+            <input class="input-field" id="pFecha" type="datetime-local" value="${eshA(fechaVal)}"></div>
+        <div class="acciones-gen">
+          <button class="btn btn-sm" onclick="regenTodo(${id})">🎲 Regenerar todo</button>
+          <button class="btn btn-sm" onclick="regenTexto(${id})">📝 Solo texto</button>
+          <button class="btn btn-sm" onclick="regenImagen(${id})">🖼️ Solo imagen</button>
+        </div>
         <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">
           <button class="btn btn-sm" onclick="guardarPost(${id})">💾 Guardar</button>
-          <button class="btn btn-sm" onclick="regenerarPost(${id})">🎲 Regenerar</button>
           <button class="btn btn-sm btn-cyan" onclick="enviarRevision(${id})">Enviar a revisión →</button>
           ${puedeAprobar ? `<button class="btn btn-sm" style="background:#16643a;color:#fff" onclick="aprobarPost(${id})">✔ Aprobar</button>
                             <button class="btn btn-sm" onclick="rechazarPost(${id})">✖ Rechazar</button>` : ''}
@@ -316,18 +344,105 @@ function recolectarPost() {
     };
 }
 
+// Guarda sin toast (usado antes de regenerar)
+async function guardarSilencioso(id) {
+    try { await apiPost(`/api/contenido/posts/${id}`, recolectarPost(), 'PUT'); } catch (e) { /* ignore */ }
+}
+
 window.guardarPost = async (id) => {
     try { await apiPost(`/api/contenido/posts/${id}`, recolectarPost(), 'PUT');
         showMsg('Guardado.', 'ok', '#msgPost'); }
     catch (err) { showMsg(err.message, 'error', '#msgPost'); }
 };
 
-window.regenerarPost = async (id) => {
-    try { await apiPost(`/api/contenido/posts/${id}`, recolectarPost(), 'PUT');
-        await apiPost(`/api/contenido/posts/${id}/generar`, {});
-        closeModal('modalPost'); showMsg('Regenerando con IA…', 'ok');
+// ── Carrusel: subir / reordenar / eliminar imágenes ──────────────────────
+window.subirAssetPost = async (id) => {
+    const inp = document.getElementById('assetFile');
+    if (!inp.files || !inp.files.length) { showMsg('Elige una imagen.', 'error', '#msgPost'); return; }
+    const btn = document.getElementById('btnAsset'); setLoading(btn, true);
+    try {
+        const fd = new FormData(); fd.append('file', inp.files[0]);
+        const res = await fetch(`/api/contenido/posts/${id}/assets`, { method: 'POST', credentials: 'include', body: fd });
+        if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.error || 'No se pudo subir.'); }
+        await abrirPost(id);
+    } catch (err) { showMsg(err.message, 'error', '#msgPost'); setLoading(btn, false); }
+};
+
+window.eliminarAssetPost = async (id, assetId) => {
+    if (!confirm('¿Eliminar esta imagen del post?')) return;
+    try {
+        await apiFetch(`/api/contenido/posts/${id}/assets/${assetId}`, { method: 'DELETE' });
+        await abrirPost(id);
+    } catch (err) { showMsg(err.message, 'error', '#msgPost'); }
+};
+
+window.moverAsset = async (id, assetId, delta) => {
+    const cur = State.postActual;
+    if (!cur || cur.id !== id) return;
+    const ids = cur.assets.map(a => a.id);
+    const i = ids.indexOf(assetId);
+    const j = i + delta;
+    if (i < 0 || j < 0 || j >= ids.length) return;
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+    try {
+        await apiPost(`/api/contenido/posts/${id}/assets/orden`, { ids }, 'PUT');
+        await abrirPost(id);
+    } catch (err) { showMsg(err.message, 'error', '#msgPost'); }
+};
+
+// ── Regeneración con IA (todo / texto / imagen) ──────────────────────────
+window.regenTexto = async (id) => {
+    await guardarSilencioso(id);
+    try {
+        await apiPost(`/api/contenido/posts/${id}/generar`, { modo: 'texto' });
+        closeModal('modalPost'); showMsg('Regenerando texto con IA…', 'ok');
         State.tab = 'posts'; renderContenido();
     } catch (err) { showMsg(err.message, 'error', '#msgPost'); }
+};
+window.regenTodo   = async (id) => { await guardarSilencioso(id); abrirGenerarPost(id, 'todo'); };
+window.regenImagen = async (id) => { await guardarSilencioso(id); abrirGenerarPost(id, 'imagen'); };
+
+// Modal de opciones de generación de imagen (prompt + elegir referencias)
+window.abrirGenerarPost = async (id, modo) => {
+    const modal = document.getElementById('modalGenPost');
+    modal.innerHTML = `<div class="modal-sheet"><div class="loading-msg"><div class="spinner"></div></div></div>`;
+    closeModal('modalPost');
+    openModal('modalGenPost');
+    let post = {}, refs = [];
+    try {
+        const d = await apiGet(`/api/contenido/posts/${id}`); post = d.post || {};
+        refs = await apiGet(`/api/contenido/marcas/${post.marcaId}/referencias`) || [];
+    } catch (e) { /* sigue con lo que haya */ }
+    const refThumbs = refs.length ? refs.map(f => `
+        <label class="ref-pick" title="${eshA(f)}">
+            <input type="checkbox" class="genRef" value="${eshA(f)}" checked>
+            <img src="/api/contenido/marcas/${post.marcaId}/referencias/${encodeURIComponent(f)}">
+        </label>`).join('')
+        : `<p class="text-dim text-sm">No hay fotos de referencia. Súbelas con 📎 Referencias para que la imagen se base en el fuste real.</p>`;
+    const titulo = modo === 'imagen' ? '🖼️ Regenerar imagen' : '🎲 Regenerar post completo';
+    modal.innerHTML = `
+      <div class="modal-sheet" style="max-width:600px">
+        <div class="flex-between mb-8"><strong>${titulo}</strong>
+            <button class="btn-close" onclick="closeModal('modalGenPost')">✕</button></div>
+        <div class="msg" id="msgGenPost"></div>
+        <div class="input-group"><label class="input-label" for="genPrompt">Prompt de imagen (qué debe mostrar)</label>
+            <textarea class="input-field" id="genPrompt" rows="3" placeholder="Ej: fuste plástico HDPE en primer plano sobre fondo neutro">${esh(post.promptImagen || post.titulo || '')}</textarea></div>
+        <label class="input-label">Fotos de referencia a usar (la imagen conserva su textura y forma real)</label>
+        <div class="ref-grid">${refThumbs}</div>
+        <button class="btn btn-cyan" id="btnGenPost" onclick="confirmarGenerarPost(${id},'${modo}')" style="margin-top:10px">Generar</button>
+        <p class="text-dim text-sm" style="margin-top:8px">Recuerda: nunca fustes de madera (es la competencia). El cuero sí está permitido.</p>
+      </div>`;
+};
+
+window.confirmarGenerarPost = async (id, modo) => {
+    const btn = document.getElementById('btnGenPost'); setLoading(btn, true);
+    const promptImagen = document.getElementById('genPrompt').value.trim();
+    const referencias = Array.from(document.querySelectorAll('.genRef:checked')).map(c => c.value);
+    try {
+        await apiPost(`/api/contenido/posts/${id}/generar`, { modo, promptImagen: promptImagen || null, referencias });
+        closeModal('modalGenPost'); showMsg('Generando con IA…', 'ok');
+        State.tab = 'posts'; renderContenido();
+    } catch (err) { showMsg(err.message, 'error', '#msgGenPost'); setLoading(btn, false); }
 };
 
 window.enviarRevision = async (id) => {
@@ -352,6 +467,69 @@ window.rechazarPost = async (id) => {
         closeModal('modalPost'); cargarPosts(); }
     catch (err) { showMsg(err.message, 'error', '#msgPost'); }
 };
+
+// ── CALENDARIO EDITORIAL ─────────────────────────────────────────────────
+async function cargarCalendario() {
+    const cont = document.getElementById('tabContent');
+    const ref = State.calRef || new Date();
+    State.calRef = new Date(ref.getFullYear(), ref.getMonth(), 1);
+    const y = State.calRef.getFullYear(), m = State.calRef.getMonth();
+    const last = new Date(y, m + 1, 0);
+    const mm = String(m + 1).padStart(2, '0');
+    const desde = `${y}-${mm}-01 00:00:00`;
+    const hasta = `${y}-${mm}-${String(last.getDate()).padStart(2, '0')} 23:59:59`;
+    let posts = [];
+    try {
+        posts = await apiGet(`/api/contenido/posts?marca=${State.marcaId}&desde=${encodeURIComponent(desde)}&hasta=${encodeURIComponent(hasta)}`) || [];
+    } catch (err) { cont.innerHTML = `<div class="msg show error">${esh(err.message)}</div>`; return; }
+
+    const byDay = {};
+    posts.forEach(p => {
+        if (!p.fechaProgramada) return;
+        const d = p.fechaProgramada.slice(0, 10);
+        (byDay[d] = byDay[d] || []).push(p);
+    });
+
+    const primerDiaSem = new Date(y, m, 1).getDay(); // 0=Dom
+    const dias = last.getDate();
+    const hoyStr = fechaISOLocal(new Date());
+    let celdas = '';
+    for (let i = 0; i < primerDiaSem; i++) celdas += `<div class="cal-cell cal-empty"></div>`;
+    for (let d = 1; d <= dias; d++) {
+        const key = `${y}-${mm}-${String(d).padStart(2, '0')}`;
+        const chips = (byDay[key] || []).map(p =>
+            `<div class="cal-chip badge-${esh(p.estado)}" onclick="abrirPost(${p.id})" title="${eshA(p.titulo || '')}">${esh((p.titulo || 'post').slice(0, 18))}</div>`
+        ).join('');
+        celdas += `<div class="cal-cell ${key === hoyStr ? 'cal-hoy' : ''}">
+            <div class="cal-num">${d}</div>${chips}</div>`;
+    }
+    const sinProg = posts.filter(p => !p.fechaProgramada).length;
+    cont.innerHTML = `
+        <div class="flex-between mb-8">
+            <div style="display:flex;align-items:center;gap:8px">
+                <button class="btn btn-sm" onclick="calNav(-1)">‹</button>
+                <strong>${MESES[m]} ${y}</strong>
+                <button class="btn btn-sm" onclick="calNav(1)">›</button>
+                <button class="btn btn-sm" onclick="calHoy()">Hoy</button>
+            </div>
+            <span class="text-dim text-sm">${posts.filter(p=>p.fechaProgramada).length} programado(s)${sinProg ? ` · ${sinProg} sin fecha` : ''}</span>
+        </div>
+        <div class="cal-head">
+            <span>Dom</span><span>Lun</span><span>Mar</span><span>Mié</span><span>Jue</span><span>Vie</span><span>Sáb</span>
+        </div>
+        <div class="cal-grid">${celdas}</div>
+        <p class="text-dim text-sm" style="margin-top:10px">Programa un post desde su detalle (campo “Programar publicación”). Al aprobarlo con fecha, pasa a “Programado”.</p>`;
+}
+
+function fechaISOLocal(dt) {
+    return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+}
+window.calNav = (delta) => {
+    const r = State.calRef || new Date();
+    State.calRef = new Date(r.getFullYear(), r.getMonth() + delta, 1);
+    cargarCalendario();
+};
+window.calHoy = () => { State.calRef = new Date(); cargarCalendario(); };
 
 // ── REFERENCIAS DE MARCA (fotos reales del producto) ────────────────────
 window.abrirReferencias = async () => {
@@ -379,7 +557,7 @@ async function cargarRefs() {
           <strong>📎 Referencias — ${esh(marcaActual().nombre || '')}</strong>
           <button class="btn-close" onclick="closeModal('modalRefs')">✕</button>
         </div>
-        <p class="text-dim text-sm">La IA usa estas fotos reales como base para generar las imágenes (respeta material, forma y color). PNG/JPG/WEBP, máx 8 MB.</p>
+        <p class="text-dim text-sm">La IA usa estas fotos reales como base y conserva la textura, material, forma y color del fuste plástico. PNG/JPG/WEBP, máx 8 MB.</p>
         <div class="msg" id="msgRefs"></div>
         <div style="display:flex;flex-wrap:wrap;gap:8px;margin:10px 0">${thumbs}</div>
         <input type="file" id="refFile" accept="image/png,image/jpeg,image/webp" multiple style="margin-bottom:8px">
