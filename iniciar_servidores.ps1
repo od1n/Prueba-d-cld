@@ -108,10 +108,10 @@ Write-Host "  ╔═════════════════════
 Write-Host "  ║              SISTEMA LISTO                           ║" -ForegroundColor Cyan
 Write-Host "  ╠══════════════════════════════════════════════════════╣" -ForegroundColor Cyan
 Write-Host "  ║  PC (navegador)  →  " -ForegroundColor Cyan -NoNewline
-Write-Host "http://localhost:5050     " -ForegroundColor Green -NoNewline
+Write-Host "https://localhost:5443    " -ForegroundColor Green -NoNewline
 Write-Host "   ║" -ForegroundColor Cyan
 if ($ipLocal) {
-    $url = "http://$($ipLocal):5050"
+    $url = "https://$($ipLocal):5443"
     $pad = " " * [Math]::Max(0, 28 - $url.Length)
     Write-Host "  ║  Celular/tablet  →  " -ForegroundColor Cyan -NoNewline
     Write-Host "$url$pad" -ForegroundColor Green -NoNewline
@@ -123,21 +123,21 @@ Write-Host "  ╚═════════════════════
 Write-Host ""
 
 # Abrir navegador (solo si hay uno asociado; en servidores sin navegador se omite sin error)
-try { Start-Process "http://localhost:5050" -ErrorAction Stop }
-catch { Write-Host "  [.] Sin navegador en este equipo. Abre el portal manualmente: http://localhost:5050" -ForegroundColor DarkGray }
+try { Start-Process "https://localhost:5443" -ErrorAction Stop }
+catch { Write-Host "  [.] Sin navegador en este equipo. Abre el portal manualmente: https://localhost:5443" -ForegroundColor DarkGray }
 
 # ── Esperar Ctrl+C o cierre de ventana ───────────────────────────────────
 try {
     # Monitorear que ambos procesos sigan vivos
     while ($true) {
         Start-Sleep -Seconds 5
-        if ($procApi.HasExited -and -not $procApi.HasExited) {
+        if ($procApi.HasExited) {
             Write-Err "La API se cerró inesperadamente."
             break
         }
-        if ($procDig.HasExited) {
-            Write-Info "El digitalizador se cerró. Puede reiniciarse desde el portal."
-        }
+        # Nota: el digitalizador Python corre como proceso hijo; no se vigila aqui
+        # (su proceso lanzador termina aunque uvicorn siga vivo en :8080). Se
+        # reinicia desde el portal si hace falta.
     }
 }
 finally {
