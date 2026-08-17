@@ -382,22 +382,26 @@ async function cargarRefs() {
         <p class="text-dim text-sm">La IA usa estas fotos reales como base para generar las imágenes (respeta material, forma y color). PNG/JPG/WEBP, máx 8 MB.</p>
         <div class="msg" id="msgRefs"></div>
         <div style="display:flex;flex-wrap:wrap;gap:8px;margin:10px 0">${thumbs}</div>
-        <input type="file" id="refFile" accept="image/png,image/jpeg,image/webp" style="margin-bottom:8px">
+        <input type="file" id="refFile" accept="image/png,image/jpeg,image/webp" multiple style="margin-bottom:8px">
         <button class="btn btn-cyan btn-sm" id="btnSubirRef" onclick="subirRef()">Subir foto</button>
       </div>`;
 }
 
 window.subirRef = async () => {
     const inp = document.getElementById('refFile');
-    if (!inp.files || !inp.files[0]) { showMsg('Elige una imagen.', 'error', '#msgRefs'); return; }
+    if (!inp.files || !inp.files.length) { showMsg('Elige una o más imágenes.', 'error', '#msgRefs'); return; }
     const btn = document.getElementById('btnSubirRef'); setLoading(btn, true);
-    try {
-        const fd = new FormData(); fd.append('file', inp.files[0]);
-        const res = await fetch(`/api/contenido/marcas/${State.marcaId}/referencias`, { method: 'POST', credentials: 'include', body: fd });
-        if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || 'Error al subir.'); }
-        await cargarRefs();
-    } catch (err) { showMsg(err.message, 'error', '#msgRefs'); }
-    finally { setLoading(btn, false); }
+    let ok = 0, fail = 0;
+    for (const f of inp.files) {
+        try {
+            const fd = new FormData(); fd.append('file', f);
+            const res = await fetch(`/api/contenido/marcas/${State.marcaId}/referencias`, { method: 'POST', credentials: 'include', body: fd });
+            if (res.ok) ok++; else fail++;
+        } catch { fail++; }
+    }
+    setLoading(btn, false);
+    showMsg(`Subidas ${ok}${fail ? ', ' + fail + ' con error' : ''}.`, fail ? 'error' : 'ok', '#msgRefs');
+    await cargarRefs();
 };
 
 window.eliminarRef = async (name) => {
