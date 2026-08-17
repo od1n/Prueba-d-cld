@@ -858,12 +858,77 @@ namespace SistemaGestion.Api.Endpoints
                 }
                 return Results.Ok(new { ok = true });
             }).RequireAuthorization();
+
+            // ════════════════ LIMPIEZA / BORRADO (solo Admin) ════════════════
+
+            // Eliminar UN post (con sus assets en disco).
+            app.MapDelete("/api/contenido/posts/{id:int}", (int id, HttpContext ctx) =>
+            {
+                if (!TokenService.EsAdmin(ctx.User)) return Results.Forbid();
+                using var c = Db.Conn();
+                BorrarAssetsDeDisco(new[] { id });
+                using var cmd = c.CreateCommand();
+                cmd.CommandText = @"DELETE FROM PostAssets WHERE PostId=$id;
+                                    DELETE FROM Publicaciones WHERE PostId=$id;
+                                    DELETE FROM Posts WHERE Id=$id;";
+                cmd.Parameters.AddWithValue("$id", id);
+                cmd.ExecuteNonQuery();
+                return Results.Ok(new { ok = true });
+            }).RequireAuthorization();
+
+            // Vaciar TODOS los posts de una marca (con sus assets en disco).
+            app.MapDelete("/api/contenido/marcas/{id:int}/posts", (int id, HttpContext ctx) =>
+            {
+                if (!TokenService.EsAdmin(ctx.User)) return Results.Forbid();
+                using var c = Db.Conn();
+                var ids = new List<int>();
+                using (var q = c.CreateCommand())
+                {
+                    q.CommandText = "SELECT Id FROM Posts WHERE MarcaId=$m";
+                    q.Parameters.AddWithValue("$m", id);
+                    using var r = q.ExecuteReader();
+                    while (r.Read()) ids.Add(Db.I(r, 0));
+                }
+                BorrarAssetsDeDisco(ids);
+                using var cmd = c.CreateCommand();
+                cmd.CommandText = @"DELETE FROM PostAssets WHERE PostId IN (SELECT Id FROM Posts WHERE MarcaId=$m);
+                                    DELETE FROM Publicaciones WHERE PostId IN (SELECT Id FROM Posts WHERE MarcaId=$m);
+                                    DELETE FROM Posts WHERE MarcaId=$m;";
+                cmd.Parameters.AddWithValue("$m", id);
+                cmd.ExecuteNonQuery();
+                return Results.Ok(new { ok = true, posts = ids.Count });
+            }).RequireAuthorization();
+
+            // Vaciar TODAS las ideas de una marca.
+            app.MapDelete("/api/contenido/marcas/{id:int}/ideas", (int id, HttpContext ctx) =>
+            {
+                if (!TokenService.EsAdmin(ctx.User)) return Results.Forbid();
+                using var c = Db.Conn();
+                using var cmd = c.CreateCommand();
+                cmd.CommandText = "DELETE FROM IdeasContenido WHERE MarcaId=$m";
+                cmd.Parameters.AddWithValue("$m", id);
+                var n = cmd.ExecuteNonQuery();
+                return Results.Ok(new { ok = true, ideas = n });
+            }).RequireAuthorization();
         }
 
         // ── Helpers ────────────────────────────────────────────────────────
 
         private static void Bind(SqliteCommand cmd, string name, string? val)
             => cmd.Parameters.AddWithValue(name, (object?)val ?? DBNull.Value);
+
+        private static void BorrarAssetsDeDisco(IEnumerable<int> postIds)
+        {
+            foreach (var pid in postIds)
+            {
+                try
+                {
+                    var dir = Path.Combine(RutaContenidoDir(), pid.ToString());
+                    if (Directory.Exists(dir)) Directory.Delete(dir, true);
+                }
+                catch { }
+            }
+        }
 
         private static object LeerMarca(SqliteDataReader r) => new
         {

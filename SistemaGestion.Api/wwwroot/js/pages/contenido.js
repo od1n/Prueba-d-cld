@@ -104,6 +104,7 @@ async function cargarIdeas() {
                 <div style="display:flex;gap:8px">
                     <button class="btn btn-sm" onclick="abrirGenerarIdeas()">✨ Generar con IA</button>
                     <button class="btn btn-cyan btn-sm" onclick="abrirModalIdea()">+ Idea</button>
+                    ${esAdmin() ? `<button class="btn btn-sm" onclick="limpiarIdeas()">🗑 Limpiar</button>` : ''}
                 </div>
             </div>
             <div class="kanban">
@@ -242,7 +243,8 @@ async function cargarPosts() {
                 <p>Todavía no hay posts. Genera uno desde una idea.</p></div>`;
             return;
         }
-        cont.innerHTML = `<div class="mb-8"><span class="text-dim text-sm">${posts.length} post(s)</span></div>
+        cont.innerHTML = `<div class="flex-between mb-8"><span class="text-dim text-sm">${posts.length} post(s)</span>
+            ${esAdmin() ? `<button class="btn btn-sm" onclick="limpiarPosts()">🗑 Limpiar posts</button>` : ''}</div>
             <div class="lista">${posts.map(tarjetaPost).join('')}</div>`;
         const generando = posts.some(p => p.estado === 'generando');
         if (generando && !State.pollActivo) {
@@ -328,7 +330,8 @@ window.abrirPost = async (id) => {
           <button class="btn btn-sm" onclick="guardarPost(${id})">💾 Guardar</button>
           <button class="btn btn-sm btn-cyan" onclick="enviarRevision(${id})">Enviar a revisión →</button>
           ${puedeAprobar ? `<button class="btn btn-sm" style="background:#16643a;color:#fff" onclick="aprobarPost(${id})">✔ Aprobar</button>
-                            <button class="btn btn-sm" onclick="rechazarPost(${id})">✖ Rechazar</button>` : ''}
+                            <button class="btn btn-sm" onclick="rechazarPost(${id})">✖ Rechazar</button>
+                            <button class="btn btn-sm" style="color:#ef4444;border-color:#ef4444" onclick="eliminarPost(${id})">🗑 Eliminar</button>` : ''}
         </div>
       </div>`;
 };
@@ -459,6 +462,22 @@ window.aprobarPost = async (id) => {
         await apiPost(`/api/contenido/posts/${id}/aprobar`, {});
         closeModal('modalPost'); cargarPosts();
     } catch (err) { showMsg(err.message, 'error', '#msgPost'); }
+};
+
+window.limpiarIdeas = async () => {
+    if (!confirm('¿Borrar TODAS las ideas de esta marca? No se puede deshacer.')) return;
+    try { await apiFetch(`/api/contenido/marcas/${State.marcaId}/ideas`, { method: 'DELETE' }); cargarIdeas(); }
+    catch (err) { showMsg(err.message, 'error'); }
+};
+window.limpiarPosts = async () => {
+    if (!confirm('¿Borrar TODOS los posts de esta marca (con sus imágenes)? No se puede deshacer.')) return;
+    try { await apiFetch(`/api/contenido/marcas/${State.marcaId}/posts`, { method: 'DELETE' }); cargarPosts(); }
+    catch (err) { showMsg(err.message, 'error'); }
+};
+window.eliminarPost = async (id) => {
+    if (!confirm('¿Eliminar este post y sus imágenes? No se puede deshacer.')) return;
+    try { await apiFetch(`/api/contenido/posts/${id}`, { method: 'DELETE' }); closeModal('modalPost'); cargarPosts(); }
+    catch (err) { showMsg(err.message, 'error', '#msgPost'); }
 };
 
 window.rechazarPost = async (id) => {
