@@ -864,7 +864,7 @@ namespace SistemaGestion.Api.Endpoints
             // Eliminar UN post (con sus assets en disco).
             app.MapDelete("/api/contenido/posts/{id:int}", (int id, HttpContext ctx) =>
             {
-                if (!TokenService.EsAdmin(ctx.User)) return Results.Forbid();
+                if (!TokenService.EsRedes(ctx.User)) return Results.Forbid();
                 using var c = Db.Conn();
                 BorrarAssetsDeDisco(new[] { id });
                 using var cmd = c.CreateCommand();
@@ -879,7 +879,7 @@ namespace SistemaGestion.Api.Endpoints
             // Vaciar TODOS los posts de una marca (con sus assets en disco).
             app.MapDelete("/api/contenido/marcas/{id:int}/posts", (int id, HttpContext ctx) =>
             {
-                if (!TokenService.EsAdmin(ctx.User)) return Results.Forbid();
+                if (!TokenService.EsRedes(ctx.User)) return Results.Forbid();
                 using var c = Db.Conn();
                 var ids = new List<int>();
                 using (var q = c.CreateCommand())
@@ -902,7 +902,7 @@ namespace SistemaGestion.Api.Endpoints
             // Vaciar TODAS las ideas de una marca.
             app.MapDelete("/api/contenido/marcas/{id:int}/ideas", (int id, HttpContext ctx) =>
             {
-                if (!TokenService.EsAdmin(ctx.User)) return Results.Forbid();
+                if (!TokenService.EsRedes(ctx.User)) return Results.Forbid();
                 using var c = Db.Conn();
                 using var cmd = c.CreateCommand();
                 cmd.CommandText = "DELETE FROM IdeasContenido WHERE MarcaId=$m";

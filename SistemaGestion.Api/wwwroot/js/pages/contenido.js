@@ -104,7 +104,7 @@ async function cargarIdeas() {
                 <div style="display:flex;gap:8px">
                     <button class="btn btn-sm" onclick="abrirGenerarIdeas()">✨ Generar con IA</button>
                     <button class="btn btn-cyan btn-sm" onclick="abrirModalIdea()">+ Idea</button>
-                    ${esAdmin() ? `<button class="btn btn-sm" onclick="limpiarIdeas()">🗑 Limpiar</button>` : ''}
+                    <button class="btn btn-sm" onclick="limpiarIdeas()">🗑 Limpiar</button>
                 </div>
             </div>
             <div class="kanban">
@@ -244,7 +244,7 @@ async function cargarPosts() {
             return;
         }
         cont.innerHTML = `<div class="flex-between mb-8"><span class="text-dim text-sm">${posts.length} post(s)</span>
-            ${esAdmin() ? `<button class="btn btn-sm" onclick="limpiarPosts()">🗑 Limpiar posts</button>` : ''}</div>
+            <button class="btn btn-sm" onclick="limpiarPosts()">🗑 Limpiar posts</button></div>
             <div class="lista">${posts.map(tarjetaPost).join('')}</div>`;
         const generando = posts.some(p => p.estado === 'generando');
         if (generando && !State.pollActivo) {
@@ -330,8 +330,8 @@ window.abrirPost = async (id) => {
           <button class="btn btn-sm" onclick="guardarPost(${id})">💾 Guardar</button>
           <button class="btn btn-sm btn-cyan" onclick="enviarRevision(${id})">Enviar a revisión →</button>
           ${puedeAprobar ? `<button class="btn btn-sm" style="background:#16643a;color:#fff" onclick="aprobarPost(${id})">✔ Aprobar</button>
-                            <button class="btn btn-sm" onclick="rechazarPost(${id})">✖ Rechazar</button>
-                            <button class="btn btn-sm" style="color:#ef4444;border-color:#ef4444" onclick="eliminarPost(${id})">🗑 Eliminar</button>` : ''}
+                            <button class="btn btn-sm" onclick="rechazarPost(${id})">✖ Rechazar</button>` : ''}
+          <button class="btn btn-sm" style="color:#ef4444;border-color:#ef4444" onclick="eliminarPost(${id})">🗑 Eliminar</button>
         </div>
       </div>`;
 };
