@@ -60,6 +60,7 @@ function renderContenido() {
                 <label class="text-dim text-sm" for="selMarca">Marca:</label>
                 <select id="selMarca" class="input-field" style="width:auto"
                         onchange="cambiarMarca(this.value)">${opciones}</select>
+                <button class="btn btn-sm" onclick="abrirReferencias()" title="Fotos reales del producto que la IA usa como base">📎 Referencias</button>
             </div>
             <div class="seg">
                 <button class="seg-btn ${State.tab === 'ideas' ? 'active' : ''}" onclick="cambiarTab('ideas')">💡 Ideas</button>
@@ -69,7 +70,8 @@ function renderContenido() {
         <div id="tabContent"><div class="loading-msg"><div class="spinner"></div></div></div>
         <div class="modal-overlay" id="modalIdea"></div>
         <div class="modal-overlay" id="modalGen"></div>
-        <div class="modal-overlay" id="modalPost"></div>`;
+        <div class="modal-overlay" id="modalPost"></div>
+        <div class="modal-overlay" id="modalRefs"></div>`;
     if (State.tab === 'ideas') cargarIdeas(); else cargarPosts();
 }
 
@@ -349,6 +351,60 @@ window.rechazarPost = async (id) => {
     try { await apiPost(`/api/contenido/posts/${id}/rechazar`, { nota });
         closeModal('modalPost'); cargarPosts(); }
     catch (err) { showMsg(err.message, 'error', '#msgPost'); }
+};
+
+// ── REFERENCIAS DE MARCA (fotos reales del producto) ────────────────────
+window.abrirReferencias = async () => {
+    const modal = document.getElementById('modalRefs');
+    modal.innerHTML = `<div class="modal-sheet"><div class="loading-msg"><div class="spinner"></div></div></div>`;
+    openModal('modalRefs');
+    await cargarRefs();
+};
+
+async function cargarRefs() {
+    const modal = document.getElementById('modalRefs');
+    let files = [];
+    try { files = await apiGet(`/api/contenido/marcas/${State.marcaId}/referencias`) || []; }
+    catch (err) { modal.innerHTML = `<div class="modal-sheet"><div class="msg show error">${esh(err.message)}</div></div>`; return; }
+    const thumbs = files.map(f => `
+        <div style="position:relative">
+            <img src="/api/contenido/marcas/${State.marcaId}/referencias/${encodeURIComponent(f)}"
+                 style="width:100px;height:100px;object-fit:cover;border-radius:8px;background:#111">
+            <button class="btn-close" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);border-radius:6px;padding:0 6px"
+                    onclick="eliminarRef('${f}')" title="Eliminar">✕</button>
+        </div>`).join('') || `<p class="text-dim text-sm">Aún no hay fotos de referencia. Sube fotos reales de los fustes plásticos.</p>`;
+    modal.innerHTML = `
+      <div class="modal-sheet">
+        <div class="flex-between mb-8">
+          <strong>📎 Referencias — ${esh(marcaActual().nombre || '')}</strong>
+          <button class="btn-close" onclick="closeModal('modalRefs')">✕</button>
+        </div>
+        <p class="text-dim text-sm">La IA usa estas fotos reales como base para generar las imágenes (respeta material, forma y color). PNG/JPG/WEBP, máx 8 MB.</p>
+        <div class="msg" id="msgRefs"></div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin:10px 0">${thumbs}</div>
+        <input type="file" id="refFile" accept="image/png,image/jpeg,image/webp" style="margin-bottom:8px">
+        <button class="btn btn-cyan btn-sm" id="btnSubirRef" onclick="subirRef()">Subir foto</button>
+      </div>`;
+}
+
+window.subirRef = async () => {
+    const inp = document.getElementById('refFile');
+    if (!inp.files || !inp.files[0]) { showMsg('Elige una imagen.', 'error', '#msgRefs'); return; }
+    const btn = document.getElementById('btnSubirRef'); setLoading(btn, true);
+    try {
+        const fd = new FormData(); fd.append('file', inp.files[0]);
+        const res = await fetch(`/api/contenido/marcas/${State.marcaId}/referencias`, { method: 'POST', credentials: 'include', body: fd });
+        if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || 'Error al subir.'); }
+        await cargarRefs();
+    } catch (err) { showMsg(err.message, 'error', '#msgRefs'); }
+    finally { setLoading(btn, false); }
+};
+
+window.eliminarRef = async (name) => {
+    try {
+        await apiFetch(`/api/contenido/marcas/${State.marcaId}/referencias/${encodeURIComponent(name)}`, { method: 'DELETE' });
+        await cargarRefs();
+    } catch (err) { showMsg(err.message, 'error', '#msgRefs'); }
 };
 
 render();

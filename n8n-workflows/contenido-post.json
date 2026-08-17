@@ -21,7 +21,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const b = $input.first().json.body || $input.first().json;\nconst marca = b.marca || {};\nconst idea = b.idea || {};\nconst conIngles = (marca.idiomas || 'es').indexOf('en') >= 0;\nconst captionPrompt = `Eres community manager de \"${marca.nombre}\".\\n`\n  + `Voz/tono: ${marca.voz || ''}. Guia de estilo: ${marca.guiaEstilo || ''}.\\n`\n  + `Tema del post: \"${idea.titulo}\". ${idea.descripcion || ''}\\n`\n  + `Escribe el caption para Instagram/Facebook, atractivo y fiel a la marca.\\n`\n  + (conIngles ? 'Incluye tambien version en ingles.\\n' : '')\n  + `Sugiere de 8 a 15 hashtags (incluye si aplican: ${marca.hashtagsBase || ''}).\\n`\n  + `Responde SOLO JSON: {\"es\":\"...\",` + (conIngles ? ` \"en\":\"...\",` : ``) + ` \"hashtags\":[\"#...\"]}.`;\nconst imagePrompt = `${b.promptImagen || idea.titulo}. Estilo de marca: ${marca.guiaEstilo || ''}. Alta calidad, apto para redes, formato cuadrado 1:1.`;\nreturn [{ json: { captionPrompt, imagePrompt, jobId: b.jobId, postId: b.postId, callbackUrl: b.callbackUrl } }];"
+        "jsCode": "const b = $input.first().json.body || $input.first().json;\nconst marca = b.marca || {};\nconst idea = b.idea || {};\nconst conIngles = (marca.idiomas || 'es').indexOf('en') >= 0;\nconst captionPrompt = `Eres community manager de \"${marca.nombre}\".\\n`\n  + `Voz/tono: ${marca.voz || ''}. Guia de estilo: ${marca.guiaEstilo || ''}.\\n`\n  + `Tema del post: \"${idea.titulo}\". ${idea.descripcion || ''}\\n`\n  + `Escribe el caption para Instagram/Facebook, atractivo y fiel a la marca.\\n`\n  + (conIngles ? 'Incluye tambien version en ingles.\\n' : '')\n  + `Sugiere de 8 a 15 hashtags (incluye si aplican: ${marca.hashtagsBase || ''}).\\n`\n  + `Responde SOLO JSON: {\"es\":\"...\",` + (conIngles ? ` \"en\":\"...\",` : ``) + ` \"hashtags\":[\"#...\"]}.`;\nconst refs = Array.isArray(b.referencias) ? b.referencias : [];\nconst nota = refs.length ? 'Basate en las imagenes de referencia adjuntas del producto real (respeta material, forma y color). ' : '';\nconst imagePrompt = `${nota}${b.promptImagen || idea.titulo}. Estilo de marca: ${marca.guiaEstilo || ''}. Alta calidad, apto para redes, formato cuadrado 1:1.`;\nreturn [{ json: { captionPrompt, imagePrompt, referencias: refs, jobId: b.jobId, postId: b.postId, callbackUrl: b.callbackUrl } }];"
       },
       "id": "c1-0001-4000-8000-000000000002",
       "name": "Preparar",
@@ -94,7 +94,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ contents:[{parts:[{text: $('Parsear Caption').first().json.imagePrompt}]}], generationConfig:{ responseModalities:['IMAGE'] } }) }}",
+        "jsonBody": "={{ JSON.stringify({ contents:[{ parts: [{text: $('Parsear Caption').first().json.imagePrompt}].concat(($('Preparar').first().json.referencias||[]).map(r => ({inlineData:{mimeType:r.mime,data:r.data}}))) }], generationConfig:{ responseModalities:['IMAGE'] } }) }}",
         "options": {
           "response": {
             "response": {

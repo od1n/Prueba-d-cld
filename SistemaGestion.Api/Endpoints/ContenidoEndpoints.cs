@@ -576,9 +576,10 @@ namespace SistemaGestion.Api.Endpoints
                     upd.ExecuteNonQuery();
                 }
 
+                var referencias = LeerReferenciasParaPayload(marcaId, 3);
                 var payload = new
                 {
-                    jobId, postId = id, tipo = "generar_post", marca,
+                    jobId, postId = id, tipo = "generar_post", marca, referencias,
                     idea = new { titulo = ideaTitulo, descripcion = ideaDesc, pilar = ideaPilar },
                     formato = fmt, promptImagen,
                     nImagenes = req.NImagenes is > 0 and <= 6 ? req.NImagenes!.Value : 1,
@@ -708,6 +709,50 @@ namespace SistemaGestion.Api.Endpoints
                 var ext = Path.GetExtension(ruta).ToLowerInvariant();
                 var mime = ext is ".jpg" or ".jpeg" ? "image/jpeg" : ext == ".mp4" ? "video/mp4" : "image/png";
                 return Results.File(File.ReadAllBytes(ruta), mime);
+            }).RequireAuthorization();
+
+            // ════════════════ REFERENCIAS DE MARCA (fotos reales del producto) ════════════════
+            //  Se guardan en {contenido}/marca-{id}/ref y se usan como base en la generacion.
+
+            app.MapGet("/api/contenido/marcas/{id:int}/referencias", (int id) =>
+            {
+                var dir = RutaRefsDir(id);
+                var files = Directory.GetFiles(dir).Select(Path.GetFileName).OrderBy(x => x).ToList();
+                return Results.Ok(files);
+            }).RequireAuthorization();
+
+            app.MapPost("/api/contenido/marcas/{id:int}/referencias", async (int id, HttpContext ctx, IFormFile file) =>
+            {
+                if (!TokenService.EsRedes(ctx.User)) return Results.Forbid();
+                if (file is null || file.Length == 0) return Results.BadRequest(new { error = "Archivo vacio." });
+                if (file.Length > 8 * 1024 * 1024) return Results.BadRequest(new { error = "Maximo 8 MB por imagen." });
+                var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
+                if (ext is not (".png" or ".jpg" or ".jpeg" or ".webp"))
+                    return Results.BadRequest(new { error = "Solo PNG, JPG o WEBP." });
+                var dir = RutaRefsDir(id);
+                var name = (DateTime.Now.ToString("yyyyMMddHHmmss") + "-" + Guid.NewGuid().ToString("N")).Substring(0, 20) + ext;
+                await using (var fs = File.Create(Path.Combine(dir, name)))
+                    await file.CopyToAsync(fs);
+                return Results.Ok(new { name });
+            }).RequireAuthorization().DisableAntiforgery();
+
+            app.MapGet("/api/contenido/marcas/{id:int}/referencias/{name}", (int id, string name) =>
+            {
+                if (!NombreRefSeguro(name)) return Results.NotFound();
+                var full = Path.Combine(RutaRefsDir(id), name);
+                if (!File.Exists(full)) return Results.NotFound();
+                var ext = Path.GetExtension(full).ToLowerInvariant();
+                var mime = ext is ".jpg" or ".jpeg" ? "image/jpeg" : ext == ".webp" ? "image/webp" : "image/png";
+                return Results.File(File.ReadAllBytes(full), mime);
+            }).RequireAuthorization();
+
+            app.MapDelete("/api/contenido/marcas/{id:int}/referencias/{name}", (int id, HttpContext ctx, string name) =>
+            {
+                if (!TokenService.EsRedes(ctx.User)) return Results.Forbid();
+                if (!NombreRefSeguro(name)) return Results.NotFound();
+                var full = Path.Combine(RutaRefsDir(id), name);
+                if (File.Exists(full)) File.Delete(full);
+                return Results.Ok(new { ok = true });
             }).RequireAuthorization();
         }
 
@@ -842,6 +887,40 @@ namespace SistemaGestion.Api.Endpoints
             var ans = doc.RootElement.GetProperty("candidates")[0].GetProperty("content").GetProperty("parts")[0].GetProperty("text").GetString() ?? "";
             ans = ans.Trim().ToUpperInvariant();
             return ans.StartsWith("SI") || ans.StartsWith("YES");
+        }
+
+        private static string RutaRefsDir(int marcaId)
+        {
+            var d = Path.Combine(RutaContenidoDir(), $"marca-{marcaId}", "ref");
+            Directory.CreateDirectory(d);
+            return d;
+        }
+
+        private static bool NombreRefSeguro(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name) || name.Contains("..")) return false;
+            if (name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0) return false;
+            var ext = Path.GetExtension(name).ToLowerInvariant();
+            return ext is ".png" or ".jpg" or ".jpeg" or ".webp";
+        }
+
+        /// <summary>Lee hasta max imagenes de referencia de la marca como {mime, data(base64)}.</summary>
+        private static List<object> LeerReferenciasParaPayload(int marcaId, int max)
+        {
+            var list = new List<object>();
+            try
+            {
+                foreach (var f in Directory.GetFiles(RutaRefsDir(marcaId)).OrderBy(x => x).Take(max))
+                {
+                    var ext = Path.GetExtension(f).ToLowerInvariant();
+                    if (ext is not (".png" or ".jpg" or ".jpeg" or ".webp")) continue;
+                    var mime = ext is ".jpg" or ".jpeg" ? "image/jpeg" : ext == ".webp" ? "image/webp" : "image/png";
+                    try { list.Add(new { mime, data = Convert.ToBase64String(File.ReadAllBytes(f)) }); }
+                    catch { }
+                }
+            }
+            catch { }
+            return list;
         }
 
         private static object? LeerMarcaDict(int marcaId)
