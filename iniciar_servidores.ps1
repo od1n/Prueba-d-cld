@@ -122,8 +122,9 @@ Write-Host "  ║  Cierra esta ventana o presiona Ctrl+C para apagar.  ║" -For
 Write-Host "  ╚══════════════════════════════════════════════════════╝" -ForegroundColor Cyan
 Write-Host ""
 
-# Abrir navegador
-Start-Process "http://localhost:5050"
+# Abrir navegador (solo si hay uno asociado; en servidores sin navegador se omite sin error)
+try { Start-Process "http://localhost:5050" -ErrorAction Stop }
+catch { Write-Host "  [.] Sin navegador en este equipo. Abre el portal manualmente: http://localhost:5050" -ForegroundColor DarkGray }
 
 # ── Esperar Ctrl+C o cierre de ventana ───────────────────────────────────
 try {
