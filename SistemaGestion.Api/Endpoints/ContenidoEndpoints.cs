@@ -4,6 +4,8 @@ using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Threading.Tasks;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Processing;
 
 // ══════════════════════════════════════════════════════════════════════════
 //  ContenidoEndpoints — Estudio de Contenido (redes sociales)
@@ -904,7 +906,10 @@ namespace SistemaGestion.Api.Endpoints
             return ext is ".png" or ".jpg" or ".jpeg" or ".webp";
         }
 
-        /// <summary>Lee hasta max imagenes de referencia de la marca como {mime, data(base64)}.</summary>
+        /// <summary>
+        /// Lee hasta max imagenes de referencia, las REDIMENSIONA a ~1024 px JPEG
+        /// (para que el payload a n8n sea liviano) y las devuelve como {mime, data(base64)}.
+        /// </summary>
         private static List<object> LeerReferenciasParaPayload(int marcaId, int max)
         {
             var list = new List<object>();
@@ -914,13 +919,31 @@ namespace SistemaGestion.Api.Endpoints
                 {
                     var ext = Path.GetExtension(f).ToLowerInvariant();
                     if (ext is not (".png" or ".jpg" or ".jpeg" or ".webp")) continue;
-                    var mime = ext is ".jpg" or ".jpeg" ? "image/jpeg" : ext == ".webp" ? "image/webp" : "image/png";
-                    try { list.Add(new { mime, data = Convert.ToBase64String(File.ReadAllBytes(f)) }); }
+                    try
+                    {
+                        var jpg = RedimensionarJpeg(File.ReadAllBytes(f), 1024, 80);
+                        list.Add(new { mime = "image/jpeg", data = Convert.ToBase64String(jpg) });
+                    }
                     catch { }
                 }
             }
             catch { }
             return list;
+        }
+
+        /// <summary>Redimensiona una imagen a un lado maximo y la re-codifica como JPEG.</summary>
+        private static byte[] RedimensionarJpeg(byte[] datos, int maxLado, int calidad)
+        {
+            using var image = Image.Load(datos);
+            int mayor = Math.Max(image.Width, image.Height);
+            if (mayor > maxLado)
+            {
+                double r = (double)maxLado / mayor;
+                image.Mutate(x => x.Resize((int)Math.Round(image.Width * r), (int)Math.Round(image.Height * r)));
+            }
+            using var ms = new MemoryStream();
+            image.Save(ms, new SixLabors.ImageSharp.Formats.Jpeg.JpegEncoder { Quality = calidad });
+            return ms.ToArray();
         }
 
         private static object? LeerMarcaDict(int marcaId)

@@ -15,6 +15,8 @@
     <!-- DPAPI (ProtectedData) — sólo funciona en Windows pero el ensamblado
          debe estar referenciado para compilar en net8.0 puro. -->
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+    <!-- Redimensionado de imágenes de referencia (pura .NET, soporta webp). -->
+    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.*" />
   </ItemGroup>
 
 </Project>
