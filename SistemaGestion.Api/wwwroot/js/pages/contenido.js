@@ -410,56 +410,73 @@ window.abrirGenerarPost = async (id, modo) => {
     modal.innerHTML = `<div class="modal-sheet"><div class="loading-msg"><div class="spinner"></div></div></div>`;
     closeModal('modalPost');
     openModal('modalGenPost');
-    let post = {}, refs = [];
+    let post = {}, prod = [], crea = [];
     try {
         const d = await apiGet(`/api/contenido/posts/${id}`); post = d.post || {};
-        refs = await apiGet(`/api/contenido/marcas/${post.marcaId}/referencias`) || [];
+        prod = await apiGet(`/api/contenido/marcas/${post.marcaId}/referencias?categoria=producto`) || [];
+        crea = await apiGet(`/api/contenido/marcas/${post.marcaId}/referencias?categoria=creatividad`) || [];
     } catch (e) { /* sigue con lo que haya */ }
-    const refThumbs = refs.length ? refs.map(f => `
-        <label class="ref-pick" title="${eshA(f)}">
-            <input type="checkbox" class="genRef" value="${eshA(f)}" onchange="actualizarRefCount()" checked>
-            <img src="/api/contenido/marcas/${post.marcaId}/referencias/${encodeURIComponent(f)}">
-        </label>`).join('')
-        : `<p class="text-dim text-sm">No hay fotos de referencia. Súbelas con 📎 Referencias para que la imagen se base en el fuste real.</p>`;
-    const titulo = modo === 'imagen' ? '🖼️ Regenerar imagen' : '🎲 Regenerar post completo';
+
+    const seccionPick = (cat, files, cls, marcadas, titulo, ayuda, vacio) => {
+        const thumbs = files.length ? files.map(f => `
+            <label class="ref-pick" title="${eshA(f)}">
+                <input type="checkbox" class="${cls}" value="${eshA(f)}" onchange="actualizarRefCount()" ${marcadas ? 'checked' : ''}>
+                <img src="/api/contenido/marcas/${post.marcaId}/referencias/${encodeURIComponent(f)}?categoria=${cat}">
+            </label>`).join('') : `<p class="text-dim text-sm">${vacio}</p>`;
+        return `
+          <div style="margin-top:8px">
+            <div class="flex-between" style="align-items:flex-end;gap:8px">
+              <label class="input-label" style="margin:0">${titulo} <span id="cnt_${cls}" class="text-dim"></span></label>
+              ${files.length ? `<span style="display:flex;gap:6px;white-space:nowrap">
+                <button type="button" class="btn btn-sm" onclick="marcarRefs('.${cls}',true)">\u2713 Todas</button>
+                <button type="button" class="btn btn-sm" onclick="marcarRefs('.${cls}',false)">\u2717 Ninguna</button></span>` : ''}
+            </div>
+            <p class="text-dim text-sm" style="margin:2px 0">${ayuda}</p>
+            <div class="ref-grid">${thumbs}</div>
+          </div>`;
+    };
+
+    const titulo = modo === 'imagen' ? '\ud83d\uddbc\ufe0f Regenerar imagen' : '\ud83c\udfb2 Regenerar post completo';
     modal.innerHTML = `
-      <div class="modal-sheet" style="max-width:600px">
+      <div class="modal-sheet" style="max-width:620px">
         <div class="flex-between mb-8"><strong>${titulo}</strong>
-            <button class="btn-close" onclick="closeModal('modalGenPost')">✕</button></div>
+            <button class="btn-close" onclick="closeModal('modalGenPost')">\u2715</button></div>
         <div class="msg" id="msgGenPost"></div>
-        <div class="input-group"><label class="input-label" for="genPrompt">Prompt de imagen (qué debe mostrar)</label>
-            <textarea class="input-field" id="genPrompt" rows="3" placeholder="Ej: fuste plástico HDPE en primer plano sobre fondo neutro">${esh(post.promptImagen || post.titulo || '')}</textarea></div>
-        <div class="flex-between" style="align-items:flex-end;gap:8px">
-          <label class="input-label" style="margin:0">Fotos de referencia a usar (conserva textura y forma real) <span id="refCount" class="text-dim"></span></label>
-          ${refs.length >= 1 ? `<span style="display:flex;gap:6px;white-space:nowrap">
-            <button type="button" class="btn btn-sm" onclick="marcarRefs(true)">✓ Todas</button>
-            <button type="button" class="btn btn-sm" onclick="marcarRefs(false)">✗ Ninguna</button></span>` : ''}
-        </div>
-        <div class="ref-grid">${refThumbs}</div>
-        <button class="btn btn-cyan" id="btnGenPost" onclick="confirmarGenerarPost(${id},'${modo}')" style="margin-top:10px">Generar</button>
-        <p class="text-dim text-sm" style="margin-top:8px">Recuerda: nunca fustes de madera (es la competencia). El cuero sí está permitido.</p>
+        <div class="input-group"><label class="input-label" for="genPrompt">Prompt de imagen (qu\u00e9 debe mostrar)</label>
+            <textarea class="input-field" id="genPrompt" rows="3" placeholder="Ej: fuste pl\u00e1stico en primer plano sobre fondo neutro">${esh(post.promptImagen || post.titulo || '')}</textarea></div>
+        ${seccionPick('producto', prod, 'genRef', true, '\ud83c\udfed Productos reales (base)',
+            'Mantiene forma y color reales (blanco hueso). Marcadas por defecto.',
+            'No hay fotos de producto. S\u00fabelas en \ud83d\udcce Referencias.')}
+        ${seccionPick('creatividad', crea, 'genRefCrea', false, '\ud83c\udfa8 Creatividad / comparaci\u00f3n (opcional)',
+            'Solo inspiraci\u00f3n/comparaci\u00f3n; no se copia su color ni forma. Desmarcadas por defecto.',
+            'No hay im\u00e1genes de creatividad.')}
+        <button class="btn btn-cyan" id="btnGenPost" onclick="confirmarGenerarPost(${id},'${modo}')" style="margin-top:12px">Generar</button>
+        <p class="text-dim text-sm" style="margin-top:8px">Regla: los fustes reales son blanco hueso; nunca cambiar su color. Nunca fustes de madera (competencia). El cuero s\u00ed est\u00e1 permitido.</p>
       </div>`;
     actualizarRefCount();
 };
 
-window.marcarRefs = (v) => {
-    document.querySelectorAll('.genRef').forEach(c => { c.checked = v; });
+window.marcarRefs = (sel, v) => {
+    document.querySelectorAll(sel).forEach(c => { c.checked = v; });
     actualizarRefCount();
 };
 function actualizarRefCount() {
-    const total = document.querySelectorAll('.genRef').length;
-    const sel = document.querySelectorAll('.genRef:checked').length;
-    const el = document.getElementById('refCount');
-    if (el) el.textContent = total ? `(${sel}/${total})` : '';
+    [['.genRef', 'cnt_genRef'], ['.genRefCrea', 'cnt_genRefCrea']].forEach(([sel, cntId]) => {
+        const total = document.querySelectorAll(sel).length;
+        const s = document.querySelectorAll(sel + ':checked').length;
+        const el = document.getElementById(cntId);
+        if (el) el.textContent = total ? `(${s}/${total})` : '';
+    });
 }
 
 window.confirmarGenerarPost = async (id, modo) => {
     const btn = document.getElementById('btnGenPost'); setLoading(btn, true);
     const promptImagen = document.getElementById('genPrompt').value.trim();
     const referencias = Array.from(document.querySelectorAll('.genRef:checked')).map(c => c.value);
+    const referenciasCreatividad = Array.from(document.querySelectorAll('.genRefCrea:checked')).map(c => c.value);
     try {
-        await apiPost(`/api/contenido/posts/${id}/generar`, { modo, promptImagen: promptImagen || null, referencias });
-        closeModal('modalGenPost'); showMsg('Generando con IA…', 'ok');
+        await apiPost(`/api/contenido/posts/${id}/generar`, { modo, promptImagen: promptImagen || null, referencias, referenciasCreatividad });
+        closeModal('modalGenPost'); showMsg('Generando con IA\u2026', 'ok');
         State.tab = 'posts'; renderContenido();
     } catch (err) { showMsg(err.message, 'error', '#msgGenPost'); setLoading(btn, false); }
 };
@@ -576,39 +593,60 @@ window.abrirReferencias = async () => {
 
 async function cargarRefs() {
     const modal = document.getElementById('modalRefs');
-    let files = [];
-    try { files = await apiGet(`/api/contenido/marcas/${State.marcaId}/referencias`) || []; }
-    catch (err) { modal.innerHTML = `<div class="modal-sheet"><div class="msg show error">${esh(err.message)}</div></div>`; return; }
-    const thumbs = files.map(f => `
-        <div style="position:relative">
-            <img src="/api/contenido/marcas/${State.marcaId}/referencias/${encodeURIComponent(f)}"
-                 style="width:100px;height:100px;object-fit:cover;border-radius:8px;background:#111">
-            <button class="btn-close" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);border-radius:6px;padding:0 6px"
-                    onclick="eliminarRef('${f}')" title="Eliminar">✕</button>
-        </div>`).join('') || `<p class="text-dim text-sm">Aún no hay fotos de referencia. Sube fotos reales de los fustes plásticos.</p>`;
+    let prod = [], crea = [];
+    try {
+        prod = await apiGet(`/api/contenido/marcas/${State.marcaId}/referencias?categoria=producto`) || [];
+        crea = await apiGet(`/api/contenido/marcas/${State.marcaId}/referencias?categoria=creatividad`) || [];
+    } catch (err) { modal.innerHTML = `<div class="modal-sheet"><div class="msg show error">${esh(err.message)}</div></div>`; return; }
+
+    const seccion = (cat, files, titulo, ayuda, vacio) => {
+        const otra = cat === 'producto' ? 'creatividad' : 'producto';
+        const etiqOtra = cat === 'producto' ? '\u2192 Creatividad' : '\u2192 Productos';
+        const thumbs = files.map(f => `
+            <div style="position:relative;display:flex;flex-direction:column;gap:3px;align-items:center;width:100px">
+                <img src="/api/contenido/marcas/${State.marcaId}/referencias/${encodeURIComponent(f)}?categoria=${cat}"
+                     style="width:100px;height:100px;object-fit:cover;border-radius:8px;background:#111">
+                <button class="btn btn-sm" style="font-size:10px;padding:1px 5px;width:100%"
+                        onclick="moverRef('${cat}','${otra}','${f}')" title="Mover al otro banco">${etiqOtra}</button>
+                <button class="btn-close" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);border-radius:6px;padding:0 6px"
+                        onclick="eliminarRef('${cat}','${f}')" title="Eliminar">\u2715</button>
+            </div>`).join('') || `<p class="text-dim text-sm">${vacio}</p>`;
+        return `
+          <div style="border:1px solid var(--borde);border-radius:10px;padding:10px;margin-bottom:10px">
+            <strong>${titulo}</strong>
+            <p class="text-dim text-sm" style="margin:4px 0">${ayuda}</p>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;margin:8px 0">${thumbs}</div>
+            <input type="file" id="refFile_${cat}" accept="image/png,image/jpeg,image/webp" multiple style="margin-bottom:6px">
+            <button class="btn btn-cyan btn-sm" id="btnSubir_${cat}" onclick="subirRef('${cat}')">Subir fotos</button>
+          </div>`;
+    };
+
     modal.innerHTML = `
-      <div class="modal-sheet">
+      <div class="modal-sheet" style="max-width:600px">
         <div class="flex-between mb-8">
-          <strong>📎 Referencias — ${esh(marcaActual().nombre || '')}</strong>
-          <button class="btn-close" onclick="closeModal('modalRefs')">✕</button>
+          <strong>\ud83d\udcce Referencias \u2014 ${esh(marcaActual().nombre || '')}</strong>
+          <button class="btn-close" onclick="closeModal('modalRefs')">\u2715</button>
         </div>
-        <p class="text-dim text-sm">La IA usa estas fotos reales como base y conserva la textura, material, forma y color del fuste plástico. PNG/JPG/WEBP, máx 8 MB.</p>
         <div class="msg" id="msgRefs"></div>
-        <div style="display:flex;flex-wrap:wrap;gap:8px;margin:10px 0">${thumbs}</div>
-        <input type="file" id="refFile" accept="image/png,image/jpeg,image/webp" multiple style="margin-bottom:8px">
-        <button class="btn btn-cyan btn-sm" id="btnSubirRef" onclick="subirRef()">Subir foto</button>
+        ${seccion('producto', prod, '\ud83c\udfed Productos reales (base)',
+            'La IA los usa como BASE y mantiene su forma y color reales (blanco hueso). Sube aqu\u00ed SOLO fotos reales de los fustes de la marca.',
+            'A\u00fan no hay fotos de producto. Sube fotos reales de los fustes pl\u00e1sticos (blanco hueso).')}
+        ${seccion('creatividad', crea, '\ud83c\udfa8 Creatividad / comparaci\u00f3n',
+            'Solo inspiraci\u00f3n de estilo o ejemplos de comparaci\u00f3n (p. ej. competencia). La IA NO copia su color ni forma. Opcionales al generar.',
+            'A\u00fan no hay im\u00e1genes de creatividad/comparaci\u00f3n.')}
+        <p class="text-dim text-sm">PNG/JPG/WEBP, m\u00e1x 8 MB por imagen.</p>
       </div>`;
 }
 
-window.subirRef = async () => {
-    const inp = document.getElementById('refFile');
-    if (!inp.files || !inp.files.length) { showMsg('Elige una o más imágenes.', 'error', '#msgRefs'); return; }
-    const btn = document.getElementById('btnSubirRef'); setLoading(btn, true);
+window.subirRef = async (cat) => {
+    const inp = document.getElementById(`refFile_${cat}`);
+    if (!inp.files || !inp.files.length) { showMsg('Elige una o m\u00e1s im\u00e1genes.', 'error', '#msgRefs'); return; }
+    const btn = document.getElementById(`btnSubir_${cat}`); setLoading(btn, true);
     let ok = 0, fail = 0;
     for (const f of inp.files) {
         try {
             const fd = new FormData(); fd.append('file', f);
-            const res = await fetch(`/api/contenido/marcas/${State.marcaId}/referencias`, { method: 'POST', credentials: 'include', body: fd });
+            const res = await fetch(`/api/contenido/marcas/${State.marcaId}/referencias?categoria=${cat}`, { method: 'POST', credentials: 'include', body: fd });
             if (res.ok) ok++; else fail++;
         } catch { fail++; }
     }
@@ -617,11 +655,17 @@ window.subirRef = async () => {
     await cargarRefs();
 };
 
-window.eliminarRef = async (name) => {
+window.moverRef = async (desde, hacia, name) => {
     try {
-        await apiFetch(`/api/contenido/marcas/${State.marcaId}/referencias/${encodeURIComponent(name)}`, { method: 'DELETE' });
+        await apiPost(`/api/contenido/marcas/${State.marcaId}/referencias/${encodeURIComponent(name)}/mover?desde=${desde}&hacia=${hacia}`, {});
         await cargarRefs();
     } catch (err) { showMsg(err.message, 'error', '#msgRefs'); }
 };
 
+window.eliminarRef = async (cat, name) => {
+    try {
+        await apiFetch(`/api/contenido/marcas/${State.marcaId}/referencias/${encodeURIComponent(name)}?categoria=${cat}`, { method: 'DELETE' });
+        await cargarRefs();
+    } catch (err) { showMsg(err.message, 'error', '#msgRefs'); }
+};
 render();

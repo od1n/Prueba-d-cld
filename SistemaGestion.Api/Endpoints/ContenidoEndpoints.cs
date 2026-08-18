@@ -581,13 +581,29 @@ namespace SistemaGestion.Api.Endpoints
                     upd.ExecuteNonQuery();
                 }
 
-                // Regenerar solo texto no requiere referencias (ahorra payload a n8n).
-                var referencias = modo == "texto"
-                    ? new List<object>()
-                    : LeerReferenciasParaPayload(marcaId, 4, req.Referencias);
+                // Referencias: PRODUCTO (base: mantener forma y color real) + CREATIVIDAD (opcional: inspiracion/comparacion).
+                // Regenerar solo texto no requiere referencias.
+                List<object> refsProducto = new(), refsCreatividad = new();
+                if (modo != "texto")
+                {
+                    refsProducto    = LeerReferenciasParaPayload(marcaId, 4, req.Referencias, "producto");
+                    refsCreatividad = (req.ReferenciasCreatividad != null && req.ReferenciasCreatividad.Length > 0)
+                        ? LeerReferenciasParaPayload(marcaId, 3, req.ReferenciasCreatividad, "creatividad")
+                        : new List<object>();
+                }
+                var referencias = new List<object>();
+                referencias.AddRange(refsProducto);
+                referencias.AddRange(refsCreatividad);
+
+                var notaRefs = "";
+                if (refsProducto.Count > 0)
+                    notaRefs = "Las primeras imagenes de referencia son los PRODUCTOS REALES de la marca: fustes de plastico color BLANCO HUESO. Reproduce FIELMENTE su forma y su color blanco hueso tal como se ven en las fotos; NUNCA cambies el color ni el material del producto. Cualquier fuste de OTRO color es de la competencia o de mala calidad y NO debe copiarse. ";
+                if (refsCreatividad.Count > 0)
+                    notaRefs += $"Las ultimas {refsCreatividad.Count} imagen(es) son SOLO inspiracion de estilo/composicion o comparacion; NO copies de ellas el color ni la forma del producto. ";
+
                 var payload = new
                 {
-                    jobId, postId = id, tipo = "generar_post", marca, referencias, modo,
+                    jobId, postId = id, tipo = "generar_post", marca, referencias, notaRefs, modo,
                     idea = new { titulo = ideaTitulo, descripcion = ideaDesc, pilar = ideaPilar },
                     formato = fmt, promptImagen,
                     nImagenes = req.NImagenes is > 0 and <= 6 ? req.NImagenes!.Value : 1,
@@ -725,14 +741,14 @@ namespace SistemaGestion.Api.Endpoints
             // ════════════════ REFERENCIAS DE MARCA (fotos reales del producto) ════════════════
             //  Se guardan en {contenido}/marca-{id}/ref y se usan como base en la generacion.
 
-            app.MapGet("/api/contenido/marcas/{id:int}/referencias", (int id) =>
+            app.MapGet("/api/contenido/marcas/{id:int}/referencias", (int id, string? categoria) =>
             {
-                var dir = RutaRefsDir(id);
+                var dir = RutaRefsDir(id, categoria);
                 var files = Directory.GetFiles(dir).Select(Path.GetFileName).OrderBy(x => x).ToList();
                 return Results.Ok(files);
             }).RequireAuthorization();
 
-            app.MapPost("/api/contenido/marcas/{id:int}/referencias", async (int id, HttpContext ctx, IFormFile file) =>
+            app.MapPost("/api/contenido/marcas/{id:int}/referencias", async (int id, HttpContext ctx, IFormFile file, string? categoria) =>
             {
                 if (!TokenService.EsRedes(ctx.User)) return Results.Forbid();
                 if (file is null || file.Length == 0) return Results.BadRequest(new { error = "Archivo vacio." });
@@ -740,30 +756,50 @@ namespace SistemaGestion.Api.Endpoints
                 var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
                 if (ext is not (".png" or ".jpg" or ".jpeg" or ".webp"))
                     return Results.BadRequest(new { error = "Solo PNG, JPG o WEBP." });
-                var dir = RutaRefsDir(id);
+                var dir = RutaRefsDir(id, categoria);
                 var name = (DateTime.Now.ToString("yyyyMMddHHmmss") + "-" + Guid.NewGuid().ToString("N")).Substring(0, 20) + ext;
                 await using (var fs = File.Create(Path.Combine(dir, name)))
                     await file.CopyToAsync(fs);
                 return Results.Ok(new { name });
             }).RequireAuthorization().DisableAntiforgery();
 
-            app.MapGet("/api/contenido/marcas/{id:int}/referencias/{name}", (int id, string name) =>
+            app.MapGet("/api/contenido/marcas/{id:int}/referencias/{name}", (int id, string name, string? categoria) =>
             {
                 if (!NombreRefSeguro(name)) return Results.NotFound();
-                var full = Path.Combine(RutaRefsDir(id), name);
+                var full = Path.Combine(RutaRefsDir(id, categoria), name);
                 if (!File.Exists(full)) return Results.NotFound();
                 var ext = Path.GetExtension(full).ToLowerInvariant();
                 var mime = ext is ".jpg" or ".jpeg" ? "image/jpeg" : ext == ".webp" ? "image/webp" : "image/png";
                 return Results.File(File.ReadAllBytes(full), mime);
             }).RequireAuthorization();
 
-            app.MapDelete("/api/contenido/marcas/{id:int}/referencias/{name}", (int id, HttpContext ctx, string name) =>
+            app.MapDelete("/api/contenido/marcas/{id:int}/referencias/{name}", (int id, HttpContext ctx, string name, string? categoria) =>
             {
                 if (!TokenService.EsRedes(ctx.User)) return Results.Forbid();
                 if (!NombreRefSeguro(name)) return Results.NotFound();
-                var full = Path.Combine(RutaRefsDir(id), name);
+                var full = Path.Combine(RutaRefsDir(id, categoria), name);
                 if (File.Exists(full)) File.Delete(full);
                 return Results.Ok(new { ok = true });
+            }).RequireAuthorization();
+
+            // Mover una referencia de un banco al otro (producto <-> creatividad).
+            app.MapPost("/api/contenido/marcas/{id:int}/referencias/{name}/mover", (int id, HttpContext ctx, string name, string? desde, string? hacia) =>
+            {
+                if (!TokenService.EsRedes(ctx.User)) return Results.Forbid();
+                if (!NombreRefSeguro(name)) return Results.NotFound();
+                var catDesde = (desde ?? "").Trim().ToLowerInvariant() == "creatividad" ? "creatividad" : "producto";
+                var catHacia = (hacia ?? "").Trim().ToLowerInvariant() == "creatividad" ? "creatividad" : "producto";
+                if (catDesde == catHacia) return Results.Ok(new { ok = true });
+                var src = Path.Combine(RutaRefsDir(id, catDesde), name);
+                if (!File.Exists(src)) return Results.NotFound();
+                var dst = Path.Combine(RutaRefsDir(id, catHacia), name);
+                try
+                {
+                    if (File.Exists(dst)) File.Delete(dst);
+                    File.Move(src, dst);
+                }
+                catch (Exception ex) { return Results.Problem(ex.Message); }
+                return Results.Ok(new { ok = true, categoria = catHacia });
             }).RequireAuthorization();
 
             // ════════════════ ASSETS DEL POST (carrusel / subida manual) ════════════════
@@ -1058,9 +1094,11 @@ namespace SistemaGestion.Api.Endpoints
             return ans.StartsWith("SI") || ans.StartsWith("YES");
         }
 
-        private static string RutaRefsDir(int marcaId)
+        private static string RutaRefsDir(int marcaId, string? categoria = null)
         {
-            var d = Path.Combine(RutaContenidoDir(), $"marca-{marcaId}", "ref");
+            var baseDir = Path.Combine(RutaContenidoDir(), $"marca-{marcaId}", "ref");
+            var cat = (categoria ?? "").Trim().ToLowerInvariant();
+            var d = cat == "creatividad" ? Path.Combine(baseDir, "creatividad") : baseDir; // producto = raiz
             Directory.CreateDirectory(d);
             return d;
         }
@@ -1077,12 +1115,12 @@ namespace SistemaGestion.Api.Endpoints
         /// Lee hasta max imagenes de referencia, las REDIMENSIONA a ~1024 px JPEG
         /// (para que el payload a n8n sea liviano) y las devuelve como {mime, data(base64)}.
         /// </summary>
-        private static List<object> LeerReferenciasParaPayload(int marcaId, int max, string[]? seleccion = null)
+        private static List<object> LeerReferenciasParaPayload(int marcaId, int max, string[]? seleccion = null, string? categoria = null)
         {
             var list = new List<object>();
             try
             {
-                var dir = RutaRefsDir(marcaId);
+                var dir = RutaRefsDir(marcaId, categoria);
                 IEnumerable<string> archivos = (seleccion != null && seleccion.Length > 0)
                     ? seleccion.Where(NombreRefSeguro).Select(n => Path.Combine(dir, n)).Where(File.Exists)
                     : Directory.GetFiles(dir).OrderBy(x => x);
@@ -1154,7 +1192,7 @@ namespace SistemaGestion.Api.Endpoints
 
     // DTOs de generación IA
     record GenerarIdeasReq(int MarcaId, string[]? Pilares, int? Cantidad, bool? UsarBase);
-    record GenerarPostReq(string? Formato, string? PromptImagen, int? NImagenes, string? Modo, string[]? Referencias);
+    record GenerarPostReq(string? Formato, string? PromptImagen, int? NImagenes, string? Modo, string[]? Referencias, string[]? ReferenciasCreatividad);
     record HookIdeaItem(string? Titulo, string? Descripcion, string? Pilar);
     record HookIdeasReq(int MarcaId, HookIdeaItem[]? Ideas);
     record CaptionDto(string? Es, string? En);
