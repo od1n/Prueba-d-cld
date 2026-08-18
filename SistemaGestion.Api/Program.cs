@@ -226,6 +226,10 @@ app.UseStaticFiles(new Microsoft.AspNetCore.Builder.StaticFileOptions
         var path = ctx.File.PhysicalPath ?? "";
         if (path.EndsWith(".html"))
             ctx.Context.Response.Headers["Cache-Control"] = "no-store";
+        else if (path.EndsWith(".js") || path.EndsWith(".css"))
+            // JS/CSS no versionados: revalidar siempre para que los cambios se
+            // propaguen aun detras de Cloudflare (no servir versiones viejas).
+            ctx.Context.Response.Headers["Cache-Control"] = "no-cache, must-revalidate";
         else
             ctx.Context.Response.Headers["Cache-Control"] = "public, max-age=86400";
     }
