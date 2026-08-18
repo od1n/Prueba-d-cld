@@ -431,7 +431,7 @@ window.abrirGenerarPost = async (id, modo) => {
             <textarea class="input-field" id="genPrompt" rows="3" placeholder="Ej: fuste plástico HDPE en primer plano sobre fondo neutro">${esh(post.promptImagen || post.titulo || '')}</textarea></div>
         <div class="flex-between" style="align-items:flex-end;gap:8px">
           <label class="input-label" style="margin:0">Fotos de referencia a usar (conserva textura y forma real) <span id="refCount" class="text-dim"></span></label>
-          ${refs.length > 1 ? `<span style="display:flex;gap:6px;white-space:nowrap">
+          ${refs.length >= 1 ? `<span style="display:flex;gap:6px;white-space:nowrap">
             <button type="button" class="btn btn-sm" onclick="marcarRefs(true)">✓ Todas</button>
             <button type="button" class="btn btn-sm" onclick="marcarRefs(false)">✗ Ninguna</button></span>` : ''}
         </div>
