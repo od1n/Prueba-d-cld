@@ -68,6 +68,22 @@ Write-Ok "Digitalizador iniciado (PID $($procDig.Id))"
 
 Start-Sleep -Seconds 3
 
+# ── Asegurar UNA sola instancia: cerrar API vieja (incluida la de AppData) ──
+#    El portal DEBE servirse desde C:\SistemaGestion\publish\api (lo que se
+#    publica aqui), NUNCA desde %LOCALAPPDATA%\SistemaGestion. Si quedaba una
+#    instancia vieja ocupando 5050/5443, la nueva no arrancaba y se seguia
+#    sirviendo codigo viejo. Por eso la cerramos y liberamos los puertos.
+Write-Info "Cerrando instancias previas de la API (para servir SIEMPRE desde publish)..."
+Get-Process -Name "SistemaGestion.Api" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Get-CimInstance Win32_Process -Filter "Name='dotnet.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -like "*SistemaGestion.Api.dll*" } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+foreach ($puerto in 5050, 5443) {
+    Get-NetTCPConnection -LocalPort $puerto -State Listen -ErrorAction SilentlyContinue |
+        ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
+}
+Start-Sleep -Seconds 2
+
 # ── Publicar y arrancar API C# ────────────────────────────────────────────
 Write-Step "4/4" "Publicando y arrancando portal/API (puertos 5050 y 5443)..."
 $apiProj = Join-Path $BASE "SistemaGestion.Api"
@@ -83,6 +99,7 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 Write-Ok "API publicada en $apiPublish"
+Write-Info "El portal se sirve desde: $apiPublish  (NO desde AppData)"
 
 # Ejecutar desde el directorio de publish (no dotnet run)
 $procApi = Start-Process -FilePath "dotnet" `

@@ -257,8 +257,7 @@ async function cargarPosts() {
 }
 
 function tarjetaPost(p) {
-    const clickable = p.estado !== 'generando';
-    return `<div class="card-mini" ${clickable ? `onclick="abrirPost(${p.id})" style="cursor:pointer"` : ''}>
+    return `<div class="card-mini" onclick="abrirPost(${p.id})" style="cursor:pointer">
         <div class="flex-between">
             <strong>${esh(p.titulo || '(sin título)')}</strong>
             ${badgeEstado(p.estado)}
