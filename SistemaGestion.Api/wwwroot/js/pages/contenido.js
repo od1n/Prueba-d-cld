@@ -417,7 +417,7 @@ window.abrirGenerarPost = async (id, modo) => {
     } catch (e) { /* sigue con lo que haya */ }
     const refThumbs = refs.length ? refs.map(f => `
         <label class="ref-pick" title="${eshA(f)}">
-            <input type="checkbox" class="genRef" value="${eshA(f)}" checked>
+            <input type="checkbox" class="genRef" value="${eshA(f)}" onchange="actualizarRefCount()" checked>
             <img src="/api/contenido/marcas/${post.marcaId}/referencias/${encodeURIComponent(f)}">
         </label>`).join('')
         : `<p class="text-dim text-sm">No hay fotos de referencia. Súbelas con 📎 Referencias para que la imagen se base en el fuste real.</p>`;
@@ -429,12 +429,29 @@ window.abrirGenerarPost = async (id, modo) => {
         <div class="msg" id="msgGenPost"></div>
         <div class="input-group"><label class="input-label" for="genPrompt">Prompt de imagen (qué debe mostrar)</label>
             <textarea class="input-field" id="genPrompt" rows="3" placeholder="Ej: fuste plástico HDPE en primer plano sobre fondo neutro">${esh(post.promptImagen || post.titulo || '')}</textarea></div>
-        <label class="input-label">Fotos de referencia a usar (la imagen conserva su textura y forma real)</label>
+        <div class="flex-between" style="align-items:flex-end;gap:8px">
+          <label class="input-label" style="margin:0">Fotos de referencia a usar (conserva textura y forma real) <span id="refCount" class="text-dim"></span></label>
+          ${refs.length > 1 ? `<span style="display:flex;gap:6px;white-space:nowrap">
+            <button type="button" class="btn btn-sm" onclick="marcarRefs(true)">✓ Todas</button>
+            <button type="button" class="btn btn-sm" onclick="marcarRefs(false)">✗ Ninguna</button></span>` : ''}
+        </div>
         <div class="ref-grid">${refThumbs}</div>
         <button class="btn btn-cyan" id="btnGenPost" onclick="confirmarGenerarPost(${id},'${modo}')" style="margin-top:10px">Generar</button>
         <p class="text-dim text-sm" style="margin-top:8px">Recuerda: nunca fustes de madera (es la competencia). El cuero sí está permitido.</p>
       </div>`;
+    actualizarRefCount();
 };
+
+window.marcarRefs = (v) => {
+    document.querySelectorAll('.genRef').forEach(c => { c.checked = v; });
+    actualizarRefCount();
+};
+function actualizarRefCount() {
+    const total = document.querySelectorAll('.genRef').length;
+    const sel = document.querySelectorAll('.genRef:checked').length;
+    const el = document.getElementById('refCount');
+    if (el) el.textContent = total ? `(${sel}/${total})` : '';
+}
 
 window.confirmarGenerarPost = async (id, modo) => {
     const btn = document.getElementById('btnGenPost'); setLoading(btn, true);
