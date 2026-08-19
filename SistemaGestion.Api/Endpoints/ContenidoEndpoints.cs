@@ -563,6 +563,125 @@ namespace SistemaGestion.Api.Endpoints
                 return Results.Ok(new { ok = true });
             }).RequireAuthorization();
 
+            // ════════════════ PUBLICACION AUTOMATICA (Fase 4b — Meta Graph API) ════════════════
+
+            // Imagen PUBLICA por token (sin login) para que Meta pueda descargarla al publicar.
+            app.MapGet("/api/contenido/pub/{token}/{idx:int}", (string token, int idx) =>
+            {
+                if (string.IsNullOrWhiteSpace(token) || token.Length < 16) return Results.NotFound();
+                using var c = Db.Conn();
+                int postId;
+                using (var q = c.CreateCommand())
+                {
+                    q.CommandText = "SELECT Id FROM Posts WHERE PublicToken=$t";
+                    q.Parameters.AddWithValue("$t", token);
+                    var v = q.ExecuteScalar();
+                    if (v is null || v is DBNull) return Results.NotFound();
+                    postId = Convert.ToInt32(v);
+                }
+                string ruta;
+                using (var q = c.CreateCommand())
+                {
+                    q.CommandText = "SELECT RutaArchivo FROM PostAssets WHERE PostId=$p ORDER BY Orden LIMIT 1 OFFSET $o";
+                    q.Parameters.AddWithValue("$p", postId);
+                    q.Parameters.AddWithValue("$o", idx);
+                    ruta = q.ExecuteScalar()?.ToString() ?? "";
+                }
+                if (string.IsNullOrEmpty(ruta) || !File.Exists(ruta)) return Results.NotFound();
+                var ext = Path.GetExtension(ruta).ToLowerInvariant();
+                var mime = ext is ".jpg" or ".jpeg" ? "image/jpeg" : ext == ".png" ? "image/png" : "application/octet-stream";
+                return Results.File(File.ReadAllBytes(ruta), mime);
+            });
+
+            // Configurar una cuenta de red (Page/IG/token) — solo Admin.
+            app.MapPut("/api/contenido/cuentas/{id:int}", (int id, HttpContext ctx, ContCuentaEditarReq req) =>
+            {
+                if (!TokenService.EsAdmin(ctx.User)) return Results.Forbid();
+                using var c = Db.Conn();
+                using var cmd = c.CreateCommand();
+                cmd.CommandText = @"UPDATE CuentasRed SET
+                        NombreCuenta = COALESCE($nc, NombreCuenta),
+                        IgUserId     = COALESCE($ig, IgUserId),
+                        PageId       = COALESCE($pg, PageId),
+                        TokenRef     = COALESCE($tk, TokenRef),
+                        ModoPublicacion = COALESCE($mo, ModoPublicacion),
+                        Estado = CASE WHEN TRIM(COALESCE($tk, TokenRef, '')) <> '' THEN 'conectada' ELSE Estado END
+                    WHERE Id = $id";
+                Bind(cmd, "$nc", req.NombreCuenta);
+                Bind(cmd, "$ig", req.IgUserId);
+                Bind(cmd, "$pg", req.PageId);
+                Bind(cmd, "$tk", req.Token);
+                Bind(cmd, "$mo", req.ModoPublicacion);
+                cmd.Parameters.AddWithValue("$id", id);
+                return cmd.ExecuteNonQuery() > 0
+                    ? Results.Ok(new { ok = true })
+                    : Results.NotFound(new { error = "Cuenta no encontrada." });
+            }).RequireAuthorization();
+
+            // Publicar AHORA en las redes via Graph API.
+            app.MapPost("/api/contenido/posts/{id:int}/publicar", async (int id, HttpContext ctx, ContPublicarAutoReq req) =>
+            {
+                if (!TokenService.EsRedes(ctx.User)) return Results.Forbid();
+                using var c = Db.Conn();
+                int marcaId; string estado, capEs, hashtags;
+                using (var cmd = c.CreateCommand())
+                {
+                    cmd.CommandText = @"SELECT MarcaId, Estado, COALESCE(CaptionEs,''), COALESCE(Hashtags,'')
+                                        FROM Posts WHERE Id=$id";
+                    cmd.Parameters.AddWithValue("$id", id);
+                    using var r = cmd.ExecuteReader();
+                    if (!r.Read()) return Results.NotFound(new { error = "Post no encontrado." });
+                    marcaId = Db.I(r, 0); estado = Db.S(r, 1); capEs = Db.S(r, 2); hashtags = Db.S(r, 3);
+                }
+                if (estado is not ("aprobado" or "programado" or "publicado"))
+                    return Results.BadRequest(new { error = $"Solo se publica un post aprobado (actual: {estado})." });
+
+                int nAssets;
+                using (var cmd = c.CreateCommand())
+                {
+                    cmd.CommandText = "SELECT COUNT(*) FROM PostAssets WHERE PostId=$id";
+                    cmd.Parameters.AddWithValue("$id", id);
+                    nAssets = Convert.ToInt32(cmd.ExecuteScalar() ?? 0);
+                }
+                if (nAssets == 0) return Results.BadRequest(new { error = "El post no tiene imagen para publicar." });
+
+                var pubToken = AsegurarPublicToken(c, id);
+                var baseUrl = CallbackUrl("");
+                var urls = Enumerable.Range(0, nAssets).Select(i => $"{baseUrl}/api/contenido/pub/{pubToken}/{i}").ToList();
+                var caption = string.IsNullOrWhiteSpace(hashtags) ? capEs : (capEs + "\n\n" + hashtags);
+
+                var plataformas = (req.Plataformas != null && req.Plataformas.Length > 0)
+                    ? req.Plataformas : new[] { "instagram" };
+                var resultados = new List<object>();
+                bool algunaOk = false;
+                foreach (var plRaw in plataformas)
+                {
+                    var pl = plRaw.Trim().ToLowerInvariant();
+                    var (igId, pageId, tkAcc) = LeerCuenta(c, marcaId, pl);
+                    if (string.IsNullOrWhiteSpace(tkAcc))
+                    { resultados.Add(new { plataforma = pl, ok = false, error = "Falta configurar la cuenta y el token en Cuentas." }); continue; }
+                    try
+                    {
+                        string permalink = pl == "facebook"
+                            ? await PublicarFacebook(pageId, tkAcc, urls, caption)
+                            : await PublicarInstagram(igId, tkAcc, urls, caption);
+                        RegistrarPublicacion(c, id, pl, permalink);
+                        resultados.Add(new { plataforma = pl, ok = true, permalink });
+                        algunaOk = true;
+                    }
+                    catch (Exception ex)
+                    { resultados.Add(new { plataforma = pl, ok = false, error = ex.Message }); }
+                }
+                if (algunaOk)
+                {
+                    using var upd = c.CreateCommand();
+                    upd.CommandText = "UPDATE Posts SET Estado='publicado', FechaActualizacion=datetime('now','localtime') WHERE Id=$id";
+                    upd.Parameters.AddWithValue("$id", id);
+                    upd.ExecuteNonQuery();
+                }
+                return Results.Ok(new { ok = algunaOk, resultados });
+            }).RequireAuthorization();
+
             // ════════════════════════ CONFIG (Admin) ════════════════════════
             app.MapGet("/api/contenido/config", (HttpContext ctx) =>
             {
@@ -1243,6 +1362,112 @@ namespace SistemaGestion.Api.Endpoints
             return ms.ToArray();
         }
 
+        private static string AsegurarPublicToken(SqliteConnection c, int postId)
+        {
+            using (var q = c.CreateCommand())
+            {
+                q.CommandText = "SELECT PublicToken FROM Posts WHERE Id=$id";
+                q.Parameters.AddWithValue("$id", postId);
+                var v = q.ExecuteScalar()?.ToString();
+                if (!string.IsNullOrWhiteSpace(v)) return v!;
+            }
+            var tok = Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N");
+            using (var u = c.CreateCommand())
+            {
+                u.CommandText = "UPDATE Posts SET PublicToken=$t WHERE Id=$id";
+                u.Parameters.AddWithValue("$t", tok);
+                u.Parameters.AddWithValue("$id", postId);
+                u.ExecuteNonQuery();
+            }
+            return tok;
+        }
+
+        private static (string igId, string pageId, string token) LeerCuenta(SqliteConnection c, int marcaId, string plataforma)
+        {
+            using var cmd = c.CreateCommand();
+            cmd.CommandText = @"SELECT COALESCE(IgUserId,''), COALESCE(PageId,''), COALESCE(TokenRef,'')
+                                FROM CuentasRed WHERE MarcaId=$m AND LOWER(Plataforma)=$p AND Activa=1 LIMIT 1";
+            cmd.Parameters.AddWithValue("$m", marcaId);
+            cmd.Parameters.AddWithValue("$p", plataforma.ToLowerInvariant());
+            using var r = cmd.ExecuteReader();
+            if (!r.Read()) return ("", "", "");
+            return (Db.S(r, 0), Db.S(r, 1), Db.S(r, 2));
+        }
+
+        private static void RegistrarPublicacion(SqliteConnection c, int postId, string plataforma, string permalink)
+        {
+            using var ins = c.CreateCommand();
+            ins.CommandText = @"INSERT INTO Publicaciones (PostId, Plataforma, Estado, Permalink, FechaPublicacion)
+                                VALUES ($p, $pl, 'publicado', $link, datetime('now','localtime'))";
+            ins.Parameters.AddWithValue("$p", postId);
+            ins.Parameters.AddWithValue("$pl", plataforma);
+            ins.Parameters.AddWithValue("$link", (object?)permalink ?? DBNull.Value);
+            ins.ExecuteNonQuery();
+        }
+
+        private const string GraphBase = "https://graph.facebook.com/v21.0/";
+
+        private static async Task<string> GraphPost(string path, Dictionary<string, string> form)
+        {
+            using var content = new FormUrlEncodedContent(form);
+            var resp = await _http.PostAsync(GraphBase + path, content);
+            var body = await resp.Content.ReadAsStringAsync();
+            if (!resp.IsSuccessStatusCode) throw new Exception($"Graph {(int)resp.StatusCode}: {body}");
+            using var doc = System.Text.Json.JsonDocument.Parse(body);
+            if (doc.RootElement.TryGetProperty("id", out var idp)) return idp.GetString() ?? "";
+            if (doc.RootElement.TryGetProperty("post_id", out var pp)) return pp.GetString() ?? "";
+            return "";
+        }
+
+        private static async Task<string> PublicarInstagram(string igId, string token, List<string> urls, string caption)
+        {
+            if (string.IsNullOrWhiteSpace(igId)) throw new Exception("Falta el ID de la cuenta de Instagram Business.");
+            string creationId;
+            if (urls.Count == 1)
+            {
+                creationId = await GraphPost($"{igId}/media", new() { ["image_url"] = urls[0], ["caption"] = caption, ["access_token"] = token });
+            }
+            else
+            {
+                var children = new List<string>();
+                foreach (var u in urls)
+                {
+                    var cid = await GraphPost($"{igId}/media", new() { ["image_url"] = u, ["is_carousel_item"] = "true", ["access_token"] = token });
+                    children.Add(cid);
+                }
+                creationId = await GraphPost($"{igId}/media", new() { ["media_type"] = "CAROUSEL", ["children"] = string.Join(",", children), ["caption"] = caption, ["access_token"] = token });
+            }
+            var mediaId = await GraphPost($"{igId}/media_publish", new() { ["creation_id"] = creationId, ["access_token"] = token });
+            try
+            {
+                var resp = await _http.GetAsync($"{GraphBase}{mediaId}?fields=permalink&access_token={Uri.EscapeDataString(token)}");
+                var body = await resp.Content.ReadAsStringAsync();
+                using var doc = System.Text.Json.JsonDocument.Parse(body);
+                if (doc.RootElement.TryGetProperty("permalink", out var pl)) return pl.GetString() ?? $"IG {mediaId}";
+            }
+            catch { }
+            return $"IG {mediaId}";
+        }
+
+        private static async Task<string> PublicarFacebook(string pageId, string token, List<string> urls, string caption)
+        {
+            if (string.IsNullOrWhiteSpace(pageId)) throw new Exception("Falta el ID de la Pagina de Facebook.");
+            if (urls.Count == 1)
+            {
+                var id = await GraphPost($"{pageId}/photos", new() { ["url"] = urls[0], ["caption"] = caption, ["access_token"] = token });
+                return $"https://www.facebook.com/{id}";
+            }
+            var media = new List<string>();
+            foreach (var u in urls)
+            {
+                var fbid = await GraphPost($"{pageId}/photos", new() { ["url"] = u, ["published"] = "false", ["access_token"] = token });
+                media.Add(fbid);
+            }
+            var attached = "[" + string.Join(",", media.Select(m => $"{{\"media_fbid\":\"{m}\"}}")) + "]";
+            var postId = await GraphPost($"{pageId}/feed", new() { ["message"] = caption, ["attached_media"] = attached, ["access_token"] = token });
+            return $"https://www.facebook.com/{postId}";
+        }
+
         private static object? LeerMarcaDict(int marcaId)
         {
             using var c = Db.Conn();
@@ -1278,6 +1503,8 @@ namespace SistemaGestion.Api.Endpoints
     record ContRechazoReq(string? Nota);
     record ContOrdenReq(int[]? Ids);
     record ContPublicarReq(string[]? Plataformas, string? Permalink);
+    record ContCuentaEditarReq(string? NombreCuenta, string? IgUserId, string? PageId, string? Token, string? ModoPublicacion);
+    record ContPublicarAutoReq(string[]? Plataformas);
 
     // DTOs de generación IA
     record GenerarIdeasReq(int MarcaId, string[]? Pilares, int? Cantidad, bool? UsarBase);

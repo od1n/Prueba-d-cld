@@ -67,6 +67,7 @@ function renderContenido() {
                 <select id="selMarca" class="input-field" style="width:auto"
                         onchange="cambiarMarca(this.value)">${opciones}</select>
                 <button class="btn btn-sm" onclick="abrirReferencias()" title="Fotos reales del producto que la IA usa como base">📎 Referencias</button>
+                ${esAdmin() ? `<button class="btn btn-sm" onclick="abrirCuentas()" title="Configurar Instagram/Facebook para publicar">⚙ Cuentas</button>` : ''}
             </div>
             <div class="seg">
                 <button class="seg-btn ${State.tab === 'ideas' ? 'active' : ''}" onclick="cambiarTab('ideas')">💡 Ideas</button>
@@ -79,7 +80,8 @@ function renderContenido() {
         <div class="modal-overlay" id="modalGen"></div>
         <div class="modal-overlay" id="modalPost"></div>
         <div class="modal-overlay" id="modalGenPost"></div>
-        <div class="modal-overlay" id="modalRefs"></div>`;
+        <div class="modal-overlay" id="modalRefs"></div>
+        <div class="modal-overlay" id="modalCuentas"></div>`;
     if (State.tab === 'ideas') cargarIdeas();
     else if (State.tab === 'posts') cargarPosts();
     else cargarCalendario();
@@ -329,6 +331,10 @@ window.abrirPost = async (id) => {
               ? `<button class="btn btn-sm" style="background:#16643a;color:#fff" onclick="marcarPublicado(${id})">✅ Marcar como publicado</button>`
               : `<span class="text-dim text-sm">Este post ya está marcado como publicado.</span>`}
           </div>
+          <div style="border-top:1px solid var(--borde);padding-top:8px;margin-top:2px">
+            <div class="text-dim text-sm" style="margin-bottom:4px">O publica automáticamente (requiere cuentas configuradas en ⚙ Cuentas):</div>
+            <button class="btn btn-sm" style="background:#7c3aed;color:#fff" onclick="publicarAhora(${id},'${p.plataformasDestino || 'instagram'}')">🚀 Publicar ahora (auto)</button>
+          </div>
         </div>` : '';
     modal.innerHTML = `
       <div class="modal-sheet" style="max-width:640px">
@@ -418,6 +424,72 @@ window.marcarPublicado = async (id) => {
         await apiPost(`/api/contenido/posts/${id}/marcar-publicado`, {});
         closeModal('modalPost'); cargarPosts();
     } catch (err) { showMsg(err.message, 'error', '#msgPost'); }
+};
+
+window.publicarAhora = async (id, plataformasStr) => {
+    if (!confirm('¿Publicar AHORA automáticamente en las redes configuradas? Se subirá la imagen y el texto.')) return;
+    await guardarSilencioso(id);
+    showMsg('Publicando…', 'ok', '#msgPost');
+    const plats = (plataformasStr || 'instagram').split(',').map(s => s.trim()).filter(Boolean);
+    try {
+        const res = await apiPost(`/api/contenido/posts/${id}/publicar`, { plataformas: plats });
+        const lineas = (res.resultados || []).map(r => `${r.plataforma}: ${r.ok ? 'OK ' + (r.permalink || '') : 'ERROR: ' + (r.error || '')}`).join(' · ');
+        if (res.ok) { showMsg('Publicado. ' + lineas, 'ok', '#msgPost'); setTimeout(() => { closeModal('modalPost'); cargarPosts(); }, 2000); }
+        else showMsg('No se pudo publicar. ' + lineas, 'error', '#msgPost');
+    } catch (err) { showMsg(err.message, 'error', '#msgPost'); }
+};
+
+// ── Configuración de cuentas Meta (Admin) ────────────────────────────────
+window.abrirCuentas = async () => {
+    const modal = document.getElementById('modalCuentas');
+    modal.innerHTML = `<div class="modal-sheet"><div class="loading-msg"><div class="spinner"></div></div></div>`;
+    openModal('modalCuentas');
+    let cuentas = [];
+    try { cuentas = await apiGet(`/api/contenido/marcas/${State.marcaId}/cuentas`) || []; } catch (e) { }
+    for (const pl of ['instagram', 'facebook']) {
+        if (!cuentas.find(x => (x.plataforma || '').toLowerCase() === pl)) {
+            try { await apiPost('/api/contenido/cuentas', { marcaId: State.marcaId, plataforma: pl }); } catch (e) { }
+        }
+    }
+    cuentas = await apiGet(`/api/contenido/marcas/${State.marcaId}/cuentas`) || [];
+    const ig = cuentas.find(x => (x.plataforma || '').toLowerCase() === 'instagram') || {};
+    const fb = cuentas.find(x => (x.plataforma || '').toLowerCase() === 'facebook') || {};
+    const badge = (c) => c.estado === 'conectada' ? '<span class="badge badge-publicado">conectada</span>' : '<span class="badge">sin token</span>';
+    modal.innerHTML = `
+      <div class="modal-sheet" style="max-width:560px">
+        <div class="flex-between mb-8"><strong>⚙ Cuentas Meta — ${esh(marcaActual().nombre || '')}</strong>
+          <button class="btn-close" onclick="closeModal('modalCuentas')">✕</button></div>
+        <div class="msg" id="msgCuentas"></div>
+        <div style="border:1px solid var(--borde);border-radius:10px;padding:10px;margin-bottom:10px">
+          <strong>Instagram ${badge(ig)}</strong>
+          <div class="input-group"><label class="input-label">ID de la cuenta de Instagram Business</label>
+            <input class="input-field" id="igId" value="${eshA(ig.igUserId || '')}"></div>
+          <div class="input-group"><label class="input-label">Token de acceso de Página (largo)</label>
+            <input class="input-field" id="igTk" type="password" placeholder="${ig.estado === 'conectada' ? 'ya guardado — deja vacío para no cambiar' : 'pega el token'}"></div>
+          <button class="btn btn-cyan btn-sm" onclick="guardarCuenta(${ig.id},'instagram')">Guardar Instagram</button>
+        </div>
+        <div style="border:1px solid var(--borde);border-radius:10px;padding:10px">
+          <strong>Facebook ${badge(fb)}</strong>
+          <div class="input-group"><label class="input-label">ID de la Página de Facebook</label>
+            <input class="input-field" id="fbId" value="${eshA(fb.pageId || '')}"></div>
+          <div class="input-group"><label class="input-label">Token de acceso de Página (largo)</label>
+            <input class="input-field" id="fbTk" type="password" placeholder="${fb.estado === 'conectada' ? 'ya guardado — deja vacío para no cambiar' : 'pega el token'}"></div>
+          <button class="btn btn-cyan btn-sm" onclick="guardarCuenta(${fb.id},'facebook')">Guardar Facebook</button>
+        </div>
+        <p class="text-dim text-sm" style="margin-top:8px">El token se guarda en el servidor. Instagram usa el ID de la cuenta Business; Facebook, el ID de la Página. Ambos usan un token de acceso de Página de larga duración (te guío para obtenerlo).</p>
+      </div>`;
+};
+
+window.guardarCuenta = async (id, plataforma) => {
+    const idVal = (plataforma === 'instagram' ? document.getElementById('igId').value : document.getElementById('fbId').value).trim();
+    const tk = (plataforma === 'instagram' ? document.getElementById('igTk').value : document.getElementById('fbTk').value);
+    const body = { modoPublicacion: 'auto' };
+    if (plataforma === 'instagram') body.igUserId = idVal; else body.pageId = idVal;
+    if (tk && tk.trim()) body.token = tk.trim();
+    try {
+        await apiPost(`/api/contenido/cuentas/${id}`, body, 'PUT');
+        showMsg('Guardado.', 'ok', '#msgCuentas'); await abrirCuentas();
+    } catch (err) { showMsg(err.message, 'error', '#msgCuentas'); }
 };
 
 // ── Carrusel: subir / reordenar / eliminar imágenes ──────────────────────

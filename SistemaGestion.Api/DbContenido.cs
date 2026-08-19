@@ -176,6 +176,7 @@ namespace SistemaGestion.Api
                 catch { /* la columna ya existe */ }
             }
             AddCol("Posts", "ModoGen", "TEXT");
+            AddCol("Posts", "PublicToken", "TEXT");
         }
 
         /// <summary>Siembra las 2 marcas base solo si la tabla está vacía.</summary>

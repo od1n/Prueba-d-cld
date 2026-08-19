@@ -303,7 +303,8 @@ app.Use(async (ctx, next) =>
     // (2) El area de contenido: solo Admin o Redes (los hooks de n8n usan
     //     X-Internal-Token y se validan dentro del endpoint).
     if (path.StartsWith("/api/contenido", StringComparison.OrdinalIgnoreCase)
-        && !path.StartsWith("/api/contenido/hook", StringComparison.OrdinalIgnoreCase))
+        && !path.StartsWith("/api/contenido/hook", StringComparison.OrdinalIgnoreCase)
+        && !path.StartsWith("/api/contenido/pub", StringComparison.OrdinalIgnoreCase))
     {
         if (!autenticado)
         { ctx.Response.StatusCode = StatusCodes.Status401Unauthorized; return; }
