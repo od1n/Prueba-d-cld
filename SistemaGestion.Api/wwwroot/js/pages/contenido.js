@@ -299,6 +299,24 @@ window.abrirPost = async (id) => {
         : `<p class="text-dim text-sm">Sin imagen todavía.</p>`;
     const fechaVal = (p.fechaProgramada || '').replace(' ', 'T').slice(0, 16);
     const puedeAprobar = esAdmin();
+    const puedePublicar = ['aprobado', 'programado', 'publicado'].includes(p.estado);
+    const seccionPublicar = puedePublicar ? `
+        <div class="acciones-gen" style="flex-direction:column;align-items:stretch;gap:8px">
+          <strong>📢 Publicar ${p.estado === 'publicado' ? '<span class="badge badge-publicado">Publicado</span>' : ''}</strong>
+          <div style="display:flex;flex-wrap:wrap;gap:6px">
+            <a class="btn btn-sm" href="/api/contenido/posts/${id}/paquete.zip?t=${cb}" download>⬇ Descargar (zip)</a>
+            <button class="btn btn-sm" onclick="copiarContenido('es',${id})">📋 Caption ES</button>
+            ${conEn ? `<button class="btn btn-sm" onclick="copiarContenido('en',${id})">📋 Caption EN</button>` : ''}
+            <button class="btn btn-sm" onclick="copiarContenido('ht',${id})">📋 Hashtags</button>
+            <button class="btn btn-sm" onclick="copiarContenido('todo',${id})">📋 Caption + hashtags</button>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px">
+            <a class="btn btn-sm" href="https://www.instagram.com/" target="_blank" rel="noopener">Instagram ↗</a>
+            <a class="btn btn-sm" href="https://business.facebook.com/latest/composer" target="_blank" rel="noopener">Facebook ↗</a>
+            ${p.estado !== 'publicado' ? `<button class="btn btn-sm" style="background:#16643a;color:#fff" onclick="marcarPublicado(${id})">✅ Marcar como publicado</button>` : ''}
+          </div>
+          <p class="text-dim text-sm" style="margin:0">Descarga el zip (imágenes + caption.txt), pega el texto en la app, sube las imágenes y luego marca como publicado.</p>
+        </div>` : '';
     modal.innerHTML = `
       <div class="modal-sheet" style="max-width:640px">
         <div class="flex-between mb-8">
@@ -332,6 +350,7 @@ window.abrirPost = async (id) => {
                             <button class="btn btn-sm" onclick="rechazarPost(${id})">✖ Rechazar</button>` : ''}
           <button class="btn btn-sm" style="color:#ef4444;border-color:#ef4444" onclick="eliminarPost(${id})">🗑 Eliminar</button>
         </div>
+        ${seccionPublicar}
       </div>`;
 };
 
@@ -355,6 +374,30 @@ window.guardarPost = async (id) => {
     try { await apiPost(`/api/contenido/posts/${id}`, recolectarPost(), 'PUT');
         showMsg('Guardado.', 'ok', '#msgPost'); }
     catch (err) { showMsg(err.message, 'error', '#msgPost'); }
+};
+
+// ── Publicación asistida (Fase 4a) ───────────────────────────────────────
+window.copiarContenido = async (tipo, id) => {
+    const es = document.getElementById('pCapEs') ? document.getElementById('pCapEs').value : '';
+    const en = document.getElementById('pCapEn') ? document.getElementById('pCapEn').value : '';
+    const ht = document.getElementById('pHash') ? document.getElementById('pHash').value : '';
+    let txt = tipo === 'es' ? es : tipo === 'en' ? en : tipo === 'ht' ? ht
+        : [es, ht].filter(Boolean).join('\n\n');
+    try {
+        await navigator.clipboard.writeText(txt);
+        showMsg('Copiado al portapapeles.', 'ok', '#msgPost');
+    } catch (e) {
+        showMsg('No se pudo copiar automáticamente; selecciona el texto y cópialo manual.', 'error', '#msgPost');
+    }
+};
+
+window.marcarPublicado = async (id) => {
+    if (!confirm('¿Marcar este post como PUBLICADO? Registra que ya lo publicaste manualmente en las redes.')) return;
+    await guardarSilencioso(id);
+    try {
+        await apiPost(`/api/contenido/posts/${id}/marcar-publicado`, {});
+        closeModal('modalPost'); cargarPosts();
+    } catch (err) { showMsg(err.message, 'error', '#msgPost'); }
 };
 
 // ── Carrusel: subir / reordenar / eliminar imágenes ──────────────────────

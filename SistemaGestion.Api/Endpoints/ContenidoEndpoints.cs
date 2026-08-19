@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using SistemaGestion.Api.Auth;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Net.Http;
 using System.Threading.Tasks;
@@ -473,6 +474,93 @@ namespace SistemaGestion.Api.Endpoints
                 return cmd.ExecuteNonQuery() > 0
                     ? Results.Ok(new { ok = true })
                     : Results.BadRequest(new { error = "Solo se rechazan posts en revisión." });
+            }).RequireAuthorization();
+
+            // ════════════════ PUBLICACION ASISTIDA (Fase 4a) ════════════════
+
+            // Descargar un ZIP con las imagenes del post + caption.txt (texto listo para pegar).
+            app.MapGet("/api/contenido/posts/{id:int}/paquete.zip", (int id) =>
+            {
+                using var c = Db.Conn();
+                string titulo = "", capEs = "", capEn = "", hashtags = "";
+                using (var cmd = c.CreateCommand())
+                {
+                    cmd.CommandText = "SELECT COALESCE(Titulo,''), COALESCE(CaptionEs,''), COALESCE(CaptionEn,''), COALESCE(Hashtags,'') FROM Posts WHERE Id=$id";
+                    cmd.Parameters.AddWithValue("$id", id);
+                    using var r = cmd.ExecuteReader();
+                    if (!r.Read()) return Results.NotFound();
+                    titulo = Db.S(r, 0); capEs = Db.S(r, 1); capEn = Db.S(r, 2); hashtags = Db.S(r, 3);
+                }
+                var rutas = new List<string>();
+                using (var cmd = c.CreateCommand())
+                {
+                    cmd.CommandText = "SELECT RutaArchivo FROM PostAssets WHERE PostId=$id ORDER BY Orden";
+                    cmd.Parameters.AddWithValue("$id", id);
+                    using var r = cmd.ExecuteReader();
+                    while (r.Read()) rutas.Add(Db.S(r, 0));
+                }
+                using var ms = new MemoryStream();
+                using (var zip = new ZipArchive(ms, ZipArchiveMode.Create, true))
+                {
+                    var sb = new System.Text.StringBuilder();
+                    if (!string.IsNullOrWhiteSpace(titulo)) { sb.AppendLine(titulo); sb.AppendLine(); }
+                    sb.AppendLine("== Caption (ES) =="); sb.AppendLine(capEs);
+                    if (!string.IsNullOrWhiteSpace(capEn)) { sb.AppendLine(); sb.AppendLine("== Caption (EN) =="); sb.AppendLine(capEn); }
+                    sb.AppendLine(); sb.AppendLine("== Hashtags =="); sb.AppendLine(hashtags);
+                    var entry = zip.CreateEntry("caption.txt");
+                    using (var w = new StreamWriter(entry.Open(), new System.Text.UTF8Encoding(false))) w.Write(sb.ToString());
+                    int n = 0;
+                    foreach (var ruta in rutas)
+                    {
+                        if (string.IsNullOrEmpty(ruta) || !File.Exists(ruta)) continue;
+                        n++;
+                        var ext = Path.GetExtension(ruta);
+                        var e = zip.CreateEntry($"imagen-{n:00}{ext}");
+                        using var zs = e.Open();
+                        using var fs = File.OpenRead(ruta);
+                        fs.CopyTo(zs);
+                    }
+                }
+                return Results.File(ms.ToArray(), "application/zip", $"post-{id}.zip");
+            }).RequireAuthorization();
+
+            // Marcar como publicado (registro manual: el operador ya publico en las redes).
+            app.MapPost("/api/contenido/posts/{id:int}/marcar-publicado", (int id, HttpContext ctx, ContPublicarReq req) =>
+            {
+                if (!TokenService.EsRedes(ctx.User)) return Results.Forbid();
+                using var c = Db.Conn();
+                string estado = "", plataformas = "";
+                using (var cmd = c.CreateCommand())
+                {
+                    cmd.CommandText = "SELECT Estado, COALESCE(PlataformasDestino,'instagram') FROM Posts WHERE Id=$id";
+                    cmd.Parameters.AddWithValue("$id", id);
+                    using var r = cmd.ExecuteReader();
+                    if (!r.Read()) return Results.NotFound(new { error = "Post no encontrado." });
+                    estado = Db.S(r, 0); plataformas = Db.S(r, 1);
+                }
+                if (estado is not ("aprobado" or "programado" or "publicado"))
+                    return Results.BadRequest(new { error = $"Solo se marca publicado un post aprobado o programado (actual: {estado})." });
+
+                var lista = (req.Plataformas != null && req.Plataformas.Length > 0)
+                    ? req.Plataformas
+                    : plataformas.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                foreach (var pl in lista)
+                {
+                    using var ins = c.CreateCommand();
+                    ins.CommandText = @"INSERT INTO Publicaciones (PostId, Plataforma, Estado, Permalink, FechaPublicacion)
+                                        VALUES ($p, $pl, 'publicado', $link, datetime('now','localtime'))";
+                    ins.Parameters.AddWithValue("$p", id);
+                    ins.Parameters.AddWithValue("$pl", pl);
+                    ins.Parameters.AddWithValue("$link", (object?)req.Permalink ?? DBNull.Value);
+                    ins.ExecuteNonQuery();
+                }
+                using (var upd = c.CreateCommand())
+                {
+                    upd.CommandText = "UPDATE Posts SET Estado='publicado', FechaActualizacion=datetime('now','localtime') WHERE Id=$id";
+                    upd.Parameters.AddWithValue("$id", id);
+                    upd.ExecuteNonQuery();
+                }
+                return Results.Ok(new { ok = true });
             }).RequireAuthorization();
 
             // ════════════════════════ CONFIG (Admin) ════════════════════════
@@ -1189,6 +1277,7 @@ namespace SistemaGestion.Api.Endpoints
     record ContEstadoReq(string Estado);
     record ContRechazoReq(string? Nota);
     record ContOrdenReq(int[]? Ids);
+    record ContPublicarReq(string[]? Plataformas, string? Permalink);
 
     // DTOs de generación IA
     record GenerarIdeasReq(int MarcaId, string[]? Pilares, int? Cantidad, bool? UsarBase);
