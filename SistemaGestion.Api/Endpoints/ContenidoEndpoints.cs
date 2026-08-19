@@ -662,10 +662,10 @@ namespace SistemaGestion.Api.Endpoints
                     { resultados.Add(new { plataforma = pl, ok = false, error = "Falta configurar la cuenta y el token en Cuentas." }); continue; }
                     try
                     {
-                        string permalink = pl == "facebook"
+                        var (extId, permalink) = pl == "facebook"
                             ? await PublicarFacebook(pageId, tkAcc, urls, caption)
                             : await PublicarInstagram(igId, tkAcc, urls, caption);
-                        RegistrarPublicacion(c, id, pl, permalink);
+                        RegistrarPublicacion(c, id, pl, extId, permalink);
                         resultados.Add(new { plataforma = pl, ok = true, permalink });
                         algunaOk = true;
                     }
@@ -680,6 +680,153 @@ namespace SistemaGestion.Api.Endpoints
                     upd.ExecuteNonQuery();
                 }
                 return Results.Ok(new { ok = algunaOk, resultados });
+            }).RequireAuthorization();
+
+            // ════════════════════════ MÉTRICAS (Insights) ════════════════════════
+            // Métricas de un post publicado (por plataforma). Requiere token de la cuenta.
+            app.MapGet("/api/contenido/posts/{id:int}/metricas", async (int id, HttpContext ctx) =>
+            {
+                if (!TokenService.EsRedes(ctx.User)) return Results.Forbid();
+                using var c = Db.Conn();
+                int marcaId;
+                using (var cmd = c.CreateCommand())
+                {
+                    cmd.CommandText = "SELECT MarcaId FROM Posts WHERE Id=$id";
+                    cmd.Parameters.AddWithValue("$id", id);
+                    var o = cmd.ExecuteScalar();
+                    if (o == null || o == DBNull.Value) return Results.NotFound(new { error = "Post no encontrado." });
+                    marcaId = Convert.ToInt32(o);
+                }
+                var pubs = new List<(string pl, string ext, string link)>();
+                using (var cmd = c.CreateCommand())
+                {
+                    cmd.CommandText = "SELECT Plataforma, COALESCE(IdExterno,''), COALESCE(Permalink,'') FROM Publicaciones WHERE PostId=$id AND Estado='publicado'";
+                    cmd.Parameters.AddWithValue("$id", id);
+                    using var r = cmd.ExecuteReader();
+                    while (r.Read()) pubs.Add((Db.S(r, 0), Db.S(r, 1), Db.S(r, 2)));
+                }
+                var salida = new List<object>();
+                foreach (var (pl, ext, link) in pubs)
+                {
+                    var pll = pl.ToLowerInvariant();
+                    var (igId, pageId, tk) = LeerCuenta(c, marcaId, pll);
+                    if (string.IsNullOrWhiteSpace(tk))
+                    { salida.Add(new { plataforma = pll, idExterno = ext, permalink = link, ok = false, error = "Falta el token de la cuenta (pendiente de verificación de Meta)." }); continue; }
+                    if (string.IsNullOrWhiteSpace(ext))
+                    { salida.Add(new { plataforma = pll, idExterno = ext, permalink = link, ok = false, error = "Sin ID del post. Vincúlalo con el enlace publicado." }); continue; }
+                    try
+                    {
+                        object m = pll == "facebook" ? await LeerMetricasFB(tk, ext) : await LeerMetricasIG(tk, ext);
+                        salida.Add(new { plataforma = pll, idExterno = ext, permalink = link, ok = true, metricas = m });
+                    }
+                    catch (Exception ex)
+                    { salida.Add(new { plataforma = pll, idExterno = ext, permalink = link, ok = false, error = ex.Message }); }
+                }
+                return Results.Ok(new { postId = id, plataformas = salida });
+            }).RequireAuthorization();
+
+            // Lista los últimos medios de la cuenta (para vincular posts publicados a mano)
+            app.MapGet("/api/contenido/marcas/{marcaId:int}/medios-recientes", async (int marcaId, string? plataforma, HttpContext ctx) =>
+            {
+                if (!TokenService.EsRedes(ctx.User)) return Results.Forbid();
+                var pl = (plataforma ?? "instagram").ToLowerInvariant();
+                using var c = Db.Conn();
+                var (igId, pageId, tk) = LeerCuenta(c, marcaId, pl);
+                if (string.IsNullOrWhiteSpace(tk)) return Results.BadRequest(new { error = "Falta el token de la cuenta (pendiente de verificación de Meta)." });
+                try
+                {
+                    var lista = new List<object>();
+                    if (pl == "facebook")
+                    {
+                        var el = await GraphGet($"{pageId}/published_posts", "fields=id,message,created_time,permalink_url,full_picture&limit=25", tk);
+                        if (el.TryGetProperty("data", out var arr))
+                            foreach (var m in arr.EnumerateArray())
+                                lista.Add(new
+                                {
+                                    id = m.TryGetProperty("id", out var i) ? i.GetString() : "",
+                                    texto = m.TryGetProperty("message", out var msg) ? msg.GetString() : "",
+                                    fecha = m.TryGetProperty("created_time", out var ct) ? ct.GetString() : "",
+                                    enlace = m.TryGetProperty("permalink_url", out var pu) ? pu.GetString() : "",
+                                    imagen = m.TryGetProperty("full_picture", out var fp) ? fp.GetString() : ""
+                                });
+                    }
+                    else
+                    {
+                        var el = await GraphGet($"{igId}/media", "fields=id,caption,media_type,permalink,timestamp,thumbnail_url,media_url&limit=25", tk);
+                        if (el.TryGetProperty("data", out var arr))
+                            foreach (var m in arr.EnumerateArray())
+                                lista.Add(new
+                                {
+                                    id = m.TryGetProperty("id", out var i) ? i.GetString() : "",
+                                    texto = m.TryGetProperty("caption", out var cap) ? cap.GetString() : "",
+                                    fecha = m.TryGetProperty("timestamp", out var ts) ? ts.GetString() : "",
+                                    enlace = m.TryGetProperty("permalink", out var pk) ? pk.GetString() : "",
+                                    imagen = m.TryGetProperty("thumbnail_url", out var th) ? th.GetString()
+                                           : (m.TryGetProperty("media_url", out var mu) ? mu.GetString() : "")
+                                });
+                    }
+                    return Results.Ok(lista);
+                }
+                catch (Exception ex) { return Results.BadRequest(new { error = ex.Message }); }
+            }).RequireAuthorization();
+
+            // Vincula un post publicado a mano con su ID externo (para poder seguir sus métricas)
+            app.MapPost("/api/contenido/posts/{id:int}/vincular", (int id, HttpContext ctx, ContVincularReq req) =>
+            {
+                if (!TokenService.EsRedes(ctx.User)) return Results.Forbid();
+                if (req == null || string.IsNullOrWhiteSpace(req.Plataforma) || string.IsNullOrWhiteSpace(req.IdExterno))
+                    return Results.BadRequest(new { error = "Falta plataforma o ID del post." });
+                using var c = Db.Conn();
+                RegistrarPublicacion(c, id, req.Plataforma.ToLowerInvariant(), req.IdExterno.Trim(), (req.Enlace ?? "").Trim());
+                using (var upd = c.CreateCommand())
+                {
+                    upd.CommandText = "UPDATE Posts SET Estado='publicado', FechaActualizacion=datetime('now','localtime') WHERE Id=$id AND Estado<>'publicado'";
+                    upd.Parameters.AddWithValue("$id", id);
+                    upd.ExecuteNonQuery();
+                }
+                return Results.Ok(new { ok = true });
+            }).RequireAuthorization();
+
+            // Resumen de la cuenta (seguidores, nº de publicaciones)
+            app.MapGet("/api/contenido/marcas/{marcaId:int}/metricas-cuenta", async (int marcaId, HttpContext ctx) =>
+            {
+                if (!TokenService.EsRedes(ctx.User)) return Results.Forbid();
+                using var c = Db.Conn();
+                var res = new List<object>();
+                foreach (var pl in new[] { "instagram", "facebook" })
+                {
+                    var (igId, pageId, tk) = LeerCuenta(c, marcaId, pl);
+                    if (string.IsNullOrWhiteSpace(tk)) continue;
+                    try
+                    {
+                        if (pl == "instagram")
+                        {
+                            var el = await GraphGet(igId, "fields=username,followers_count,media_count", tk);
+                            res.Add(new
+                            {
+                                plataforma = "instagram",
+                                usuario = el.TryGetProperty("username", out var u) ? u.GetString() : "",
+                                seguidores = el.TryGetProperty("followers_count", out var f) && f.ValueKind == System.Text.Json.JsonValueKind.Number ? f.GetInt64() : 0,
+                                publicaciones = el.TryGetProperty("media_count", out var mc) && mc.ValueKind == System.Text.Json.JsonValueKind.Number ? mc.GetInt64() : 0
+                            });
+                        }
+                        else
+                        {
+                            var el = await GraphGet(pageId, "fields=name,fan_count,followers_count", tk);
+                            long seg = el.TryGetProperty("followers_count", out var fo) && fo.ValueKind == System.Text.Json.JsonValueKind.Number ? fo.GetInt64()
+                                     : (el.TryGetProperty("fan_count", out var fc) && fc.ValueKind == System.Text.Json.JsonValueKind.Number ? fc.GetInt64() : 0);
+                            res.Add(new
+                            {
+                                plataforma = "facebook",
+                                usuario = el.TryGetProperty("name", out var n) ? n.GetString() : "",
+                                seguidores = seg,
+                                publicaciones = (long?)null
+                            });
+                        }
+                    }
+                    catch { }
+                }
+                return Results.Ok(res);
             }).RequireAuthorization();
 
             // ════════════════════════ CONFIG (Admin) ════════════════════════
@@ -1394,13 +1541,16 @@ namespace SistemaGestion.Api.Endpoints
             return (Db.S(r, 0), Db.S(r, 1), Db.S(r, 2));
         }
 
-        private static void RegistrarPublicacion(SqliteConnection c, int postId, string plataforma, string permalink)
+        private static void RegistrarPublicacion(SqliteConnection c, int postId, string plataforma, string idExterno, string permalink)
         {
             using var ins = c.CreateCommand();
-            ins.CommandText = @"INSERT INTO Publicaciones (PostId, Plataforma, Estado, Permalink, FechaPublicacion)
-                                VALUES ($p, $pl, 'publicado', $link, datetime('now','localtime'))";
+            // Reemplaza cualquier registro previo de esa plataforma para el post (evita duplicados al re-vincular)
+            ins.CommandText = @"DELETE FROM Publicaciones WHERE PostId=$p AND LOWER(Plataforma)=LOWER($pl);
+                                INSERT INTO Publicaciones (PostId, Plataforma, Estado, IdExterno, Permalink, FechaPublicacion)
+                                VALUES ($p, $pl, 'publicado', $ext, $link, datetime('now','localtime'))";
             ins.Parameters.AddWithValue("$p", postId);
             ins.Parameters.AddWithValue("$pl", plataforma);
+            ins.Parameters.AddWithValue("$ext", string.IsNullOrWhiteSpace(idExterno) ? (object)DBNull.Value : idExterno);
             ins.Parameters.AddWithValue("$link", (object?)permalink ?? DBNull.Value);
             ins.ExecuteNonQuery();
         }
@@ -1419,7 +1569,108 @@ namespace SistemaGestion.Api.Endpoints
             return "";
         }
 
-        private static async Task<string> PublicarInstagram(string igId, string token, List<string> urls, string caption)
+        // POST que devuelve el JSON completo (para leer varios campos, p.ej. post_id de Facebook)
+        private static async Task<System.Text.Json.JsonElement> GraphPostDoc(string path, Dictionary<string, string> form)
+        {
+            using var content = new FormUrlEncodedContent(form);
+            var resp = await _http.PostAsync(GraphBase + path, content);
+            var body = await resp.Content.ReadAsStringAsync();
+            if (!resp.IsSuccessStatusCode) throw new Exception($"Graph {(int)resp.StatusCode}: {body}");
+            using var doc = System.Text.Json.JsonDocument.Parse(body);
+            return doc.RootElement.Clone();
+        }
+
+        // GET a la Graph API; query sin el access_token (se agrega aquí)
+        private static async Task<System.Text.Json.JsonElement> GraphGet(string path, string query, string token)
+        {
+            var url = $"{GraphBase}{path}?{query}{(string.IsNullOrEmpty(query) ? "" : "&")}access_token={Uri.EscapeDataString(token)}";
+            var resp = await _http.GetAsync(url);
+            var body = await resp.Content.ReadAsStringAsync();
+            if (!resp.IsSuccessStatusCode) throw new Exception($"Graph {(int)resp.StatusCode}: {body}");
+            using var doc = System.Text.Json.JsonDocument.Parse(body);
+            return doc.RootElement.Clone();
+        }
+
+        // Convierte la respuesta de /insights (data[].name + values[0].value) a un diccionario
+        private static Dictionary<string, long> ParseInsights(System.Text.Json.JsonElement el)
+        {
+            var d = new Dictionary<string, long>();
+            if (el.TryGetProperty("data", out var arr) && arr.ValueKind == System.Text.Json.JsonValueKind.Array)
+                foreach (var m in arr.EnumerateArray())
+                {
+                    var name = m.TryGetProperty("name", out var nm) ? (nm.GetString() ?? "") : "";
+                    if (string.IsNullOrEmpty(name)) continue;
+                    if (m.TryGetProperty("values", out var vals) && vals.ValueKind == System.Text.Json.JsonValueKind.Array)
+                        foreach (var val in vals.EnumerateArray())
+                        {
+                            if (val.TryGetProperty("value", out var v) && v.ValueKind == System.Text.Json.JsonValueKind.Number)
+                                d[name] = v.GetInt64();
+                            break; // sólo el primer valor
+                        }
+                }
+            return d;
+        }
+
+        // Métricas de una publicación de Instagram (por media id)
+        private static async Task<object> LeerMetricasIG(string token, string mediaId)
+        {
+            long likes = 0, comentarios = 0, alcance = 0, guardados = 0, interacciones = 0;
+            string tipo = "", permalink = "";
+            try
+            {
+                var f = await GraphGet(mediaId, "fields=like_count,comments_count,media_type,permalink", token);
+                if (f.TryGetProperty("like_count", out var lc) && lc.ValueKind == System.Text.Json.JsonValueKind.Number) likes = lc.GetInt64();
+                if (f.TryGetProperty("comments_count", out var cc) && cc.ValueKind == System.Text.Json.JsonValueKind.Number) comentarios = cc.GetInt64();
+                if (f.TryGetProperty("media_type", out var mt)) tipo = mt.GetString() ?? "";
+                if (f.TryGetProperty("permalink", out var pk)) permalink = pk.GetString() ?? "";
+            }
+            catch { }
+            try
+            {
+                var ins = await GraphGet($"{mediaId}/insights", "metric=reach,saved,total_interactions", token);
+                var d = ParseInsights(ins);
+                d.TryGetValue("reach", out alcance);
+                d.TryGetValue("saved", out guardados);
+                d.TryGetValue("total_interactions", out interacciones);
+            }
+            catch
+            {
+                try
+                {
+                    var ins2 = await GraphGet($"{mediaId}/insights", "metric=reach,saved", token);
+                    var d2 = ParseInsights(ins2);
+                    d2.TryGetValue("reach", out alcance);
+                    d2.TryGetValue("saved", out guardados);
+                }
+                catch { }
+            }
+            return new { alcance, likes, comentarios, guardados, interacciones, tipo, permalink };
+        }
+
+        // Métricas de una publicación de Facebook (por post id)
+        private static async Task<object> LeerMetricasFB(string token, string postId)
+        {
+            long likes = 0, comentarios = 0, compartidos = 0, impresiones = 0, alcance = 0;
+            try
+            {
+                var f = await GraphGet(postId, "fields=likes.summary(true).limit(0),comments.summary(true).limit(0),shares", token);
+                if (f.TryGetProperty("likes", out var lk) && lk.TryGetProperty("summary", out var ls) && ls.TryGetProperty("total_count", out var ltc)) likes = ltc.GetInt64();
+                if (f.TryGetProperty("comments", out var cm) && cm.TryGetProperty("summary", out var cs) && cs.TryGetProperty("total_count", out var ctc)) comentarios = ctc.GetInt64();
+                if (f.TryGetProperty("shares", out var sh) && sh.TryGetProperty("count", out var scc)) compartidos = scc.GetInt64();
+            }
+            catch { }
+            try
+            {
+                var ins = await GraphGet($"{postId}/insights", "metric=post_impressions,post_impressions_unique", token);
+                var d = ParseInsights(ins);
+                d.TryGetValue("post_impressions", out impresiones);
+                d.TryGetValue("post_impressions_unique", out alcance);
+            }
+            catch { }
+            return new { alcance, impresiones, likes, comentarios, compartidos };
+        }
+
+        private static async Task<(string id, string permalink)> PublicarInstagram(string igId, string token, List<string> urls, string caption)
         {
             if (string.IsNullOrWhiteSpace(igId)) throw new Exception("Falta el ID de la cuenta de Instagram Business.");
             string creationId;
@@ -1438,24 +1689,28 @@ namespace SistemaGestion.Api.Endpoints
                 creationId = await GraphPost($"{igId}/media", new() { ["media_type"] = "CAROUSEL", ["children"] = string.Join(",", children), ["caption"] = caption, ["access_token"] = token });
             }
             var mediaId = await GraphPost($"{igId}/media_publish", new() { ["creation_id"] = creationId, ["access_token"] = token });
+            string permalink = $"IG {mediaId}";
             try
             {
                 var resp = await _http.GetAsync($"{GraphBase}{mediaId}?fields=permalink&access_token={Uri.EscapeDataString(token)}");
                 var body = await resp.Content.ReadAsStringAsync();
                 using var doc = System.Text.Json.JsonDocument.Parse(body);
-                if (doc.RootElement.TryGetProperty("permalink", out var pl)) return pl.GetString() ?? $"IG {mediaId}";
+                if (doc.RootElement.TryGetProperty("permalink", out var pl)) permalink = pl.GetString() ?? permalink;
             }
             catch { }
-            return $"IG {mediaId}";
+            return (mediaId, permalink);
         }
 
-        private static async Task<string> PublicarFacebook(string pageId, string token, List<string> urls, string caption)
+        private static async Task<(string id, string permalink)> PublicarFacebook(string pageId, string token, List<string> urls, string caption)
         {
             if (string.IsNullOrWhiteSpace(pageId)) throw new Exception("Falta el ID de la Pagina de Facebook.");
             if (urls.Count == 1)
             {
-                var id = await GraphPost($"{pageId}/photos", new() { ["url"] = urls[0], ["caption"] = caption, ["access_token"] = token });
-                return $"https://www.facebook.com/{id}";
+                // /photos devuelve id (foto) y post_id (historia de la página): para métricas usamos post_id
+                var el = await GraphPostDoc($"{pageId}/photos", new() { ["url"] = urls[0], ["caption"] = caption, ["access_token"] = token });
+                string pid = el.TryGetProperty("post_id", out var pp) ? (pp.GetString() ?? "")
+                           : (el.TryGetProperty("id", out var ii) ? (ii.GetString() ?? "") : "");
+                return (pid, $"https://www.facebook.com/{pid}");
             }
             var media = new List<string>();
             foreach (var u in urls)
@@ -1465,7 +1720,7 @@ namespace SistemaGestion.Api.Endpoints
             }
             var attached = "[" + string.Join(",", media.Select(m => $"{{\"media_fbid\":\"{m}\"}}")) + "]";
             var postId = await GraphPost($"{pageId}/feed", new() { ["message"] = caption, ["attached_media"] = attached, ["access_token"] = token });
-            return $"https://www.facebook.com/{postId}";
+            return (postId, $"https://www.facebook.com/{postId}");
         }
 
         private static object? LeerMarcaDict(int marcaId)
@@ -1504,6 +1759,7 @@ namespace SistemaGestion.Api.Endpoints
     record ContOrdenReq(int[]? Ids);
     record ContPublicarReq(string[]? Plataformas, string? Permalink);
     record ContCuentaEditarReq(string? NombreCuenta, string? IgUserId, string? PageId, string? Token, string? ModoPublicacion);
+    record ContVincularReq(string Plataforma, string IdExterno, string? Enlace);
     record ContPublicarAutoReq(string[]? Plataformas);
 
     // DTOs de generación IA

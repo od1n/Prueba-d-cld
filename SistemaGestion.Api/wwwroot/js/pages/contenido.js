@@ -67,6 +67,7 @@ function renderContenido() {
                 <select id="selMarca" class="input-field" style="width:auto"
                         onchange="cambiarMarca(this.value)">${opciones}</select>
                 <button class="btn btn-sm" onclick="abrirReferencias()" title="Fotos reales del producto que la IA usa como base">📎 Referencias</button>
+                <button class="btn btn-sm" onclick="abrirMetricasCuenta()" title="Seguidores e interacción de las cuentas">📊 Métricas</button>
                 ${esAdmin() ? `<button class="btn btn-sm" onclick="abrirCuentas()" title="Configurar Instagram/Facebook para publicar">⚙ Cuentas</button>` : ''}
             </div>
             <div class="seg">
@@ -81,7 +82,8 @@ function renderContenido() {
         <div class="modal-overlay" id="modalPost"></div>
         <div class="modal-overlay" id="modalGenPost"></div>
         <div class="modal-overlay" id="modalRefs"></div>
-        <div class="modal-overlay" id="modalCuentas"></div>`;
+        <div class="modal-overlay" id="modalCuentas"></div>
+        <div class="modal-overlay" id="modalMetricas"></div>`;
     if (State.tab === 'ideas') cargarIdeas();
     else if (State.tab === 'posts') cargarPosts();
     else cargarCalendario();
@@ -335,6 +337,13 @@ window.abrirPost = async (id) => {
             <div class="text-dim text-sm" style="margin-bottom:4px">O publica automáticamente (requiere cuentas configuradas en ⚙ Cuentas):</div>
             <button class="btn btn-sm" style="background:#7c3aed;color:#fff" onclick="publicarAhora(${id},'${p.plataformasDestino || 'instagram'}')">🚀 Publicar ahora (auto)</button>
           </div>
+          <div style="border-top:1px solid var(--borde);padding-top:8px;margin-top:2px">
+            <div class="text-dim text-sm" style="margin-bottom:4px">Seguimiento · visualizaciones e interacción</div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px">
+              <button class="btn btn-sm" onclick="verMetricasPost(${id})">📊 Ver métricas de este post</button>
+              <button class="btn btn-sm" onclick="vincularPost(${id})" title="Para posts que subiste a mano: engancha el post publicado para poder ver sus métricas">🔗 Vincular post publicado a mano</button>
+            </div>
+          </div>
         </div>` : '';
     modal.innerHTML = `
       <div class="modal-sheet" style="max-width:640px">
@@ -437,6 +446,113 @@ window.publicarAhora = async (id, plataformasStr) => {
         if (res.ok) { showMsg('Publicado. ' + lineas, 'ok', '#msgPost'); setTimeout(() => { closeModal('modalPost'); cargarPosts(); }, 2000); }
         else showMsg('No se pudo publicar. ' + lineas, 'error', '#msgPost');
     } catch (err) { showMsg(err.message, 'error', '#msgPost'); }
+};
+
+// ── Métricas / Insights (Fase 4c) ────────────────────────────────────────
+function metricasSheet(inner) {
+    return `<div class="modal-sheet" style="max-width:560px">
+        <div class="flex-between mb-8"><strong>📊 Métricas</strong>
+        <button class="btn-close" onclick="closeModal('modalMetricas')">✕</button></div>
+        ${inner}</div>`;
+}
+function fmtNum(n) {
+    n = Number(n) || 0;
+    if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+    if (n >= 1000) return (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k';
+    return String(n);
+}
+function metricTile(label, val) {
+    const n = (val === null || val === undefined) ? '—' : fmtNum(val);
+    return `<div class="metric-tile"><div class="metric-num">${n}</div><div class="metric-lbl">${esh(label)}</div></div>`;
+}
+
+window.verMetricasPost = async (id) => {
+    const modal = document.getElementById('modalMetricas');
+    modal.innerHTML = metricasSheet(`<div class="loading-msg"><div class="spinner"></div></div>`);
+    openModal('modalMetricas');
+    let data;
+    try { data = await apiGet(`/api/contenido/posts/${id}/metricas`); }
+    catch (e) { modal.innerHTML = metricasSheet(`<div class="msg show error">${esh(e.message)}</div>`); return; }
+    const plats = data.plataformas || [];
+    let body;
+    if (!plats.length) {
+        body = `<p class="text-dim text-sm">Este post no tiene publicaciones registradas todavía. Publícalo (🚀 auto) o usa "🔗 Vincular" para engancharlo si lo subiste a mano.</p>`;
+    } else {
+        body = plats.map(pl => {
+            const icon = pl.plataforma === 'facebook' ? '📘 Facebook' : '📸 Instagram';
+            if (!pl.ok) return `<div class="card-mini"><strong>${icon}</strong><div class="msg show error" style="margin-top:6px">${esh(pl.error || 'Sin datos')}</div></div>`;
+            const m = pl.metricas || {};
+            const tiles = pl.plataforma === 'facebook'
+                ? [['Alcance', m.alcance], ['Impresiones', m.impresiones], ['Me gusta', m.likes], ['Comentarios', m.comentarios], ['Compartidos', m.compartidos]]
+                : [['Alcance', m.alcance], ['Me gusta', m.likes], ['Comentarios', m.comentarios], ['Guardados', m.guardados], ['Interacción', m.interacciones]];
+            const link = pl.permalink && /^https?:/.test(pl.permalink) ? `<a href="${esh(pl.permalink)}" target="_blank" class="text-sm">Ver ↗</a>` : '';
+            return `<div class="card-mini"><div class="flex-between"><strong>${icon}</strong>${link}</div>
+                <div class="metricas-grid">${tiles.map(t => metricTile(t[0], t[1])).join('')}</div></div>`;
+        }).join('');
+    }
+    modal.innerHTML = metricasSheet(`<h3 style="margin:0 0 4px;font-size:15px">Métricas del post</h3>
+      <p class="text-dim text-sm" style="margin:0 0 10px">Datos en vivo desde Instagram / Facebook.</p>${body}`);
+};
+
+window.vincularPost = async (id, plataforma) => {
+    const modal = document.getElementById('modalMetricas');
+    if (!plataforma) {
+        modal.innerHTML = metricasSheet(`<h3 style="margin:0 0 8px;font-size:15px">🔗 Vincular post publicado a mano</h3>
+          <p class="text-dim text-sm" style="margin:0 0 8px">¿En qué red lo publicaste?</p>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-sm btn-cyan" onclick="vincularPost(${id},'instagram')">📸 Instagram</button>
+            <button class="btn btn-sm" onclick="vincularPost(${id},'facebook')">📘 Facebook</button>
+          </div>`);
+        openModal('modalMetricas'); return;
+    }
+    modal.innerHTML = metricasSheet(`<div class="loading-msg"><div class="spinner"></div></div>`);
+    openModal('modalMetricas');
+    let medios;
+    try { medios = await apiGet(`/api/contenido/marcas/${State.marcaId}/medios-recientes?plataforma=${plataforma}`); }
+    catch (e) { modal.innerHTML = metricasSheet(`<div class="msg show error">${esh(e.message)}</div>`); return; }
+    if (!medios || !medios.length) { modal.innerHTML = metricasSheet(`<p class="text-dim text-sm">No se encontraron publicaciones recientes en la cuenta.</p>`); return; }
+    const items = medios.map(md => {
+        const txt = (md.texto || '').slice(0, 60);
+        const img = md.imagen ? `<img src="${esh(md.imagen)}" style="width:52px;height:52px;object-fit:cover;border-radius:8px;background:#111">` : '';
+        const fecha = (md.fecha || '').slice(0, 10);
+        return `<div class="card-mini" style="display:flex;gap:8px;align-items:center;cursor:pointer" onclick="confirmarVinculo(${id},'${plataforma}','${esh(md.id)}','${encodeURIComponent(md.enlace || '')}')">
+            ${img}<div style="flex:1;min-width:0"><div class="text-sm" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esh(txt || '(sin texto)')}</div>
+            <div class="text-dim text-sm">${fecha}</div></div></div>`;
+    }).join('');
+    modal.innerHTML = metricasSheet(`<h3 style="margin:0 0 6px;font-size:15px">🔗 Elige la publicación</h3>
+      <p class="text-dim text-sm" style="margin:0 0 8px">Toca el post que corresponde a este contenido.</p>${items}`);
+};
+
+window.confirmarVinculo = async (id, plataforma, idExterno, enlaceEnc) => {
+    try {
+        await apiPost(`/api/contenido/posts/${id}/vincular`, { plataforma, idExterno, enlace: decodeURIComponent(enlaceEnc || '') });
+        closeModal('modalMetricas');
+        showMsg('Post vinculado. Ya puedes ver sus métricas.', 'ok', '#msgPost');
+        cargarPosts();
+    } catch (e) { showMsg(e.message, 'error', '#msgPost'); }
+};
+
+window.abrirMetricasCuenta = async () => {
+    const modal = document.getElementById('modalMetricas');
+    modal.innerHTML = metricasSheet(`<div class="loading-msg"><div class="spinner"></div></div>`);
+    openModal('modalMetricas');
+    let data;
+    try { data = await apiGet(`/api/contenido/marcas/${State.marcaId}/metricas-cuenta`); }
+    catch (e) { modal.innerHTML = metricasSheet(`<div class="msg show error">${esh(e.message)}</div>`); return; }
+    let body;
+    if (!data || !data.length) {
+        body = `<p class="text-dim text-sm">Sin datos de cuenta todavía. Aparecerán cuando la cuenta esté conectada con token (tras la verificación de Meta) en ⚙ Cuentas.</p>`;
+    } else {
+        body = data.map(d => {
+            const icon = d.plataforma === 'facebook' ? '📘 Facebook' : '📸 Instagram';
+            const tiles = [['Seguidores', d.seguidores]];
+            if (d.publicaciones !== null && d.publicaciones !== undefined) tiles.push(['Publicaciones', d.publicaciones]);
+            return `<div class="card-mini"><div class="flex-between"><strong>${icon}</strong><span class="text-dim text-sm">${esh(d.usuario || '')}</span></div>
+              <div class="metricas-grid">${tiles.map(t => metricTile(t[0], t[1])).join('')}</div></div>`;
+        }).join('');
+    }
+    modal.innerHTML = metricasSheet(`<h3 style="margin:0 0 6px;font-size:15px">Métricas de la cuenta</h3>
+      <p class="text-dim text-sm" style="margin:0 0 10px">Resumen de las cuentas conectadas de esta marca.</p>${body}`);
 };
 
 // ── Configuración de cuentas Meta (Admin) ────────────────────────────────
