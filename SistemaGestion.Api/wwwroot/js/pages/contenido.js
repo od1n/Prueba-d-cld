@@ -301,21 +301,34 @@ window.abrirPost = async (id) => {
     const puedeAprobar = esAdmin();
     const puedePublicar = ['aprobado', 'programado', 'publicado'].includes(p.estado);
     const seccionPublicar = puedePublicar ? `
-        <div class="acciones-gen" style="flex-direction:column;align-items:stretch;gap:8px">
+        <div class="acciones-gen" style="flex-direction:column;align-items:stretch;gap:10px">
           <strong>📢 Publicar ${p.estado === 'publicado' ? '<span class="badge badge-publicado">Publicado</span>' : ''}</strong>
-          <div style="display:flex;flex-wrap:wrap;gap:6px">
-            <a class="btn btn-sm" href="/api/contenido/posts/${id}/paquete.zip?t=${cb}" download>⬇ Descargar (zip)</a>
-            <button class="btn btn-sm" onclick="copiarContenido('es',${id})">📋 Caption ES</button>
-            ${conEn ? `<button class="btn btn-sm" onclick="copiarContenido('en',${id})">📋 Caption EN</button>` : ''}
-            <button class="btn btn-sm" onclick="copiarContenido('ht',${id})">📋 Hashtags</button>
-            <button class="btn btn-sm" onclick="copiarContenido('todo',${id})">📋 Caption + hashtags</button>
+          <div>
+            <div class="text-dim text-sm" style="margin-bottom:4px">Paso 1 · Descarga las imágenes y el texto</div>
+            <button class="btn btn-sm" onclick="descargarZip(${id})">⬇ Descargar zip (imágenes + texto)</button>
           </div>
-          <div style="display:flex;flex-wrap:wrap;gap:6px">
-            <a class="btn btn-sm" href="https://www.instagram.com/" target="_blank" rel="noopener">Instagram ↗</a>
-            <a class="btn btn-sm" href="https://business.facebook.com/latest/composer" target="_blank" rel="noopener">Facebook ↗</a>
-            ${p.estado !== 'publicado' ? `<button class="btn btn-sm" style="background:#16643a;color:#fff" onclick="marcarPublicado(${id})">✅ Marcar como publicado</button>` : ''}
+          <div>
+            <div class="text-dim text-sm" style="margin-bottom:4px">Paso 2 · Copia el texto al portapapeles</div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px">
+              <button class="btn btn-sm btn-cyan" onclick="copiarContenido('todo',${id})">📋 Caption + hashtags</button>
+              <button class="btn btn-sm" onclick="copiarContenido('es',${id})">Solo caption ES</button>
+              ${conEn ? `<button class="btn btn-sm" onclick="copiarContenido('en',${id})">Caption EN</button>` : ''}
+              <button class="btn btn-sm" onclick="copiarContenido('ht',${id})">Solo hashtags</button>
+            </div>
           </div>
-          <p class="text-dim text-sm" style="margin:0">Descarga el zip (imágenes + caption.txt), pega el texto en la app, sube las imágenes y luego marca como publicado.</p>
+          <div>
+            <div class="text-dim text-sm" style="margin-bottom:4px">Paso 3 · Abre la red, pega el texto y sube las imágenes del zip</div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px">
+              <button class="btn btn-sm" onclick="window.open('https://www.instagram.com/','_blank')">Abrir Instagram ↗</button>
+              <button class="btn btn-sm" onclick="window.open('https://business.facebook.com/latest/composer','_blank')">Abrir Facebook ↗</button>
+            </div>
+          </div>
+          <div>
+            <div class="text-dim text-sm" style="margin-bottom:4px">Paso 4 · Cuando ya quedó publicado en la red</div>
+            ${p.estado !== 'publicado'
+              ? `<button class="btn btn-sm" style="background:#16643a;color:#fff" onclick="marcarPublicado(${id})">✅ Marcar como publicado</button>`
+              : `<span class="text-dim text-sm">Este post ya está marcado como publicado.</span>`}
+          </div>
         </div>` : '';
     modal.innerHTML = `
       <div class="modal-sheet" style="max-width:640px">
@@ -377,6 +390,13 @@ window.guardarPost = async (id) => {
 };
 
 // ── Publicación asistida (Fase 4a) ───────────────────────────────────────
+window.descargarZip = (id) => {
+    const a = document.createElement('a');
+    a.href = `/api/contenido/posts/${id}/paquete.zip?t=${Date.now()}`;
+    a.download = `post-${id}.zip`;
+    document.body.appendChild(a); a.click(); a.remove();
+};
+
 window.copiarContenido = async (tipo, id) => {
     const es = document.getElementById('pCapEs') ? document.getElementById('pCapEs').value : '';
     const en = document.getElementById('pCapEn') ? document.getElementById('pCapEn').value : '';
