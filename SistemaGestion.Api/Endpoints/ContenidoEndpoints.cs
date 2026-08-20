@@ -1665,11 +1665,7 @@ namespace SistemaGestion.Api.Endpoints
         }
 
         // ── Video (reel armado con ffmpeg) ──────────────────────────────────
-        // Escapa una ruta de Windows para usarla dentro de un filtro de ffmpeg
-        // (drawtext fontfile/textfile): C:\a\b  ->  C\:/a/b
-        private static string FfPath(string p) => p.Replace("\\", "/").Replace(":", "\\:");
-
-        private static async Task<(bool ok, string err)> CorrerFfmpegAsync(List<string> args, int timeoutMs = 180000)
+        private static async Task<(bool ok, string err)> CorrerFfmpegAsync(List<string> args, string? workingDir = null, int timeoutMs = 180000)
         {
             try
             {
@@ -1681,6 +1677,7 @@ namespace SistemaGestion.Api.Endpoints
                     UseShellExecute = false,
                     CreateNoWindow = true
                 };
+                if (!string.IsNullOrEmpty(workingDir)) psi.WorkingDirectory = workingDir;
                 foreach (var a in args) psi.ArgumentList.Add(a);
                 using var p = System.Diagnostics.Process.Start(psi);
                 if (p == null) return (false, "No se pudo iniciar ffmpeg.");
@@ -1712,24 +1709,39 @@ namespace SistemaGestion.Api.Endpoints
             for (int i = 0; i < imgs.Count; i++) sb.Append($"[v{i}]");
             sb.Append($"concat=n={imgs.Count}:v=1:a=0[vc];");
 
+            var dir = Path.GetDirectoryName(outPath)!;
+            var outName = Path.GetFileName(outPath);
+
+            // Para el texto: copiamos la fuente al directorio de trabajo y referenciamos
+            // fuente y textfile por nombre RELATIVO (cwd = dir). Así evitamos el escape de
+            // rutas de Windows (C:\...) dentro del filtro, que rompe el parser de ffmpeg.
             string lastLabel = "vc";
-            string? hookFile = null;
-            string? fontReal = new[] { @"C:\Windows\Fonts\arialbd.ttf", @"C:\Windows\Fonts\segoeuib.ttf", @"C:\Windows\Fonts\arial.ttf", @"C:\Windows\Fonts\segoeui.ttf" }
-                .FirstOrDefault(File.Exists);
-            if (!string.IsNullOrWhiteSpace(gancho) && fontReal != null)
+            string? hookAbs = null, fontAbs = null;
+            if (!string.IsNullOrWhiteSpace(gancho))
             {
-                hookFile = Path.Combine(Path.GetDirectoryName(outPath)!, $"hook-{Guid.NewGuid():N}.txt");
-                await File.WriteAllTextAsync(hookFile, gancho.Trim(), new System.Text.UTF8Encoding(false));
-                var font = FfPath(fontReal);
-                var hf = FfPath(hookFile);
-                double hookDur = Math.Min(totalDur, 3.0);
-                sb.Append($"[vc]drawtext=fontfile={font}:textfile={hf}:fontcolor=white:fontsize=72:borderw=6:bordercolor=black@0.85:x=(w-tw)/2:y=170:line_spacing=12:enable='lt(t,{hookDur.ToString("0.###", inv)})'[vout];");
-                lastLabel = "vout";
+                var fontOrigen = new[] { @"C:\Windows\Fonts\arialbd.ttf", @"C:\Windows\Fonts\segoeuib.ttf", @"C:\Windows\Fonts\arial.ttf", @"C:\Windows\Fonts\segoeui.ttf" }
+                    .FirstOrDefault(File.Exists);
+                if (fontOrigen != null)
+                {
+                    var fontRel = $"reelfont-{Guid.NewGuid():N}.ttf";
+                    var hookRel = $"reelhook-{Guid.NewGuid():N}.txt";
+                    fontAbs = Path.Combine(dir, fontRel);
+                    hookAbs = Path.Combine(dir, hookRel);
+                    try
+                    {
+                        File.Copy(fontOrigen, fontAbs, true);
+                        await File.WriteAllTextAsync(hookAbs, gancho.Trim(), new System.Text.UTF8Encoding(false));
+                        double hookDur = Math.Min(totalDur, 3.0);
+                        sb.Append($"[vc]drawtext=fontfile={fontRel}:textfile={hookRel}:fontcolor=white:fontsize=72:borderw=6:bordercolor=black@0.85:x=(w-tw)/2:y=170:line_spacing=12:enable='lt(t,{hookDur.ToString("0.###", inv)})'[vout];");
+                        lastLabel = "vout";
+                    }
+                    catch { lastLabel = "vc"; }
+                }
             }
             var filter = sb.ToString().TrimEnd(';');
 
             var args = new List<string> { "-y", "-loglevel", "error" };
-            foreach (var im in imgs) { args.Add("-i"); args.Add(im); }
+            foreach (var im in imgs) { args.Add("-i"); args.Add(im); }   // rutas absolutas OK (son args, no van en el filtro)
             args.Add("-filter_complex"); args.Add(filter);
             args.Add("-map"); args.Add($"[{lastLabel}]");
             args.Add("-r"); args.Add(fps.ToString());
@@ -1737,10 +1749,11 @@ namespace SistemaGestion.Api.Endpoints
             args.Add("-preset"); args.Add("veryfast");
             args.Add("-pix_fmt"); args.Add("yuv420p");
             args.Add("-t"); args.Add(totalDur.ToString("0.###", inv));
-            args.Add(outPath);
+            args.Add(outName);   // relativo (cwd = dir)
 
-            var res = await CorrerFfmpegAsync(args);
-            if (hookFile != null) { try { File.Delete(hookFile); } catch { } }
+            var res = await CorrerFfmpegAsync(args, dir);
+            if (hookAbs != null) { try { File.Delete(hookAbs); } catch { } }
+            if (fontAbs != null) { try { File.Delete(fontAbs); } catch { } }
             return res;
         }
 
