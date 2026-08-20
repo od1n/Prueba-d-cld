@@ -68,6 +68,7 @@ function renderContenido() {
                         onchange="cambiarMarca(this.value)">${opciones}</select>
                 <button class="btn btn-sm" onclick="abrirReferencias()" title="Fotos reales del producto que la IA usa como base">📎 Referencias</button>
                 <button class="btn btn-sm" onclick="abrirMetricasCuenta()" title="Seguidores e interacción de las cuentas">📊 Métricas</button>
+                <button class="btn btn-sm" onclick="abrirBandeja()" title="Mensajes y comentarios de la gente en las redes">💬 Bandeja</button>
                 ${esAdmin() ? `<button class="btn btn-sm" onclick="abrirCuentas()" title="Configurar Instagram/Facebook para publicar">⚙ Cuentas</button>` : ''}
             </div>
             <div class="seg">
@@ -83,7 +84,8 @@ function renderContenido() {
         <div class="modal-overlay" id="modalGenPost"></div>
         <div class="modal-overlay" id="modalRefs"></div>
         <div class="modal-overlay" id="modalCuentas"></div>
-        <div class="modal-overlay" id="modalMetricas"></div>`;
+        <div class="modal-overlay" id="modalMetricas"></div>
+        <div class="modal-overlay" id="modalBandeja"></div>`;
     if (State.tab === 'ideas') cargarIdeas();
     else if (State.tab === 'posts') cargarPosts();
     else cargarCalendario();
@@ -554,6 +556,124 @@ window.abrirMetricasCuenta = async () => {
     }
     modal.innerHTML = metricasSheet(`<h3 style="margin:0 0 6px;font-size:15px">Métricas de la cuenta</h3>
       <p class="text-dim text-sm" style="margin:0 0 10px">Resumen de las cuentas conectadas de esta marca.</p>${body}`);
+};
+
+// ── Bandeja de mensajes / comentarios (Fase 5) ───────────────────────────
+function canalLabel(c) {
+    return c === 'ig_comment' ? '📸 IG · comentario'
+        : c === 'ig_dm' ? '📸 IG · DM'
+        : c === 'fb_comment' ? '📘 FB · comentario'
+        : c === 'fb_msg' ? '📘 Messenger' : c;
+}
+function estadoBadgeMsg(e) {
+    const map = { nuevo: ['Nuevo', '#38bdf8'], auto_respondido: ['IA respondió', '#22c55e'],
+        escalado: ['Requiere humano', '#eab308'], respondido: ['Respondido', '#a3e635'], cerrado: ['Cerrado', '#94a3b8'] };
+    const m = map[e] || [e, '#94a3b8'];
+    return `<span class="badge" style="color:${m[1]};border-color:${m[1]}">${m[0]}</span>`;
+}
+function bandejaSheet(inner) {
+    return `<div class="modal-sheet" style="max-width:680px">
+        <div class="flex-between mb-8"><strong>💬 Bandeja de mensajes</strong>
+          <span style="display:flex;gap:6px">
+            <button class="btn btn-sm" onclick="simularMsg()" title="Probar la lógica con un mensaje de ejemplo (sin Meta)">＋ Simular</button>
+            <button class="btn btn-sm" onclick="abrirBandejaConfig()" title="Horario, base de conocimiento y respuestas">⚙ Config</button>
+            <button class="btn-close" onclick="closeModal('modalBandeja')">✕</button>
+          </span></div>
+        <div class="msg" id="msgBandeja"></div>
+        ${inner}</div>`;
+}
+
+window.abrirBandeja = async (estado) => {
+    estado = estado || '';
+    const modal = document.getElementById('modalBandeja');
+    modal.innerHTML = bandejaSheet(`<div class="loading-msg"><div class="spinner"></div></div>`);
+    openModal('modalBandeja');
+    let lista;
+    try { lista = await apiGet(`/api/contenido/marcas/${State.marcaId}/mensajes${estado ? `?estado=${estado}` : ''}`) || []; }
+    catch (e) { modal.innerHTML = bandejaSheet(`<div class="msg show error">${esh(e.message)}</div>`); return; }
+    const filtros = [['', 'Todos'], ['escalado', 'Requieren humano'], ['nuevo', 'Nuevos'],
+        ['auto_respondido', 'IA'], ['respondido', 'Respondidos'], ['cerrado', 'Cerrados']]
+        .map(([v, l]) => `<button class="seg-btn ${estado === v ? 'active' : ''}" onclick="abrirBandeja('${v}')">${l}</button>`).join('');
+    let body;
+    if (!lista.length) {
+        body = `<p class="text-dim text-sm" style="padding:12px 0">No hay mensajes en esta vista. Usa "＋ Simular" para probar cómo responde el sistema, o espera a conectar Meta.</p>`;
+    } else {
+        body = lista.map(m => {
+            const suger = m.respuestaIa ? `<div class="text-dim text-sm" style="margin-top:4px"><b>${m.estado === 'auto_respondido' ? (m.respuestaEnviada ? 'IA respondió:' : 'IA sugiere (aún sin enviar):') : 'Enviado al cliente:'}</b> ${esh(m.respuestaIa)}</div>` : '';
+            const link = m.permalink && /^https?:/.test(m.permalink) ? ` · <a href="${esh(m.permalink)}" target="_blank">ver</a>` : '';
+            const acciones = m.estado !== 'cerrado' ? `<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
+                <button class="btn btn-sm btn-cyan" onclick="responderMsg(${m.id})">✍ Responder</button>
+                <button class="btn btn-sm" onclick="cerrarMsg(${m.id})">✓ Cerrar</button></div>` : '';
+            return `<div class="card-mini" style="border-left:3px solid ${m.estado === 'escalado' ? '#eab308' : 'var(--borde)'}">
+                <div class="flex-between"><span class="text-sm"><b>${esh(m.autor || 'Anónimo')}</b> · ${canalLabel(m.canal)}${link}</span>${estadoBadgeMsg(m.estado)}</div>
+                <div style="margin-top:4px">${esh(m.texto || '')}</div>
+                ${suger}${acciones}</div>`;
+        }).join('');
+    }
+    modal.innerHTML = bandejaSheet(`<div class="seg" style="flex-wrap:wrap;margin-bottom:8px">${filtros}</div>${body}`);
+};
+
+window.responderMsg = async (id) => {
+    const txt = prompt('Escribe la respuesta que se enviará al cliente:');
+    if (txt === null || !txt.trim()) return;
+    try {
+        const r = await apiPost(`/api/contenido/mensajes/${id}/responder`, { texto: txt.trim() });
+        showMsg(r.enviado ? 'Respuesta enviada.' : 'Registrada. (No se envió por la red porque falta el token de Meta.)', 'ok', '#msgBandeja');
+        setTimeout(() => abrirBandeja(), 500);
+    } catch (e) { showMsg(e.message, 'error', '#msgBandeja'); }
+};
+
+window.cerrarMsg = async (id) => {
+    try { await apiPost(`/api/contenido/mensajes/${id}/estado`, { estado: 'cerrado' }); abrirBandeja(); }
+    catch (e) { showMsg(e.message, 'error', '#msgBandeja'); }
+};
+
+window.simularMsg = async () => {
+    const texto = prompt('Escribe un mensaje de ejemplo (como si fuera un cliente):', '¿Cuál es el horario de atención?');
+    if (!texto) return;
+    try {
+        await apiPost(`/api/contenido/marcas/${State.marcaId}/mensajes/simular`, { canal: 'ig_comment', texto });
+        showMsg('Mensaje simulado. Mira cómo lo clasificó el sistema.', 'ok', '#msgBandeja');
+        setTimeout(() => abrirBandeja(), 800);
+    } catch (e) { showMsg(e.message, 'error', '#msgBandeja'); }
+};
+
+window.abrirBandejaConfig = async () => {
+    const modal = document.getElementById('modalBandeja');
+    modal.innerHTML = bandejaSheet(`<div class="loading-msg"><div class="spinner"></div></div>`);
+    let cfg = {};
+    try { cfg = await apiGet(`/api/contenido/marcas/${State.marcaId}/bandeja-config`) || {}; } catch (e) { }
+    modal.innerHTML = bandejaSheet(`
+        <h3 style="margin:0 0 8px;font-size:15px">⚙ Configuración de la bandeja</h3>
+        <div style="display:flex;gap:8px">
+          <div class="input-group" style="flex:1"><label class="input-label">Horario inicio (HH:MM)</label><input class="input-field" id="cfgIni" value="${eshA(cfg.horarioInicio || '08:00')}"></div>
+          <div class="input-group" style="flex:1"><label class="input-label">Horario fin (HH:MM)</label><input class="input-field" id="cfgFin" value="${eshA(cfg.horarioFin || '17:00')}"></div>
+        </div>
+        <div class="input-group"><label class="input-label">Días laborales (1=Lun … 7=Dom)</label><input class="input-field" id="cfgDias" value="${eshA(cfg.diasLaborales || '1,2,3,4,5')}"></div>
+        <div class="input-group"><label class="input-label">Base de conocimiento — lo que la IA puede responder (horario, ubicación, productos, precios públicos, formas de pago…)</label>
+          <textarea class="input-field" id="cfgKb" rows="6" placeholder="Ej: Horario: Lun–Vie 8am a 5pm. Estamos en Villa de Cura, Aragua. Vendemos fustes de plástico HDPE. Aceptamos pago móvil y transferencia…">${esh(cfg.baseConocimiento || '')}</textarea></div>
+        <div class="input-group"><label class="input-label">Mensaje de acuse (se envía fuera de horario cuando hace falta una persona)</label>
+          <textarea class="input-field" id="cfgAcuse" rows="2">${esh(cfg.plantillaAcuse || '')}</textarea></div>
+        <div class="input-group"><label class="input-label">Palabras que SIEMPRE van a una persona (separadas por coma)</label>
+          <input class="input-field" id="cfgPal" value="${eshA(cfg.palabrasHumano || '')}"></div>
+        <label style="display:flex;gap:6px;align-items:center;margin-bottom:10px"><input type="checkbox" id="cfgAuto" ${cfg.autoRespuesta !== false ? 'checked' : ''}> La IA responde automáticamente lo que puede</label>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-cyan" onclick="guardarBandejaConfig()">💾 Guardar</button>
+          <button class="btn" onclick="abrirBandeja()">← Volver a la bandeja</button>
+        </div>`);
+};
+
+window.guardarBandejaConfig = async () => {
+    const g = id => { const e = document.getElementById(id); return e ? e.value : null; };
+    const body = {
+        horarioInicio: g('cfgIni'), horarioFin: g('cfgFin'), diasLaborales: g('cfgDias'),
+        baseConocimiento: g('cfgKb'), plantillaAcuse: g('cfgAcuse'), palabrasHumano: g('cfgPal'),
+        autoRespuesta: document.getElementById('cfgAuto') ? document.getElementById('cfgAuto').checked : true
+    };
+    try {
+        await apiPost(`/api/contenido/marcas/${State.marcaId}/bandeja-config`, body, 'PUT');
+        showMsg('Configuración guardada.', 'ok', '#msgBandeja');
+    } catch (e) { showMsg(e.message, 'error', '#msgBandeja'); }
 };
 
 // ── Configuración de cuentas Meta (Admin) ────────────────────────────────

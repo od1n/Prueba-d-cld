@@ -152,6 +152,7 @@ namespace SistemaGestion.Api
                 cmd.ExecuteNonQuery();
 
                 MigrarColumnas(c);
+                CrearTablasBandeja(c);
                 SembrarMarcasBase(c);
                 SembrarConfigBase(c);
                 AsegurarGuiaMarcas(c);
@@ -160,6 +161,50 @@ namespace SistemaGestion.Api
             {
                 Console.WriteLine($"[API] WARN EnsureContenido: {ex.Message}");
             }
+        }
+
+        /// <summary>Crea las tablas de la Bandeja de mensajes/comentarios (Fase 5, idempotente).</summary>
+        private static void CrearTablasBandeja(SqliteConnection c)
+        {
+            using var cmd = c.CreateCommand();
+            cmd.CommandText = @"
+                CREATE TABLE IF NOT EXISTS MensajesRed (
+                    Id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    MarcaId       INTEGER NOT NULL,
+                    Canal         TEXT    NOT NULL,          -- ig_comment | ig_dm | fb_comment | fb_msg
+                    ExternoId     TEXT,                      -- id del comentario/mensaje en Meta
+                    ThreadId      TEXT,                      -- hilo/conversacion (DMs)
+                    PostId        INTEGER,                   -- post interno relacionado (si aplica)
+                    PostExternoId TEXT,                      -- id del media/post de Meta
+                    AutorNombre   TEXT,
+                    AutorId       TEXT,
+                    Texto         TEXT,
+                    Estado        TEXT    NOT NULL DEFAULT 'nuevo', -- nuevo|auto_respondido|escalado|respondido|cerrado
+                    RequiereHumano   INTEGER NOT NULL DEFAULT 0,
+                    RespuestaIa      TEXT,                   -- respuesta enviada o sugerida por IA
+                    RespuestaEnviada INTEGER NOT NULL DEFAULT 0,
+                    NotaInterna   TEXT,
+                    Permalink     TEXT,
+                    AvisarEn      TEXT,                      -- cuando avisar a Redes (fuera de horario -> proximo inicio)
+                    Avisado       INTEGER NOT NULL DEFAULT 0,
+                    RecibidoEn    TEXT,
+                    ActualizadoEn TEXT
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS IX_MsgRed_Ext   ON MensajesRed(Canal, ExternoId);
+                CREATE INDEX        IF NOT EXISTS IX_MsgRed_Marca ON MensajesRed(MarcaId, Estado);
+
+                CREATE TABLE IF NOT EXISTS BandejaConfig (
+                    MarcaId          INTEGER PRIMARY KEY,
+                    HorarioInicio    TEXT    NOT NULL DEFAULT '08:00',
+                    HorarioFin       TEXT    NOT NULL DEFAULT '17:00',
+                    DiasLaborales    TEXT    NOT NULL DEFAULT '1,2,3,4,5',  -- 1=Lun .. 7=Dom
+                    BaseConocimiento TEXT,
+                    PlantillaAcuse   TEXT    NOT NULL DEFAULT 'Gracias por escribirnos. Te responderemos personalmente en cuanto inicie nuestro horario de atencion.',
+                    AutoRespuesta    INTEGER NOT NULL DEFAULT 1,
+                    PalabrasHumano   TEXT    DEFAULT 'reclamo,queja,devolucion,demanda,abogado,mayorista,distribuidor,factura,garantia',
+                    Activa           INTEGER NOT NULL DEFAULT 1
+                );";
+            cmd.ExecuteNonQuery();
         }
 
         /// <summary>Agrega columnas nuevas a tablas existentes (idempotente).</summary>

@@ -829,6 +829,163 @@ namespace SistemaGestion.Api.Endpoints
                 return Results.Ok(res);
             }).RequireAuthorization();
 
+            // ════════════════════ BANDEJA (mensajes / comentarios) ══════════════
+            // Webhook de Meta (sin auth). GET = verificacion; POST = eventos entrantes.
+            app.MapGet("/api/contenido/webhook/meta", (HttpContext ctx) =>
+            {
+                var q = ctx.Request.Query;
+                var verify = Environment.GetEnvironmentVariable("SG_META_VERIFY_TOKEN") ?? "hatopascher-verify";
+                if (q["hub.mode"] == "subscribe" && q["hub.verify_token"] == verify)
+                    return Results.Text(q["hub.challenge"].ToString());
+                return Results.StatusCode(403);
+            });
+
+            app.MapPost("/api/contenido/webhook/meta", async (HttpContext ctx) =>
+            {
+                string body;
+                using (var sr = new StreamReader(ctx.Request.Body)) body = await sr.ReadToEndAsync();
+                try { await ProcesarWebhookMetaAsync(body); } catch { }
+                return Results.Ok(new { received = true }); // Meta exige 200 rapido
+            });
+
+            // Simular un mensaje entrante (para probar la logica SIN Meta). Rol Redes.
+            app.MapPost("/api/contenido/marcas/{marcaId:int}/mensajes/simular", async (int marcaId, HttpContext ctx, ContSimularMsgReq req) =>
+            {
+                if (!TokenService.EsRedes(ctx.User)) return Results.Forbid();
+                if (req == null || string.IsNullOrWhiteSpace(req.Texto)) return Results.BadRequest(new { error = "Falta el texto." });
+                var canal = string.IsNullOrWhiteSpace(req.Canal) ? "ig_comment" : req.Canal.Trim().ToLowerInvariant();
+                await GuardarYProcesarAsync(marcaId, canal, "sim-" + Guid.NewGuid().ToString("N"),
+                    req.AutorNombre ?? "Cliente (simulado)", "", req.Texto, req.PostExternoId ?? "", "");
+                return Results.Ok(new { ok = true });
+            }).RequireAuthorization();
+
+            // Listar mensajes de una marca (bandeja). Rol Redes.
+            app.MapGet("/api/contenido/marcas/{marcaId:int}/mensajes", (int marcaId, string? estado, string? canal, HttpContext ctx) =>
+            {
+                if (!TokenService.EsRedes(ctx.User)) return Results.Forbid();
+                using var c = Db.Conn();
+                using var cmd = c.CreateCommand();
+                var sql = @"SELECT Id,Canal,COALESCE(AutorNombre,''),COALESCE(Texto,''),Estado,RequiereHumano,
+                                   COALESCE(RespuestaIa,''),RespuestaEnviada,COALESCE(Permalink,''),COALESCE(AvisarEn,''),
+                                   Avisado,COALESCE(RecibidoEn,''),COALESCE(NotaInterna,'')
+                            FROM MensajesRed WHERE MarcaId=$m";
+                cmd.Parameters.AddWithValue("$m", marcaId);
+                if (!string.IsNullOrWhiteSpace(estado)) { sql += " AND Estado=$e"; cmd.Parameters.AddWithValue("$e", estado); }
+                if (!string.IsNullOrWhiteSpace(canal)) { sql += " AND Canal=$c"; cmd.Parameters.AddWithValue("$c", canal); }
+                sql += " ORDER BY (Estado='escalado') DESC, Id DESC LIMIT 300";
+                cmd.CommandText = sql;
+                var lista = new List<object>();
+                using var r = cmd.ExecuteReader();
+                while (r.Read())
+                    lista.Add(new
+                    {
+                        id = Db.I(r, 0), canal = Db.S(r, 1), autor = Db.S(r, 2), texto = Db.S(r, 3), estado = Db.S(r, 4),
+                        requiereHumano = Db.I(r, 5) == 1, respuestaIa = Db.S(r, 6), respuestaEnviada = Db.I(r, 7) == 1,
+                        permalink = Db.S(r, 8), avisarEn = Db.S(r, 9), avisado = Db.I(r, 10) == 1,
+                        recibidoEn = Db.S(r, 11), nota = Db.S(r, 12)
+                    });
+                return Results.Ok(lista);
+            }).RequireAuthorization();
+
+            // Contador de avisos pendientes (para el badge). Rol Redes.
+            app.MapGet("/api/contenido/marcas/{marcaId:int}/avisos", (int marcaId, HttpContext ctx) =>
+            {
+                if (!TokenService.EsRedes(ctx.User)) return Results.Forbid();
+                using var c = Db.Conn();
+                using var cmd = c.CreateCommand();
+                cmd.CommandText = @"SELECT COUNT(*) FROM MensajesRed WHERE MarcaId=$m AND Estado='escalado' AND Avisado=0
+                                    AND (AvisarEn IS NULL OR AvisarEn <= datetime('now','localtime'))";
+                cmd.Parameters.AddWithValue("$m", marcaId);
+                var n = Convert.ToInt32(cmd.ExecuteScalar() ?? 0);
+                return Results.Ok(new { pendientes = n });
+            }).RequireAuthorization();
+
+            // Responder manualmente un mensaje (envía por el canal si hay token). Rol Redes.
+            app.MapPost("/api/contenido/mensajes/{id:int}/responder", async (int id, HttpContext ctx, ContResponderMsgReq req) =>
+            {
+                if (!TokenService.EsRedes(ctx.User)) return Results.Forbid();
+                if (req == null || string.IsNullOrWhiteSpace(req.Texto)) return Results.BadRequest(new { error = "Falta el texto." });
+                using var c = Db.Conn();
+                int marcaId; string canal, externoId, autorId;
+                using (var cmd = c.CreateCommand())
+                {
+                    cmd.CommandText = "SELECT MarcaId,Canal,COALESCE(ExternoId,''),COALESCE(AutorId,'') FROM MensajesRed WHERE Id=$id";
+                    cmd.Parameters.AddWithValue("$id", id);
+                    using var r = cmd.ExecuteReader();
+                    if (!r.Read()) return Results.NotFound(new { error = "Mensaje no encontrado." });
+                    marcaId = Db.I(r, 0); canal = Db.S(r, 1); externoId = Db.S(r, 2); autorId = Db.S(r, 3);
+                }
+                bool enviado = await EnviarRespuestaCanal(c, marcaId, canal, externoId, autorId, req.Texto);
+                using (var upd = c.CreateCommand())
+                {
+                    upd.CommandText = "UPDATE MensajesRed SET Estado='respondido',RespuestaEnviada=$re,Avisado=1,NotaInterna=$n,ActualizadoEn=datetime('now','localtime') WHERE Id=$id";
+                    upd.Parameters.AddWithValue("$re", enviado ? 1 : 0);
+                    upd.Parameters.AddWithValue("$n", "Respuesta manual: " + req.Texto);
+                    upd.Parameters.AddWithValue("$id", id);
+                    upd.ExecuteNonQuery();
+                }
+                return Results.Ok(new { ok = true, enviado });
+            }).RequireAuthorization();
+
+            // Cambiar estado (cerrar, marcar respondido, etc.). Rol Redes.
+            app.MapPost("/api/contenido/mensajes/{id:int}/estado", (int id, HttpContext ctx, ContEstadoMsgReq req) =>
+            {
+                if (!TokenService.EsRedes(ctx.User)) return Results.Forbid();
+                var est = (req?.Estado ?? "").Trim().ToLowerInvariant();
+                if (est is not ("nuevo" or "escalado" or "respondido" or "cerrado" or "auto_respondido"))
+                    return Results.BadRequest(new { error = "Estado inválido." });
+                using var c = Db.Conn();
+                using var cmd = c.CreateCommand();
+                cmd.CommandText = "UPDATE MensajesRed SET Estado=$e,Avisado=1,ActualizadoEn=datetime('now','localtime') WHERE Id=$id";
+                cmd.Parameters.AddWithValue("$e", est);
+                cmd.Parameters.AddWithValue("$id", id);
+                cmd.ExecuteNonQuery();
+                return Results.Ok(new { ok = true });
+            }).RequireAuthorization();
+
+            // Configuración de la bandeja (horario, base de conocimiento, plantilla). Rol Redes.
+            app.MapGet("/api/contenido/marcas/{marcaId:int}/bandeja-config", (int marcaId, HttpContext ctx) =>
+            {
+                if (!TokenService.EsRedes(ctx.User)) return Results.Forbid();
+                using var c = Db.Conn();
+                var cfg = LeerBandejaConfig(c, marcaId);
+                return Results.Ok(new
+                {
+                    horarioInicio = cfg.ini, horarioFin = cfg.fin, diasLaborales = cfg.dias,
+                    baseConocimiento = cfg.kb, plantillaAcuse = cfg.acuse, autoRespuesta = cfg.auto,
+                    palabrasHumano = cfg.palabras, activa = cfg.activa
+                });
+            }).RequireAuthorization();
+
+            app.MapPut("/api/contenido/marcas/{marcaId:int}/bandeja-config", (int marcaId, HttpContext ctx, ContBandejaConfigReq req) =>
+            {
+                if (!TokenService.EsRedes(ctx.User)) return Results.Forbid();
+                using var c = Db.Conn();
+                LeerBandejaConfig(c, marcaId); // asegura que exista la fila
+                using var cmd = c.CreateCommand();
+                cmd.CommandText = @"UPDATE BandejaConfig SET
+                        HorarioInicio=COALESCE($hi,HorarioInicio),
+                        HorarioFin=COALESCE($hf,HorarioFin),
+                        DiasLaborales=COALESCE($dl,DiasLaborales),
+                        BaseConocimiento=COALESCE($bc,BaseConocimiento),
+                        PlantillaAcuse=COALESCE($pa,PlantillaAcuse),
+                        AutoRespuesta=COALESCE($ar,AutoRespuesta),
+                        PalabrasHumano=COALESCE($ph,PalabrasHumano),
+                        Activa=COALESCE($ac,Activa)
+                        WHERE MarcaId=$m";
+                cmd.Parameters.AddWithValue("$hi", (object?)req.HorarioInicio ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("$hf", (object?)req.HorarioFin ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("$dl", (object?)req.DiasLaborales ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("$bc", (object?)req.BaseConocimiento ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("$pa", (object?)req.PlantillaAcuse ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("$ar", req.AutoRespuesta.HasValue ? (object)(req.AutoRespuesta.Value ? 1 : 0) : DBNull.Value);
+                cmd.Parameters.AddWithValue("$ph", (object?)req.PalabrasHumano ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("$ac", req.Activa.HasValue ? (object)(req.Activa.Value ? 1 : 0) : DBNull.Value);
+                cmd.Parameters.AddWithValue("$m", marcaId);
+                cmd.ExecuteNonQuery();
+                return Results.Ok(new { ok = true });
+            }).RequireAuthorization();
+
             // ════════════════════════ CONFIG (Admin) ════════════════════════
             app.MapGet("/api/contenido/config", (HttpContext ctx) =>
             {
@@ -1456,6 +1613,306 @@ namespace SistemaGestion.Api.Endpoints
             catch (Exception ex) { return (false, ex.Message); }
         }
 
+        // ── Bandeja: configuración, horario, clasificación IA y escalado ─────
+        private static (string ini, string fin, string dias, string kb, string acuse, bool auto, string palabras, bool activa)
+            LeerBandejaConfig(SqliteConnection c, int marcaId)
+        {
+            using (var chk = c.CreateCommand())
+            {
+                chk.CommandText = @"SELECT HorarioInicio,HorarioFin,DiasLaborales,COALESCE(BaseConocimiento,''),
+                                           PlantillaAcuse,AutoRespuesta,COALESCE(PalabrasHumano,''),Activa
+                                    FROM BandejaConfig WHERE MarcaId=$m";
+                chk.Parameters.AddWithValue("$m", marcaId);
+                using var r = chk.ExecuteReader();
+                if (r.Read())
+                    return (Db.S(r, 0), Db.S(r, 1), Db.S(r, 2), Db.S(r, 3), Db.S(r, 4), Db.I(r, 5) == 1, Db.S(r, 6), Db.I(r, 7) == 1);
+            }
+            using (var ins = c.CreateCommand())
+            {
+                ins.CommandText = "INSERT OR IGNORE INTO BandejaConfig (MarcaId) VALUES ($m)";
+                ins.Parameters.AddWithValue("$m", marcaId);
+                ins.ExecuteNonQuery();
+            }
+            return ("08:00", "17:00", "1,2,3,4,5", "",
+                "Gracias por escribirnos. Te responderemos personalmente en cuanto inicie nuestro horario de atencion.",
+                true, "reclamo,queja,devolucion,demanda,abogado,mayorista,distribuidor,factura,garantia", true);
+        }
+
+        private static bool EnHorario(string ini, string fin, string dias, DateTime now)
+        {
+            try
+            {
+                int dow = (int)now.DayOfWeek;          // 0=Dom..6=Sab
+                int diaIso = dow == 0 ? 7 : dow;       // 1=Lun..7=Dom
+                var setDias = (dias ?? "1,2,3,4,5")
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Select(x => int.TryParse(x, out var d) ? d : -1).ToHashSet();
+                if (!setDias.Contains(diaIso)) return false;
+                if (TimeSpan.TryParse(ini, out var ti) && TimeSpan.TryParse(fin, out var tf))
+                    return now.TimeOfDay >= ti && now.TimeOfDay <= tf;
+                return true;
+            }
+            catch { return true; }
+        }
+
+        private static DateTime ProximoInicioHorario(string ini, string dias, DateTime now)
+        {
+            try
+            {
+                if (!TimeSpan.TryParse(ini, out var ti)) ti = new TimeSpan(8, 0, 0);
+                var setDias = (dias ?? "1,2,3,4,5")
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Select(x => int.TryParse(x, out var d) ? d : -1).ToHashSet();
+                for (int i = 0; i <= 7; i++)
+                {
+                    var cand = now.Date.AddDays(i).Add(ti);
+                    int dow = (int)cand.DayOfWeek; int diaIso = dow == 0 ? 7 : dow;
+                    if (setDias.Contains(diaIso) && cand > now) return cand;
+                }
+                return now.AddHours(12);
+            }
+            catch { return now.AddHours(12); }
+        }
+
+        // Devuelve (puede, respuesta). puede=true => la IA respondió con seguridad usando la base.
+        private static async Task<(bool puede, string respuesta)> ClasificarMensajeAsync(string kb, string palabrasHumano, string texto)
+        {
+            var low = (texto ?? "").ToLowerInvariant();
+            foreach (var p in (palabrasHumano ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                if (p.Length > 0 && low.Contains(p.ToLowerInvariant())) return (false, "");
+
+            var key = GeminiKey();
+            if (string.IsNullOrEmpty(key)) return (false, "");
+            var prompt =
+                "Eres el asistente de atencion al cliente de una marca. Responde SOLO con la base de conocimiento:\n" +
+                "=== BASE ===\n" + (string.IsNullOrWhiteSpace(kb) ? "(sin base de conocimiento)" : kb) + "\n=== FIN BASE ===\n" +
+                "Mensaje del cliente: \"" + (texto ?? "") + "\"\n" +
+                "Si puedes responder de forma correcta, breve y amable USANDO SOLO la base, hazlo. " +
+                "Si requiere una persona (precio no listado, reclamo, negociacion, hacer un pedido, o algo que NO esta en la base), NO inventes. " +
+                "Responde UNICAMENTE en JSON: {\"puede\":true|false,\"respuesta\":\"...\"}. Si puede=false deja respuesta vacia.";
+            var body = new { contents = new[] { new { parts = new object[] { new { text = prompt } } } } };
+            var url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent";
+            using var reqMsg = new HttpRequestMessage(HttpMethod.Post, url)
+            { Content = new StringContent(System.Text.Json.JsonSerializer.Serialize(body), System.Text.Encoding.UTF8, "application/json") };
+            reqMsg.Headers.Add("x-goog-api-key", key);
+            try
+            {
+                var resp = await _http.SendAsync(reqMsg);
+                if (!resp.IsSuccessStatusCode) return (false, "");
+                var txt = await resp.Content.ReadAsStringAsync();
+                using var doc = System.Text.Json.JsonDocument.Parse(txt);
+                var ans = doc.RootElement.GetProperty("candidates")[0].GetProperty("content").GetProperty("parts")[0].GetProperty("text").GetString() ?? "";
+                int a = ans.IndexOf('{'), b = ans.LastIndexOf('}');
+                if (a >= 0 && b > a) ans = ans.Substring(a, b - a + 1);
+                using var j = System.Text.Json.JsonDocument.Parse(ans);
+                bool puede = j.RootElement.TryGetProperty("puede", out var pp) && pp.ValueKind == System.Text.Json.JsonValueKind.True;
+                string r = j.RootElement.TryGetProperty("respuesta", out var rr) ? (rr.GetString() ?? "") : "";
+                if (puede && string.IsNullOrWhiteSpace(r)) puede = false;
+                return (puede, r);
+            }
+            catch { return (false, ""); }
+        }
+
+        private static async Task<bool> GraphPostRawJson(string path, string json, string token)
+        {
+            try
+            {
+                var url = $"{GraphBase}{path}?access_token={Uri.EscapeDataString(token)}";
+                using var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+                var resp = await _http.PostAsync(url, content);
+                return resp.IsSuccessStatusCode;
+            }
+            catch { return false; }
+        }
+
+        // Envía una respuesta por el canal correcto (comentario o DM). false si no hay token o falla.
+        private static async Task<bool> EnviarRespuestaCanal(SqliteConnection c, int marcaId, string canal, string externoId, string autorId, string texto)
+        {
+            var plRed = canal.StartsWith("ig") ? "instagram" : "facebook";
+            var (igId, pageId, tk) = LeerCuenta(c, marcaId, plRed);
+            if (string.IsNullOrWhiteSpace(tk)) return false;
+            try
+            {
+                if (canal == "ig_comment" && !string.IsNullOrEmpty(externoId))
+                { await GraphPost($"{externoId}/replies", new() { ["message"] = texto, ["access_token"] = tk }); return true; }
+                if (canal == "fb_comment" && !string.IsNullOrEmpty(externoId))
+                { await GraphPost($"{externoId}/comments", new() { ["message"] = texto, ["access_token"] = tk }); return true; }
+                if (canal == "ig_dm" && !string.IsNullOrEmpty(autorId))
+                    return await GraphPostRawJson($"{igId}/messages",
+                        $"{{\"recipient\":{{\"id\":\"{autorId}\"}},\"message\":{{\"text\":{System.Text.Json.JsonSerializer.Serialize(texto)}}}}}", tk);
+                if (canal == "fb_msg" && !string.IsNullOrEmpty(autorId))
+                    return await GraphPostRawJson($"{pageId}/messages",
+                        $"{{\"recipient\":{{\"id\":\"{autorId}\"}},\"message\":{{\"text\":{System.Text.Json.JsonSerializer.Serialize(texto)}}}}}", tk);
+            }
+            catch { return false; }
+            return false;
+        }
+
+        // Núcleo: decide auto-respuesta vs escalado según horario y capacidad de la IA.
+        private static async Task ProcesarMensajeAsync(int mensajeId)
+        {
+            using var c = Db.Conn();
+            int marcaId; string canal, texto, externoId, autorId;
+            using (var cmd = c.CreateCommand())
+            {
+                cmd.CommandText = "SELECT MarcaId,Canal,COALESCE(Texto,''),COALESCE(ExternoId,''),COALESCE(AutorId,'') FROM MensajesRed WHERE Id=$id";
+                cmd.Parameters.AddWithValue("$id", mensajeId);
+                using var r = cmd.ExecuteReader();
+                if (!r.Read()) return;
+                marcaId = Db.I(r, 0); canal = Db.S(r, 1); texto = Db.S(r, 2); externoId = Db.S(r, 3); autorId = Db.S(r, 4);
+            }
+            var cfg = LeerBandejaConfig(c, marcaId);
+            var now = DateTime.Now;
+            bool enHorario = EnHorario(cfg.ini, cfg.fin, cfg.dias, now);
+
+            bool puede = false; string respuesta = "";
+            if (cfg.auto && cfg.activa)
+            {
+                var res = await ClasificarMensajeAsync(cfg.kb, cfg.palabras, texto);
+                puede = res.puede; respuesta = res.respuesta;
+            }
+
+            string estado; int requiereHumano; string? avisarEn; int respEnviada = 0; string respIa = respuesta;
+            if (puede)
+            {
+                respEnviada = await EnviarRespuestaCanal(c, marcaId, canal, externoId, autorId, respuesta) ? 1 : 0;
+                estado = "auto_respondido"; requiereHumano = 0; avisarEn = null;
+            }
+            else
+            {
+                requiereHumano = 1;
+                if (enHorario) { estado = "escalado"; avisarEn = now.ToString("yyyy-MM-dd HH:mm:ss"); }
+                else
+                {
+                    await EnviarRespuestaCanal(c, marcaId, canal, externoId, autorId, cfg.acuse); // acuse al cliente
+                    estado = "escalado";
+                    avisarEn = ProximoInicioHorario(cfg.ini, cfg.dias, now).ToString("yyyy-MM-dd HH:mm:ss");
+                    respIa = cfg.acuse;
+                }
+            }
+            using (var upd = c.CreateCommand())
+            {
+                upd.CommandText = @"UPDATE MensajesRed SET Estado=$e,RequiereHumano=$rh,RespuestaIa=$ri,RespuestaEnviada=$re,
+                                    AvisarEn=$av,Avisado=0,ActualizadoEn=datetime('now','localtime') WHERE Id=$id";
+                upd.Parameters.AddWithValue("$e", estado);
+                upd.Parameters.AddWithValue("$rh", requiereHumano);
+                upd.Parameters.AddWithValue("$ri", (object?)respIa ?? DBNull.Value);
+                upd.Parameters.AddWithValue("$re", respEnviada);
+                upd.Parameters.AddWithValue("$av", (object?)avisarEn ?? DBNull.Value);
+                upd.Parameters.AddWithValue("$id", mensajeId);
+                upd.ExecuteNonQuery();
+            }
+        }
+
+        // Inserta (idempotente por Canal+ExternoId) y procesa si es nuevo.
+        private static async Task GuardarYProcesarAsync(int marcaId, string canal, string externoId,
+            string autorNombre, string autorId, string texto, string postExternoId, string permalink)
+        {
+            if (string.IsNullOrWhiteSpace(texto)) return;
+            int id; string estado;
+            using (var c = Db.Conn())
+            {
+                using (var ins = c.CreateCommand())
+                {
+                    ins.CommandText = @"INSERT OR IGNORE INTO MensajesRed
+                        (MarcaId,Canal,ExternoId,PostExternoId,AutorNombre,AutorId,Texto,Estado,Permalink,RecibidoEn,ActualizadoEn)
+                        VALUES ($m,$c,$e,$pe,$an,$ai,$t,'nuevo',$pl,datetime('now','localtime'),datetime('now','localtime'))";
+                    ins.Parameters.AddWithValue("$m", marcaId);
+                    ins.Parameters.AddWithValue("$c", canal);
+                    ins.Parameters.AddWithValue("$e", (object?)externoId ?? DBNull.Value);
+                    ins.Parameters.AddWithValue("$pe", (object?)postExternoId ?? DBNull.Value);
+                    ins.Parameters.AddWithValue("$an", (object?)autorNombre ?? DBNull.Value);
+                    ins.Parameters.AddWithValue("$ai", (object?)autorId ?? DBNull.Value);
+                    ins.Parameters.AddWithValue("$t", texto);
+                    ins.Parameters.AddWithValue("$pl", (object?)permalink ?? DBNull.Value);
+                    ins.ExecuteNonQuery();
+                }
+                using (var q = c.CreateCommand())
+                {
+                    q.CommandText = "SELECT Id,Estado FROM MensajesRed WHERE Canal=$c AND ExternoId=$e";
+                    q.Parameters.AddWithValue("$c", canal);
+                    q.Parameters.AddWithValue("$e", (object?)externoId ?? DBNull.Value);
+                    using var r = q.ExecuteReader();
+                    if (!r.Read()) return;
+                    id = Db.I(r, 0); estado = Db.S(r, 1);
+                }
+            }
+            if (estado == "nuevo") await ProcesarMensajeAsync(id);
+        }
+
+        private static int MarcaPorCuentaExterna(string extId)
+        {
+            if (!string.IsNullOrWhiteSpace(extId))
+            {
+                using var c = Db.Conn();
+                using var cmd = c.CreateCommand();
+                cmd.CommandText = "SELECT MarcaId FROM CuentasRed WHERE PageId=$x OR IgUserId=$x LIMIT 1";
+                cmd.Parameters.AddWithValue("$x", extId);
+                var o = cmd.ExecuteScalar();
+                if (o != null && o != DBNull.Value) return Convert.ToInt32(o);
+            }
+            using (var c = Db.Conn())
+            {
+                using var cmd = c.CreateCommand();
+                cmd.CommandText = "SELECT Id FROM Marcas WHERE Activa=1 ORDER BY Id LIMIT 1";
+                var o = cmd.ExecuteScalar();
+                return (o != null && o != DBNull.Value) ? Convert.ToInt32(o) : 1;
+            }
+        }
+
+        // Parser tolerante del webhook de Meta (comentarios IG/FB y mensajes IG-DM/Messenger).
+        private static async Task ProcesarWebhookMetaAsync(string body)
+        {
+            if (string.IsNullOrWhiteSpace(body)) return;
+            using var doc = System.Text.Json.JsonDocument.Parse(body);
+            var root = doc.RootElement;
+            string obj = root.TryGetProperty("object", out var o) ? (o.GetString() ?? "") : "";
+            if (!root.TryGetProperty("entry", out var entries) || entries.ValueKind != System.Text.Json.JsonValueKind.Array) return;
+
+            foreach (var entry in entries.EnumerateArray())
+            {
+                string entryId = entry.TryGetProperty("id", out var eid) ? (eid.GetString() ?? "") : "";
+                int marcaId = MarcaPorCuentaExterna(entryId);
+
+                if (entry.TryGetProperty("changes", out var changes) && changes.ValueKind == System.Text.Json.JsonValueKind.Array)
+                    foreach (var ch in changes.EnumerateArray())
+                    {
+                        var field = ch.TryGetProperty("field", out var f) ? (f.GetString() ?? "") : "";
+                        if (!ch.TryGetProperty("value", out var v)) continue;
+                        bool esComentario = field == "comments" ||
+                            (field == "feed" && v.TryGetProperty("item", out var it) && it.GetString() == "comment");
+                        if (!esComentario) continue;
+                        string cid = v.TryGetProperty("comment_id", out var c1) ? (c1.GetString() ?? "")
+                                   : (v.TryGetProperty("id", out var c2) ? (c2.GetString() ?? "") : "");
+                        string texto = v.TryGetProperty("message", out var m1) ? (m1.GetString() ?? "")
+                                     : (v.TryGetProperty("text", out var m2) ? (m2.GetString() ?? "") : "");
+                        string autorN = "", autorI = "";
+                        if (v.TryGetProperty("from", out var fr))
+                        {
+                            if (fr.TryGetProperty("name", out var fn)) autorN = fn.GetString() ?? "";
+                            if (fr.TryGetProperty("username", out var fu)) autorN = fu.GetString() ?? autorN;
+                            if (fr.TryGetProperty("id", out var fi)) autorI = fi.GetString() ?? "";
+                        }
+                        string postExt = v.TryGetProperty("post_id", out var pid) ? (pid.GetString() ?? "")
+                                       : (v.TryGetProperty("media", out var md) && md.TryGetProperty("id", out var mi) ? (mi.GetString() ?? "") : "");
+                        string canal = obj == "instagram" ? "ig_comment" : "fb_comment";
+                        await GuardarYProcesarAsync(marcaId, canal, cid, autorN, autorI, texto, postExt, "");
+                    }
+
+                if (entry.TryGetProperty("messaging", out var msgs) && msgs.ValueKind == System.Text.Json.JsonValueKind.Array)
+                    foreach (var mg in msgs.EnumerateArray())
+                    {
+                        string autorI = mg.TryGetProperty("sender", out var sn) && sn.TryGetProperty("id", out var si) ? (si.GetString() ?? "") : "";
+                        string texto = mg.TryGetProperty("message", out var mm) && mm.TryGetProperty("text", out var mt) ? (mt.GetString() ?? "") : "";
+                        string mid = mg.TryGetProperty("message", out var mm2) && mm2.TryGetProperty("mid", out var midp) ? (midp.GetString() ?? "") : "";
+                        if (string.IsNullOrWhiteSpace(texto)) continue;
+                        string canal = obj == "instagram" ? "ig_dm" : "fb_msg";
+                        string ext = string.IsNullOrEmpty(mid) ? ("msg-" + autorI + "-" + texto.Length) : mid;
+                        await GuardarYProcesarAsync(marcaId, canal, ext, "", autorI, texto, "", "");
+                    }
+            }
+        }
+
         private static string GeminiKey() =>
             Environment.GetEnvironmentVariable("SG_GEMINI_KEY", EnvironmentVariableTarget.Machine)
             ?? Environment.GetEnvironmentVariable("SG_GEMINI_KEY") ?? "";
@@ -1800,6 +2257,11 @@ namespace SistemaGestion.Api.Endpoints
     record ContPublicarReq(string[]? Plataformas, string? Permalink);
     record ContCuentaEditarReq(string? NombreCuenta, string? IgUserId, string? PageId, string? Token, string? ModoPublicacion);
     record ContVincularReq(string Plataforma, string IdExterno, string? Enlace);
+    record ContSimularMsgReq(string? Canal, string? AutorNombre, string Texto, string? PostExternoId);
+    record ContResponderMsgReq(string Texto);
+    record ContEstadoMsgReq(string Estado);
+    record ContBandejaConfigReq(string? HorarioInicio, string? HorarioFin, string? DiasLaborales,
+        string? BaseConocimiento, string? PlantillaAcuse, bool? AutoRespuesta, string? PalabrasHumano, bool? Activa);
     record ContPublicarAutoReq(string[]? Plataformas);
 
     // DTOs de generación IA
