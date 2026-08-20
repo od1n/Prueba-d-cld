@@ -295,6 +295,7 @@ window.abrirPost = async (id) => {
                 <span style="display:flex;gap:4px">
                     <button class="btn btn-sm" onclick="moverAsset(${id},${a.id},-1)" ${idx === 0 ? 'disabled' : ''}>◀</button>
                     <button class="btn btn-sm" onclick="moverAsset(${id},${a.id},1)" ${idx === assets.length - 1 ? 'disabled' : ''}>▶</button>
+                    <button class="btn btn-sm" onclick="abrirAjuste(${id},${a.id})" title="Ajustar esta imagen con IA (cambiar un detalle, color, etc.)">✨</button>
                     <button class="btn btn-sm" onclick="eliminarAssetPost(${id},${a.id})" title="Eliminar">🗑</button>
                 </span>
             </div>
@@ -738,6 +739,38 @@ window.enviarRevision = async (id) => {
         await apiPost(`/api/contenido/posts/${id}/enviar-revision`, {});
         closeModal('modalPost'); cargarPosts();
     } catch (err) { showMsg(err.message, 'error', '#msgPost'); }
+};
+
+// ── Ajuste puntual de imagen (edición por instrucción, conserva el resto) ──
+window.abrirAjuste = async (id, assetId) => {
+    const modal = document.getElementById('modalGenPost');
+    closeModal('modalPost');
+    modal.innerHTML = `
+      <div class="modal-sheet" style="max-width:560px">
+        <div class="flex-between mb-8"><strong>✨ Ajustar imagen</strong>
+            <button class="btn-close" onclick="closeModal('modalGenPost')">✕</button></div>
+        <div class="msg" id="msgGenPost"></div>
+        <p class="text-dim text-sm" style="margin:0 0 8px">La IA toma esta imagen como base y aplica <b>solo</b> el cambio que pidas, conservando el resto (composición, fondo, iluminación). El resultado se agrega como una <b>imagen nueva</b> — la actual no se borra.</p>
+        <img src="/api/contenido/posts/${id}/asset/${assetId}?t=${Date.now()}" style="width:100%;max-height:240px;object-fit:contain;border:1px solid var(--borde);border-radius:10px;background:#111;margin-bottom:10px" alt="imagen base">
+        <div class="input-group"><label class="input-label" for="ajusteInstr">¿Qué cambio quieres?</label>
+            <textarea class="input-field" id="ajusteInstr" rows="3" placeholder="Ej: cambia el color del fuste a negro mate · haz el fondo blanco liso · quita el objeto de la esquina · aclara la iluminación"></textarea></div>
+        <button class="btn btn-cyan" id="btnAjuste" onclick="confirmarAjuste(${id},${assetId})">Aplicar cambio</button>
+        <p class="text-dim text-sm" style="margin-top:8px">Consejo: pide un solo cambio a la vez y sé específico. Si el resultado no gusta, la imagen original sigue ahí para volver a intentar.</p>
+      </div>`;
+    openModal('modalGenPost');
+    setTimeout(() => { const t = document.getElementById('ajusteInstr'); if (t) t.focus(); }, 50);
+};
+
+window.confirmarAjuste = async (id, assetId) => {
+    const el = document.getElementById('ajusteInstr');
+    const instr = (el ? el.value : '').trim();
+    if (!instr) { showMsg('Escribe qué quieres cambiar.', 'error', '#msgGenPost'); return; }
+    const btn = document.getElementById('btnAjuste'); setLoading(btn, true);
+    try {
+        await apiPost(`/api/contenido/posts/${id}/generar`, { modo: 'ajuste', assetIdBase: assetId, promptImagen: instr });
+        closeModal('modalGenPost'); showMsg('Ajustando la imagen con IA…', 'ok');
+        State.tab = 'posts'; renderContenido();
+    } catch (err) { showMsg(err.message, 'error', '#msgGenPost'); setLoading(btn, false); }
 };
 
 window.aprobarPost = async (id) => {

@@ -921,7 +921,9 @@ namespace SistemaGestion.Api.Endpoints
                     ? $"{ideaTitulo}. {ideaDesc}".Trim() : req.PromptImagen!;
                 var fmt = string.IsNullOrWhiteSpace(req.Formato) ? formato : req.Formato!;
                 var modo = (req.Modo ?? "todo").Trim().ToLowerInvariant();
-                if (modo is not ("texto" or "imagen" or "todo")) modo = "todo";
+                if (modo is not ("texto" or "imagen" or "todo" or "ajuste")) modo = "todo";
+                if (modo == "ajuste" && string.IsNullOrWhiteSpace(req.PromptImagen))
+                    return Results.BadRequest(new { error = "Falta la instrucción del ajuste (qué cambiar)." });
 
                 using (var upd = c.CreateCommand())
                 {
@@ -935,25 +937,54 @@ namespace SistemaGestion.Api.Endpoints
                     upd.ExecuteNonQuery();
                 }
 
-                // Referencias: PRODUCTO (base: mantener forma y color real) + CREATIVIDAD (opcional: inspiracion/comparacion).
-                // Regenerar solo texto no requiere referencias.
-                List<object> refsProducto = new(), refsCreatividad = new();
-                if (modo != "texto")
+                // Referencias + nota para la IA de imagen. Tres casos:
+                //  - texto: no lleva imagenes.
+                //  - ajuste: edita la imagen ACTUAL (base) aplicando solo el cambio pedido, conservando el resto.
+                //  - imagen/todo: genera con referencias PRODUCTO (base real) + CREATIVIDAD (inspiracion).
+                var referencias = new List<object>();
+                var notaRefs = "";
+                if (modo == "ajuste")
                 {
-                    refsProducto    = LeerReferenciasParaPayload(marcaId, 4, req.Referencias, "producto");
-                    refsCreatividad = (req.ReferenciasCreatividad != null && req.ReferenciasCreatividad.Length > 0)
+                    // Localizar la imagen base a editar (la elegida, o la ultima del post).
+                    string? rutaBase = null;
+                    using (var cmd = c.CreateCommand())
+                    {
+                        if (req.AssetIdBase is int aid)
+                        {
+                            cmd.CommandText = "SELECT RutaArchivo FROM PostAssets WHERE Id=$a AND PostId=$id";
+                            cmd.Parameters.AddWithValue("$a", aid);
+                            cmd.Parameters.AddWithValue("$id", id);
+                        }
+                        else
+                        {
+                            cmd.CommandText = "SELECT RutaArchivo FROM PostAssets WHERE PostId=$id ORDER BY Orden DESC, Id DESC LIMIT 1";
+                            cmd.Parameters.AddWithValue("$id", id);
+                        }
+                        rutaBase = cmd.ExecuteScalar() as string;
+                    }
+                    if (string.IsNullOrWhiteSpace(rutaBase) || !File.Exists(rutaBase))
+                        return Results.BadRequest(new { error = "No encontré la imagen base para ajustar." });
+                    try
+                    {
+                        var jpg = RedimensionarJpeg(File.ReadAllBytes(rutaBase), 1024, 85);
+                        referencias.Add(new { mime = "image/jpeg", data = Convert.ToBase64String(jpg) });
+                    }
+                    catch { return Results.Problem("No se pudo leer la imagen base para el ajuste."); }
+                    notaRefs = "EDICION DE IMAGEN: la PRIMERA imagen adjunta es la BASE. Aplica UNICAMENTE el cambio solicitado y CONSERVA todo lo demas EXACTAMENTE igual (misma composicion, encuadre, fondo, iluminacion, y las demas partes del producto). No regeneres desde cero ni cambies nada que no se haya pedido. Cambio solicitado: ";
+                }
+                else if (modo != "texto")
+                {
+                    var refsProducto    = LeerReferenciasParaPayload(marcaId, 4, req.Referencias, "producto");
+                    var refsCreatividad = (req.ReferenciasCreatividad != null && req.ReferenciasCreatividad.Length > 0)
                         ? LeerReferenciasParaPayload(marcaId, 3, req.ReferenciasCreatividad, "creatividad")
                         : new List<object>();
+                    referencias.AddRange(refsProducto);
+                    referencias.AddRange(refsCreatividad);
+                    if (refsProducto.Count > 0)
+                        notaRefs = "Las primeras imagenes de referencia son los PRODUCTOS REALES de la marca: fustes de plastico color BLANCO HUESO. Reproduce FIELMENTE su forma y su color blanco hueso tal como se ven en las fotos; NUNCA cambies el color ni el material del producto. Cualquier fuste de OTRO color es de la competencia o de mala calidad y NO debe copiarse. ";
+                    if (refsCreatividad.Count > 0)
+                        notaRefs += $"Las ultimas {refsCreatividad.Count} imagen(es) son SOLO inspiracion de estilo/composicion o comparacion; NO copies de ellas el color ni la forma del producto. ";
                 }
-                var referencias = new List<object>();
-                referencias.AddRange(refsProducto);
-                referencias.AddRange(refsCreatividad);
-
-                var notaRefs = "";
-                if (refsProducto.Count > 0)
-                    notaRefs = "Las primeras imagenes de referencia son los PRODUCTOS REALES de la marca: fustes de plastico color BLANCO HUESO. Reproduce FIELMENTE su forma y su color blanco hueso tal como se ven en las fotos; NUNCA cambies el color ni el material del producto. Cualquier fuste de OTRO color es de la competencia o de mala calidad y NO debe copiarse. ";
-                if (refsCreatividad.Count > 0)
-                    notaRefs += $"Las ultimas {refsCreatividad.Count} imagen(es) son SOLO inspiracion de estilo/composicion o comparacion; NO copies de ellas el color ni la forma del producto. ";
 
                 var payload = new
                 {
@@ -993,7 +1024,7 @@ namespace SistemaGestion.Api.Endpoints
                     jobActual = Db.S(r, 0);
                     modo = Db.S(r, 1);
                 }
-                bool aplicarTexto = modo != "imagen";
+                bool aplicarTexto = modo != "imagen" && modo != "ajuste";
                 bool aplicarImagen = modo != "texto";
                 if (!string.IsNullOrEmpty(req.JobId) && !string.IsNullOrEmpty(jobActual) && req.JobId != jobActual)
                     return Results.BadRequest(new { error = "jobId no coincide." });
@@ -1014,8 +1045,17 @@ namespace SistemaGestion.Api.Endpoints
                 string? primerB64 = null, primerMime = null;
                 if (req.Assets != null && aplicarImagen)
                 {
-                    using (var del = c.CreateCommand())
+                    if (modo == "ajuste")
                     {
+                        // Ajuste: conservar las imagenes existentes y agregar la version nueva al final.
+                        using var mx = c.CreateCommand();
+                        mx.CommandText = "SELECT COALESCE(MAX(Orden),0) FROM PostAssets WHERE PostId=$id";
+                        mx.Parameters.AddWithValue("$id", req.PostId);
+                        orden = Convert.ToInt32(mx.ExecuteScalar() ?? 0);
+                    }
+                    else
+                    {
+                        using var del = c.CreateCommand();
                         del.CommandText = "DELETE FROM PostAssets WHERE PostId=$id AND Origen='ia'";
                         del.Parameters.AddWithValue("$id", req.PostId);
                         del.ExecuteNonQuery();
@@ -1045,7 +1085,7 @@ namespace SistemaGestion.Api.Endpoints
 
                 // Verificacion de material: la marca es fuste PLASTICO; nunca madera.
                 string? advertencia = null;
-                if (primerB64 != null && !string.IsNullOrEmpty(GeminiKey()))
+                if (modo != "ajuste" && primerB64 != null && !string.IsNullOrEmpty(GeminiKey()))
                 {
                     try
                     {
@@ -1764,7 +1804,7 @@ namespace SistemaGestion.Api.Endpoints
 
     // DTOs de generación IA
     record GenerarIdeasReq(int MarcaId, string[]? Pilares, int? Cantidad, bool? UsarBase);
-    record GenerarPostReq(string? Formato, string? PromptImagen, int? NImagenes, string? Modo, string[]? Referencias, string[]? ReferenciasCreatividad);
+    record GenerarPostReq(string? Formato, string? PromptImagen, int? NImagenes, string? Modo, string[]? Referencias, string[]? ReferenciasCreatividad, int? AssetIdBase);
     record HookIdeaItem(string? Titulo, string? Descripcion, string? Pilar);
     record HookIdeasReq(int MarcaId, HookIdeaItem[]? Ideas);
     record CaptionDto(string? Es, string? En);
