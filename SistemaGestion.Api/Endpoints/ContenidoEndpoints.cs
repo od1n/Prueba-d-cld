@@ -1887,10 +1887,9 @@ namespace SistemaGestion.Api.Endpoints
             {
                 instances = new[] { new {
                     prompt = string.IsNullOrWhiteSpace(prompt) ? "Animacion sutil y realista del producto para un reel vertical." : prompt,
-                    image = new { inlineData = new { mimeType = string.IsNullOrEmpty(mime) ? "image/jpeg" : mime, data = imgB64 } },
-                    aspectRatio = aspect
+                    image = new { bytesBase64Encoded = imgB64, mimeType = string.IsNullOrEmpty(mime) ? "image/jpeg" : mime }
                 } },
-                parameters = new { sampleCount = 1 }
+                parameters = new { sampleCount = 1, aspectRatio = aspect }
             };
             var url = $"{GeminiBase}models/{model}:predictLongRunning";
             using var reqMsg = new HttpRequestMessage(HttpMethod.Post, url)
