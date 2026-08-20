@@ -589,9 +589,11 @@ namespace SistemaGestion
         private readonly Inventario       _original;
         private readonly List<Inventario> _todos;
 
-        // Solo letras, numeros, espacios y caracteres comunes de descripcion
+        // Letras, numeros, espacios y simbolos comunes de descripcion/medidas.
+        // Incluye comillas dobles (pulgadas: 2") y simples (pies: 3'), # ° + x % & : ; * _
+        // El guardado en BD es parametrizado, asi que estos simbolos son seguros.
         private static readonly Regex _rxDesc =
-            new Regex(@"^[a-zA-ZáéíóúÁÉÍÓÚüÜñÑ0-9\s\-\.\,\/\(\)]+$");
+            new Regex(@"^[a-zA-ZáéíóúÁÉÍÓÚüÜñÑ0-9\s\-\.\,\/\(\)""'#°ºª+×%&:;*_]+$");
 
         public DlgInventario(Inventario i, List<Inventario> todos)
         {
@@ -692,7 +694,7 @@ namespace SistemaGestion
 
             // Descripcion: caracteres validos
             if (!_rxDesc.IsMatch(desc))
-            { Warn("La descripción contiene caracteres no permitidos.\nUse letras, números, espacios y: - . , / ( )"); return; }
+            { Warn("La descripción contiene caracteres no permitidos.\nEvite símbolos raros o de control; se permiten letras, números, espacios, comillas \" ' y - . , / ( ) # ° + × % & : ;"); return; }
 
             // Unidad obligatoria
             if (string.IsNullOrWhiteSpace(txtUnidad.Text.Trim()))
