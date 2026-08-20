@@ -829,6 +829,57 @@ namespace SistemaGestion.Api.Endpoints
                 return Results.Ok(res);
             }).RequireAuthorization();
 
+            // ════════════════════════ VIDEO (reels) ═════════════════════════
+            // Genera un reel 9:16 a partir de las imágenes del post. tipo='armado' (ffmpeg)
+            // funciona ya; tipo='ia' (Veo/Kling/…) queda para cuando se configure un motor.
+            app.MapPost("/api/contenido/posts/{id:int}/video", async (int id, HttpContext ctx, ContVideoReq req) =>
+            {
+                if (!TokenService.EsRedes(ctx.User)) return Results.Forbid();
+                var tipo = (req?.Tipo ?? "armado").Trim().ToLowerInvariant();
+                if (tipo == "ia")
+                    return Results.BadRequest(new { error = "El video con IA (Veo/Kling/Seedance) estará disponible al configurar un motor. Por ahora usa 'Armado'." });
+
+                using var c = Db.Conn();
+                var imgs = new List<string>();
+                using (var cmd = c.CreateCommand())
+                {
+                    cmd.CommandText = "SELECT RutaArchivo FROM PostAssets WHERE PostId=$id AND (Tipo IS NULL OR Tipo='imagen') ORDER BY Orden";
+                    cmd.Parameters.AddWithValue("$id", id);
+                    using var r = cmd.ExecuteReader();
+                    while (r.Read()) { var p = Db.S(r, 0); if (!string.IsNullOrWhiteSpace(p) && File.Exists(p)) imgs.Add(p); }
+                }
+                if (imgs.Count == 0) return Results.BadRequest(new { error = "El post no tiene imágenes para armar el video." });
+
+                double seg = (req?.SegundosPorImagen is > 0 and <= 10) ? req!.SegundosPorImagen!.Value : 3.0;
+                var dir = Path.Combine(RutaContenidoDir(), id.ToString());
+                Directory.CreateDirectory(dir);
+                var outPath = Path.Combine(dir, $"reel-{Guid.NewGuid():N}.mp4");
+
+                var (ok, err) = await GenerarReelArmadoAsync(imgs, seg, req?.Gancho ?? "", outPath);
+                if (!ok) return Results.Problem(err, statusCode: 500);
+
+                int orden;
+                using (var mx = c.CreateCommand())
+                {
+                    mx.CommandText = "SELECT COALESCE(MAX(Orden),0) FROM PostAssets WHERE PostId=$id";
+                    mx.Parameters.AddWithValue("$id", id);
+                    orden = Convert.ToInt32(mx.ExecuteScalar() ?? 0) + 1;
+                }
+                using (var ins = c.CreateCommand())
+                {
+                    ins.CommandText = @"INSERT INTO PostAssets (PostId, Orden, Tipo, RutaArchivo, Origen, ModeloGen, PromptGen, EsFinal)
+                                        VALUES ($p,$o,'video',$rt,'video','armado-ffmpeg',$g,1)";
+                    ins.Parameters.AddWithValue("$p", id);
+                    ins.Parameters.AddWithValue("$o", orden);
+                    ins.Parameters.AddWithValue("$rt", outPath);
+                    ins.Parameters.AddWithValue("$g", (object?)(req?.Gancho) ?? DBNull.Value);
+                    ins.ExecuteNonQuery();
+                }
+                int assetId;
+                using (var q = c.CreateCommand()) { q.CommandText = "SELECT last_insert_rowid()"; assetId = Convert.ToInt32(q.ExecuteScalar() ?? 0); }
+                return Results.Ok(new { ok = true, assetId });
+            }).RequireAuthorization();
+
             // ════════════════════ BANDEJA (mensajes / comentarios) ══════════════
             // Webhook de Meta (sin auth). GET = verificacion; POST = eventos entrantes.
             app.MapGet("/api/contenido/webhook/meta", (HttpContext ctx) =>
@@ -1613,6 +1664,84 @@ namespace SistemaGestion.Api.Endpoints
             catch (Exception ex) { return (false, ex.Message); }
         }
 
+        // ── Video (reel armado con ffmpeg) ──────────────────────────────────
+        // Escapa una ruta de Windows para usarla dentro de un filtro de ffmpeg
+        // (drawtext fontfile/textfile): C:\a\b  ->  C\:/a/b
+        private static string FfPath(string p) => p.Replace("\\", "/").Replace(":", "\\:");
+
+        private static async Task<(bool ok, string err)> CorrerFfmpegAsync(List<string> args, int timeoutMs = 180000)
+        {
+            try
+            {
+                var psi = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "ffmpeg",
+                    RedirectStandardError = true,
+                    RedirectStandardOutput = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+                foreach (var a in args) psi.ArgumentList.Add(a);
+                using var p = System.Diagnostics.Process.Start(psi);
+                if (p == null) return (false, "No se pudo iniciar ffmpeg.");
+                var errTask = p.StandardError.ReadToEndAsync();
+                if (!p.WaitForExit(timeoutMs)) { try { p.Kill(true); } catch { } return (false, "ffmpeg tardó demasiado (timeout)."); }
+                var err = await errTask;
+                if (p.ExitCode != 0)
+                    return (false, "ffmpeg error: " + (err.Length > 600 ? err.Substring(err.Length - 600) : err));
+                return (true, "");
+            }
+            catch (System.ComponentModel.Win32Exception)
+            {
+                return (false, "ffmpeg no está instalado en el servidor. Instálalo (por ej. 'winget install Gyan.FFmpeg') y reinicia la API.");
+            }
+            catch (Exception ex) { return (false, ex.Message); }
+        }
+
+        // Arma un reel 9:16 (1080x1920) con Ken Burns por imagen + texto de gancho opcional.
+        private static async Task<(bool ok, string err)> GenerarReelArmadoAsync(List<string> imgs, double segPorImg, string gancho, string outPath)
+        {
+            const int fps = 30;
+            int framesPerImg = Math.Max(15, (int)Math.Round(segPorImg * fps));
+            double totalDur = imgs.Count * segPorImg;
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
+            string kb = $"scale=2160:3840:force_original_aspect_ratio=increase,crop=2160:3840,zoompan=z='min(zoom+0.0012,1.18)':d={framesPerImg}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps={fps},setsar=1";
+
+            var sb = new System.Text.StringBuilder();
+            for (int i = 0; i < imgs.Count; i++) sb.Append($"[{i}:v]{kb}[v{i}];");
+            for (int i = 0; i < imgs.Count; i++) sb.Append($"[v{i}]");
+            sb.Append($"concat=n={imgs.Count}:v=1:a=0[vc];");
+
+            string lastLabel = "vc";
+            string? hookFile = null;
+            if (!string.IsNullOrWhiteSpace(gancho))
+            {
+                hookFile = Path.Combine(Path.GetDirectoryName(outPath)!, $"hook-{Guid.NewGuid():N}.txt");
+                await File.WriteAllTextAsync(hookFile, gancho.Trim(), new System.Text.UTF8Encoding(false));
+                var font = FfPath(@"C:\Windows\Fonts\arialbd.ttf");
+                var hf = FfPath(hookFile);
+                double hookDur = Math.Min(totalDur, 3.0);
+                sb.Append($"[vc]drawtext=fontfile={font}:textfile={hf}:fontcolor=white:fontsize=72:borderw=6:bordercolor=black@0.85:x=(w-tw)/2:y=170:line_spacing=12:enable='lt(t,{hookDur.ToString("0.###", inv)})'[vout];");
+                lastLabel = "vout";
+            }
+            var filter = sb.ToString().TrimEnd(';');
+
+            var args = new List<string> { "-y", "-loglevel", "error" };
+            foreach (var im in imgs) { args.Add("-i"); args.Add(im); }
+            args.Add("-filter_complex"); args.Add(filter);
+            args.Add("-map"); args.Add($"[{lastLabel}]");
+            args.Add("-r"); args.Add(fps.ToString());
+            args.Add("-c:v"); args.Add("libx264");
+            args.Add("-preset"); args.Add("veryfast");
+            args.Add("-pix_fmt"); args.Add("yuv420p");
+            args.Add("-t"); args.Add(totalDur.ToString("0.###", inv));
+            args.Add(outPath);
+
+            var res = await CorrerFfmpegAsync(args);
+            if (hookFile != null) { try { File.Delete(hookFile); } catch { } }
+            return res;
+        }
+
         // ── Bandeja: configuración, horario, clasificación IA y escalado ─────
         private static (string ini, string fin, string dias, string kb, string acuse, bool auto, string palabras, bool activa)
             LeerBandejaConfig(SqliteConnection c, int marcaId)
@@ -2262,6 +2391,7 @@ namespace SistemaGestion.Api.Endpoints
     record ContEstadoMsgReq(string Estado);
     record ContBandejaConfigReq(string? HorarioInicio, string? HorarioFin, string? DiasLaborales,
         string? BaseConocimiento, string? PlantillaAcuse, bool? AutoRespuesta, string? PalabrasHumano, bool? Activa);
+    record ContVideoReq(string? Tipo, double? SegundosPorImagen, string? Gancho, string? Motor);
     record ContPublicarAutoReq(string[]? Plataformas);
 
     // DTOs de generación IA

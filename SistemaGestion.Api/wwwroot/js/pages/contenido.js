@@ -301,7 +301,9 @@ window.abrirPost = async (id) => {
                     <button class="btn btn-sm" onclick="eliminarAssetPost(${id},${a.id})" title="Eliminar">🗑</button>
                 </span>
             </div>
-            <img src="/api/contenido/posts/${id}/asset/${a.id}?t=${cb}" alt="asset ${idx + 1}">
+            ${a.tipo === 'video'
+                ? `<video src="/api/contenido/posts/${id}/asset/${a.id}?t=${cb}" controls playsinline style="width:100%;border-radius:8px;background:#000;max-height:360px"></video>`
+                : `<img src="/api/contenido/posts/${id}/asset/${a.id}?t=${cb}" alt="asset ${idx + 1}">`}
         </div>`).join('')
         : `<p class="text-dim text-sm">Sin imagen todavía.</p>`;
     const fechaVal = (p.fechaProgramada || '').replace(' ', 'T').slice(0, 16);
@@ -373,6 +375,7 @@ window.abrirPost = async (id) => {
           <button class="btn btn-sm" onclick="regenTodo(${id})">🎲 Regenerar todo</button>
           <button class="btn btn-sm" onclick="regenTexto(${id})">📝 Solo texto</button>
           <button class="btn btn-sm" onclick="regenImagen(${id})">🖼️ Solo imagen</button>
+          <button class="btn btn-sm" onclick="abrirVideo(${id})">🎬 Crear video</button>
         </div>
         <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">
           <button class="btn btn-sm" onclick="guardarPost(${id})">💾 Guardar</button>
@@ -775,6 +778,45 @@ window.regenTexto = async (id) => {
 };
 window.regenTodo   = async (id) => { await guardarSilencioso(id); abrirGenerarPost(id, 'todo'); };
 window.regenImagen = async (id) => { await guardarSilencioso(id); abrirGenerarPost(id, 'imagen'); };
+
+// ── Video / Reel (Fase 6) ────────────────────────────────────────────────
+window.abrirVideo = async (id) => {
+    const modal = document.getElementById('modalGenPost');
+    closeModal('modalPost');
+    modal.innerHTML = `
+      <div class="modal-sheet" style="max-width:520px">
+        <div class="flex-between mb-8"><strong>🎬 Crear video (reel 9:16)</strong>
+            <button class="btn-close" onclick="closeModal('modalGenPost')">✕</button></div>
+        <div class="msg" id="msgGenPost"></div>
+        <p class="text-dim text-sm" style="margin:0 0 8px">Arma un video vertical con las imágenes del post (movimiento tipo Ken Burns) y un texto de gancho. Queda como un asset más del post.</p>
+        <div class="input-group"><label class="input-label">Tipo</label>
+          <select class="input-field" id="vidTipo">
+            <option value="armado">Armado (imágenes + texto) — disponible</option>
+            <option value="ia">IA anima la imagen (Veo/Kling) — próximamente</option>
+          </select></div>
+        <div class="input-group"><label class="input-label">Segundos por imagen</label>
+          <input class="input-field" id="vidSeg" type="number" min="1" max="10" step="0.5" value="3"></div>
+        <div class="input-group"><label class="input-label">Texto de gancho (opcional, aparece los primeros segundos)</label>
+          <input class="input-field" id="vidGancho" placeholder="Ej: Fustes que no se rompen"></div>
+        <button class="btn btn-cyan" id="btnVideo" onclick="generarVideo(${id})">Generar video</button>
+        <p class="text-dim text-sm" style="margin-top:8px">Requiere ffmpeg en el servidor. Publicar el Reel en IG/FB dependerá del token de Meta.</p>
+      </div>`;
+    openModal('modalGenPost');
+};
+
+window.generarVideo = async (id) => {
+    const tipo = document.getElementById('vidTipo').value;
+    if (tipo === 'ia') { showMsg('El video con IA estará disponible al configurar un motor (Veo/Kling/Seedance). Por ahora usa "Armado".', 'error', '#msgGenPost'); return; }
+    const seg = parseFloat(document.getElementById('vidSeg').value) || 3;
+    const gancho = document.getElementById('vidGancho').value.trim();
+    const btn = document.getElementById('btnVideo'); setLoading(btn, true);
+    showMsg('Generando el video… (puede tardar unos segundos según cuántas imágenes tenga)', 'ok', '#msgGenPost');
+    try {
+        await apiPost(`/api/contenido/posts/${id}/video`, { tipo, segundosPorImagen: seg, gancho });
+        closeModal('modalGenPost'); showMsg('Video generado. Míralo en el carrusel del post.', 'ok', '#msgPost');
+        abrirPost(id);
+    } catch (err) { showMsg(err.message, 'error', '#msgGenPost'); setLoading(btn, false); }
+};
 
 // Modal de opciones de generación de imagen (prompt + elegir referencias)
 window.abrirGenerarPost = async (id, modo) => {
