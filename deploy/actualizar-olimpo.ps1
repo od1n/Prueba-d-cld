@@ -22,7 +22,9 @@ $repo     = "C:\SistemaGestion"
 $apiProj  = Join-Path $repo "SistemaGestion.Api"
 $apiPub   = Join-Path $env:LOCALAPPDATA "SistemaGestion\publish\Api"
 $appProj  = Join-Path $repo "SistemaGestion.csproj"        # WinForms (raiz)
-$appPub   = Join-Path $env:LOCALAPPDATA "SistemaGestion\publish\App"
+# OJO: en OLIMPO el acceso directo de la app corre desde C:\SistemaGestion\publish\App
+# (NO desde AppData, a diferencia de la API). Publicamos donde REALMENTE se ejecuta.
+$appPub   = Join-Path $repo "publish\App"
 $lanzador = Join-Path $repo "Scripts\iniciar-servicios-olimpo.cmd"
 
 Write-Host ""

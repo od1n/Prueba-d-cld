@@ -64,6 +64,9 @@ namespace SistemaGestion
             cmbDepto = new ComboBox { Location = new Point(420, 10), Size = new Size(200, 25), DropDownStyle = ComboBoxStyle.DropDownList };
             cmbDepto.SelectedIndexChanged += (s, e) => AplicarFiltro();
             barBusq.Controls.Add(cmbDepto);
+            barBusq.Controls.Add(new Label { Text = "Tip: doble clic en un producto para cambiar su precio al instante",
+                Location = new Point(640, 14), AutoSize = true, ForeColor = Color.FromArgb(120, 80, 20),
+                Font = new Font("Segoe UI", 9f, FontStyle.Italic) });
 
             // ── Barra de acciones masivas ───────────────────────────────────
             var barAcc = new Panel { Dock = DockStyle.Top, Height = 50, BackColor = Color.FromArgb(250, 243, 230) };
@@ -115,6 +118,7 @@ namespace SistemaGestion
             AddCol("Cambio", "Cambio", 65, true);
             AddCol("Margen", "Margen", 65, true);
             dgv.CellEndEdit += OnCellEndEdit;
+            dgv.CellDoubleClick += OnRowDblClick;   // doble clic = cambiar precio de ese producto al instante
 
             // ── Footer ──────────────────────────────────────────────────────
             var footer = new Panel { Dock = DockStyle.Bottom, Height = 48, BackColor = Color.FromArgb(240, 228, 210) };
@@ -342,6 +346,29 @@ namespace SistemaGestion
             lblResumen.Text = $"  Productos: {_todo.Count}   |   En vista: {_vista.Count}   |   Precios nuevos pendientes: {pendientes}";
         }
 
+        // Doble clic en una fila: cambiar el precio de ese producto y guardarlo YA.
+        private void OnRowDblClick(object sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex < 0) return;
+            var cod = dgv.Rows[e.RowIndex].Cells["Codigo"].Value?.ToString();
+            var item = _todo.FirstOrDefault(x => string.Equals(x.Codigo, cod, StringComparison.OrdinalIgnoreCase));
+            if (item == null) return;
+            using var d = new DlgPrecioRapido(item);
+            if (d.ShowDialog() == DialogResult.OK)
+            {
+                try
+                {
+                    item.Precio = d.PrecioNuevo;
+                    item.UltimaActualz = DateTime.Today;
+                    DatabaseService.ActualizarInventario(item);
+                    _nuevos.Remove(item.Codigo);
+                    AplicarFiltro();   // refresca manteniendo el filtro/búsqueda actual
+                }
+                catch (Exception ex)
+                { MessageBox.Show("No se pudo guardar: " + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+            }
+        }
+
         private static bool TryPrecio(string s, out decimal d)
         {
             d = 0;
@@ -349,6 +376,54 @@ namespace SistemaGestion
             s = s.Replace("$", "").Replace(" ", "").Trim();
             return decimal.TryParse(s, NumberStyles.Any, CultureInfo.CurrentCulture, out d)
                 || decimal.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture, out d);
+        }
+    }
+
+    // Mini-diálogo para cambiar el precio de UN producto rápido.
+    public class DlgPrecioRapido : Form
+    {
+        public decimal PrecioNuevo { get; private set; }
+        private readonly NumericUpDown _num;
+
+        public DlgPrecioRapido(Inventario i)
+        {
+            Text = "Cambiar precio";
+            Size = new Size(380, 250);
+            StartPosition = FormStartPosition.CenterParent;
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            MaximizeBox = false; MinimizeBox = false;
+            BackColor = Color.FromArgb(240, 244, 250);
+
+            int y = 16;
+            Controls.Add(new Label { Text = i.Descripcion, Location = new Point(16, y), AutoSize = true,
+                MaximumSize = new Size(345, 0), Font = new Font("Segoe UI", 10.5f, FontStyle.Bold) }); y += 46;
+            Controls.Add(new Label { Text = $"Código: {i.Codigo}     Costo: {i.CostoActual:N2}", Location = new Point(16, y),
+                AutoSize = true, ForeColor = Color.FromArgb(90, 90, 90) }); y += 28;
+            Controls.Add(new Label { Text = $"Precio actual: {i.Precio:N2}", Location = new Point(16, y),
+                AutoSize = true, Font = new Font("Segoe UI", 9.5f) }); y += 32;
+
+            Controls.Add(new Label { Text = "Precio nuevo:", Location = new Point(16, y + 4), AutoSize = true,
+                Font = new Font("Segoe UI", 10f, FontStyle.Bold) });
+            _num = new NumericUpDown { Location = new Point(130, y), Size = new Size(150, 28), DecimalPlaces = 2,
+                Maximum = 9999999, Minimum = 0, Value = i.Precio, Font = new Font("Segoe UI", 12f) };
+            Controls.Add(_num); y += 48;
+
+            var ok = new Button { Text = "Guardar", Location = new Point(60, y), Size = new Size(120, 36),
+                BackColor = Color.FromArgb(30, 130, 70), ForeColor = Color.White, FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 10f, FontStyle.Bold) };
+            ok.FlatAppearance.BorderSize = 0;
+            ok.Click += (s, e) =>
+            {
+                if (_num.Value <= 0) { MessageBox.Show("El precio debe ser mayor a 0.", "Validación", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+                PrecioNuevo = _num.Value; DialogResult = DialogResult.OK;
+            };
+            var can = new Button { Text = "Cancelar", DialogResult = DialogResult.Cancel, Location = new Point(200, y),
+                Size = new Size(120, 36), BackColor = Color.FromArgb(160, 50, 50), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
+            can.FlatAppearance.BorderSize = 0;
+            Controls.AddRange(new Control[] { ok, can });
+            AcceptButton = ok; CancelButton = can;
+
+            Shown += (s, e) => { _num.Focus(); _num.Select(0, _num.Text.Length); };
         }
     }
 
