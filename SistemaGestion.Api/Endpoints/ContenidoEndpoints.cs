@@ -1946,22 +1946,21 @@ namespace SistemaGestion.Api.Endpoints
             var motion = string.IsNullOrWhiteSpace(prompt)
                 ? "un lento acercamiento de camara (push-in suave) con luz calida"
                 : prompt;
+            // Veo 3.1 no admite negativePrompt: las restricciones van dentro del prompt.
             var promptFinal =
                 "Usa la imagen como referencia EXACTA del producto. Manten el producto IDENTICO a la imagen: " +
                 "misma forma, color, material, texturas, textos y logotipo; NO lo transformes, deformes ni cambies. " +
                 "Aplica UNICAMENTE este movimiento, de forma realista y sutil: " + motion + ". " +
                 "Movimiento de camara e iluminacion coherentes; el producto permanece estable y reconocible en todo momento. " +
-                "Sin morphing, sin distorsion, sin cambiar el fondo bruscamente.";
-            var negPrompt =
-                "deformacion, morphing, warping, cambio de forma, cambio de color, distorsion, " +
-                "texto alterado, logotipo alterado, objetos adicionales, manos, baja calidad, artefactos, glitch, parpadeo";
+                "NO agregues: deformacion, morphing, warping, cambio de forma, cambio de color, distorsion, " +
+                "texto o logotipo alterado, objetos adicionales, manos, glitch ni parpadeo. " +
+                "Mantener alta calidad y el fondo estable.";
 
             var body = new
             {
                 instances = new[] { new {
                     prompt = promptFinal,
-                    image = new { bytesBase64Encoded = imgB64, mimeType = string.IsNullOrEmpty(mime) ? "image/jpeg" : mime },
-                    negativePrompt = negPrompt
+                    image = new { bytesBase64Encoded = imgB64, mimeType = string.IsNullOrEmpty(mime) ? "image/jpeg" : mime }
                 } },
                 parameters = new { sampleCount = 1, aspectRatio = aspect }
             };
