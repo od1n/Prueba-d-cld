@@ -856,7 +856,7 @@ namespace SistemaGestion.Api.Endpoints
                 var outPath = Path.Combine(dir, $"reel-{Guid.NewGuid():N}.mp4");
 
                 var (ok, err) = await GenerarReelArmadoAsync(imgs, seg, req?.Gancho ?? "", outPath);
-                if (!ok) return Results.Problem(err, statusCode: 500);
+                if (!ok) return Results.Json(new { error = err }, statusCode: 500);
 
                 int orden;
                 using (var mx = c.CreateCommand())
@@ -1714,11 +1714,13 @@ namespace SistemaGestion.Api.Endpoints
 
             string lastLabel = "vc";
             string? hookFile = null;
-            if (!string.IsNullOrWhiteSpace(gancho))
+            string? fontReal = new[] { @"C:\Windows\Fonts\arialbd.ttf", @"C:\Windows\Fonts\segoeuib.ttf", @"C:\Windows\Fonts\arial.ttf", @"C:\Windows\Fonts\segoeui.ttf" }
+                .FirstOrDefault(File.Exists);
+            if (!string.IsNullOrWhiteSpace(gancho) && fontReal != null)
             {
                 hookFile = Path.Combine(Path.GetDirectoryName(outPath)!, $"hook-{Guid.NewGuid():N}.txt");
                 await File.WriteAllTextAsync(hookFile, gancho.Trim(), new System.Text.UTF8Encoding(false));
-                var font = FfPath(@"C:\Windows\Fonts\arialbd.ttf");
+                var font = FfPath(fontReal);
                 var hf = FfPath(hookFile);
                 double hookDur = Math.Min(totalDur, 3.0);
                 sb.Append($"[vc]drawtext=fontfile={font}:textfile={hf}:fontcolor=white:fontsize=72:borderw=6:bordercolor=black@0.85:x=(w-tw)/2:y=170:line_spacing=12:enable='lt(t,{hookDur.ToString("0.###", inv)})'[vout];");
