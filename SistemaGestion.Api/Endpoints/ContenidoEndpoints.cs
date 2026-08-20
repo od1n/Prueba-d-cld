@@ -1500,6 +1500,64 @@ namespace SistemaGestion.Api.Endpoints
                 return Results.Ok(new { ok = true, categoria = catHacia });
             }).RequireAuthorization();
 
+            // ════════════════ BANCOS DE VIDEO DE REFERENCIA (2 bancos) ════════════════
+            // Igual que las fotos: 'producto' (clips reales) y 'creatividad' (inspiracion).
+            app.MapGet("/api/contenido/marcas/{id:int}/referencias-video", (int id, string? categoria) =>
+            {
+                var dir = RutaRefsVidDir(id, categoria);
+                var files = Directory.GetFiles(dir).Select(Path.GetFileName).OrderBy(x => x).ToList();
+                return Results.Ok(files);
+            }).RequireAuthorization();
+
+            app.MapPost("/api/contenido/marcas/{id:int}/referencias-video", async (int id, HttpContext ctx, IFormFile file, string? categoria) =>
+            {
+                if (!TokenService.EsRedes(ctx.User)) return Results.Forbid();
+                if (file is null || file.Length == 0) return Results.BadRequest(new { error = "Archivo vacio." });
+                if (file.Length > 60 * 1024 * 1024) return Results.BadRequest(new { error = "Maximo 60 MB por video." });
+                var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
+                if (ext is not (".mp4" or ".mov" or ".webm" or ".m4v"))
+                    return Results.BadRequest(new { error = "Solo MP4, MOV, M4V o WEBM." });
+                var dir = RutaRefsVidDir(id, categoria);
+                var name = (DateTime.Now.ToString("yyyyMMddHHmmss") + "-" + Guid.NewGuid().ToString("N")).Substring(0, 20) + ext;
+                await using (var fs = File.Create(Path.Combine(dir, name)))
+                    await file.CopyToAsync(fs);
+                return Results.Ok(new { name });
+            }).RequireAuthorization().DisableAntiforgery();
+
+            app.MapGet("/api/contenido/marcas/{id:int}/referencias-video/{name}", (int id, string name, string? categoria) =>
+            {
+                if (!NombreVidSeguro(name)) return Results.NotFound();
+                var full = Path.Combine(RutaRefsVidDir(id, categoria), name);
+                if (!File.Exists(full)) return Results.NotFound();
+                var ext = Path.GetExtension(full).ToLowerInvariant();
+                var mime = ext == ".webm" ? "video/webm" : ext == ".mov" ? "video/quicktime" : "video/mp4";
+                return Results.File(File.ReadAllBytes(full), mime);
+            }).RequireAuthorization();
+
+            app.MapDelete("/api/contenido/marcas/{id:int}/referencias-video/{name}", (int id, HttpContext ctx, string name, string? categoria) =>
+            {
+                if (!TokenService.EsRedes(ctx.User)) return Results.Forbid();
+                if (!NombreVidSeguro(name)) return Results.NotFound();
+                var full = Path.Combine(RutaRefsVidDir(id, categoria), name);
+                if (File.Exists(full)) File.Delete(full);
+                return Results.Ok(new { ok = true });
+            }).RequireAuthorization();
+
+            app.MapPost("/api/contenido/marcas/{id:int}/referencias-video/{name}/mover", (int id, HttpContext ctx, string name, string? desde, string? hacia) =>
+            {
+                if (!TokenService.EsRedes(ctx.User)) return Results.Forbid();
+                if (!NombreVidSeguro(name)) return Results.NotFound();
+                var catDesde = (desde ?? "").Trim().ToLowerInvariant() == "creatividad" ? "creatividad" : "producto";
+                var catHacia = (hacia ?? "").Trim().ToLowerInvariant() == "creatividad" ? "creatividad" : "producto";
+                if (catDesde == catHacia) return Results.Ok(new { ok = true });
+                var src = Path.Combine(RutaRefsVidDir(id, catDesde), name);
+                if (!File.Exists(src)) return Results.NotFound();
+                var dst = Path.Combine(RutaRefsVidDir(id, catHacia), name);
+                try { if (File.Exists(dst)) File.Delete(dst); File.Move(src, dst); }
+                catch (Exception ex) { return Results.Problem(ex.Message); }
+                return Results.Ok(new { ok = true, categoria = catHacia });
+            }).RequireAuthorization();
+
             // ════════════════ ASSETS DEL POST (carrusel / subida manual) ════════════════
 
             // Subir una imagen manual como asset del post (para carrusel o reemplazo).
@@ -1883,11 +1941,27 @@ namespace SistemaGestion.Api.Endpoints
         {
             var key = GeminiKey();
             if (string.IsNullOrEmpty(key)) return (null, "Falta SG_GEMINI_KEY en el servidor.");
+
+            // Anclaje anti-distorsión: mantener el producto IDÉNTICO a la imagen; solo movimiento de cámara/luz.
+            var motion = string.IsNullOrWhiteSpace(prompt)
+                ? "un lento acercamiento de camara (push-in suave) con luz calida"
+                : prompt;
+            var promptFinal =
+                "Usa la imagen como referencia EXACTA del producto. Manten el producto IDENTICO a la imagen: " +
+                "misma forma, color, material, texturas, textos y logotipo; NO lo transformes, deformes ni cambies. " +
+                "Aplica UNICAMENTE este movimiento, de forma realista y sutil: " + motion + ". " +
+                "Movimiento de camara e iluminacion coherentes; el producto permanece estable y reconocible en todo momento. " +
+                "Sin morphing, sin distorsion, sin cambiar el fondo bruscamente.";
+            var negPrompt =
+                "deformacion, morphing, warping, cambio de forma, cambio de color, distorsion, " +
+                "texto alterado, logotipo alterado, objetos adicionales, manos, baja calidad, artefactos, glitch, parpadeo";
+
             var body = new
             {
                 instances = new[] { new {
-                    prompt = string.IsNullOrWhiteSpace(prompt) ? "Animacion sutil y realista del producto para un reel vertical." : prompt,
-                    image = new { bytesBase64Encoded = imgB64, mimeType = string.IsNullOrEmpty(mime) ? "image/jpeg" : mime }
+                    prompt = promptFinal,
+                    image = new { bytesBase64Encoded = imgB64, mimeType = string.IsNullOrEmpty(mime) ? "image/jpeg" : mime },
+                    negativePrompt = negPrompt
                 } },
                 parameters = new { sampleCount = 1, aspectRatio = aspect }
             };
@@ -1975,8 +2049,10 @@ namespace SistemaGestion.Api.Endpoints
             if (string.IsNullOrEmpty(key)) return ideas;
             var prompt = "Eres director creativo de video. Mira esta imagen de producto. " +
                 "La marca fabrica fustes (arboles de montura) de plastico HDPE (NUNCA madera); el producto real es color blanco hueso; tono artesanal-tecnico. " +
-                "Propon 3 formas BREVES y concretas de ANIMAR esta imagen para un reel vertical 9:16 (movimiento de camara, del producto o de la luz), realistas y fieles a la marca. " +
-                "Cada idea en UNA frase en espanol, lista para usar como instruccion de animacion. Responde SOLO JSON: {\"ideas\":[\"...\",\"...\",\"...\"]}.";
+                "Propon 3 formas BREVES de ANIMAR esta imagen para un reel vertical 9:16 SIN transformar ni deformar el producto: " +
+                "solo movimientos de CAMARA (push-in lento, paneo lateral, dolly, orbita suave) y de LUZ (barrido de luz, brillo que resalta la textura), realistas. " +
+                "El producto debe permanecer identico y reconocible. Cada idea en UNA frase en espanol, lista para usar como instruccion de animacion. " +
+                "Responde SOLO JSON: {\"ideas\":[\"...\",\"...\",\"...\"]}.";
             var body = new { contents = new[] { new { parts = new object[] {
                 new { text = prompt },
                 new { inlineData = new { mimeType = string.IsNullOrEmpty(mime) ? "image/jpeg" : mime, data = imgB64 } }
@@ -2331,6 +2407,24 @@ namespace SistemaGestion.Api.Endpoints
             var ans = doc.RootElement.GetProperty("candidates")[0].GetProperty("content").GetProperty("parts")[0].GetProperty("text").GetString() ?? "";
             ans = ans.Trim().ToUpperInvariant();
             return ans.StartsWith("SI") || ans.StartsWith("YES");
+        }
+
+        // Bancos de VIDEO de referencia: marca-{id}/refvid  y  marca-{id}/refvid/creatividad
+        private static string RutaRefsVidDir(int marcaId, string? categoria = null)
+        {
+            var baseDir = Path.Combine(RutaContenidoDir(), $"marca-{marcaId}", "refvid");
+            var cat = (categoria ?? "").Trim().ToLowerInvariant();
+            var d = cat == "creatividad" ? Path.Combine(baseDir, "creatividad") : baseDir;
+            Directory.CreateDirectory(d);
+            return d;
+        }
+
+        private static bool NombreVidSeguro(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name) || name.Contains("..")) return false;
+            if (name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0) return false;
+            var ext = Path.GetExtension(name).ToLowerInvariant();
+            return ext is ".mp4" or ".mov" or ".webm" or ".m4v";
         }
 
         private static string RutaRefsDir(int marcaId, string? categoria = null)

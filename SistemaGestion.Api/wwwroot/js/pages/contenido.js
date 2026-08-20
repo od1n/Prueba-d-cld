@@ -67,6 +67,7 @@ function renderContenido() {
                 <select id="selMarca" class="input-field" style="width:auto"
                         onchange="cambiarMarca(this.value)">${opciones}</select>
                 <button class="btn btn-sm" onclick="abrirReferencias()" title="Fotos reales del producto que la IA usa como base">📎 Referencias</button>
+                <button class="btn btn-sm" onclick="abrirRefsVideo()" title="Bancos de video de referencia (productos reales / creatividad)">📹 Videos ref</button>
                 <button class="btn btn-sm" onclick="abrirMetricasCuenta()" title="Seguidores e interacción de las cuentas">📊 Métricas</button>
                 <button class="btn btn-sm" onclick="abrirBandeja()" title="Mensajes y comentarios de la gente en las redes">💬 Bandeja</button>
                 ${esAdmin() ? `<button class="btn btn-sm" onclick="abrirCuentas()" title="Configurar Instagram/Facebook para publicar">⚙ Cuentas</button>` : ''}
@@ -85,7 +86,8 @@ function renderContenido() {
         <div class="modal-overlay" id="modalRefs"></div>
         <div class="modal-overlay" id="modalCuentas"></div>
         <div class="modal-overlay" id="modalMetricas"></div>
-        <div class="modal-overlay" id="modalBandeja"></div>`;
+        <div class="modal-overlay" id="modalBandeja"></div>
+        <div class="modal-overlay" id="modalRefVid"></div>`;
     if (State.tab === 'ideas') cargarIdeas();
     else if (State.tab === 'posts') cargarPosts();
     else cargarCalendario();
@@ -1161,5 +1163,92 @@ window.eliminarRef = async (cat, name) => {
         await apiFetch(`/api/contenido/marcas/${State.marcaId}/referencias/${encodeURIComponent(name)}?categoria=${cat}`, { method: 'DELETE' });
         await cargarRefs();
     } catch (err) { showMsg(err.message, 'error', '#msgRefs'); }
+};
+
+// ── BANCOS DE VIDEO DE REFERENCIA (productos reales / creatividad) ───────
+window.abrirRefsVideo = async () => {
+    const modal = document.getElementById('modalRefVid');
+    modal.innerHTML = `<div class="modal-sheet"><div class="loading-msg"><div class="spinner"></div></div></div>`;
+    openModal('modalRefVid');
+    await cargarRefsVideo();
+};
+
+async function cargarRefsVideo() {
+    const modal = document.getElementById('modalRefVid');
+    let prod = [], crea = [];
+    try {
+        prod = await apiGet(`/api/contenido/marcas/${State.marcaId}/referencias-video?categoria=producto`) || [];
+        crea = await apiGet(`/api/contenido/marcas/${State.marcaId}/referencias-video?categoria=creatividad`) || [];
+    } catch (err) { modal.innerHTML = `<div class="modal-sheet"><div class="msg show error">${esh(err.message)}</div></div>`; return; }
+
+    const seccion = (cat, files, titulo, ayuda, vacio) => {
+        const otra = cat === 'producto' ? 'creatividad' : 'producto';
+        const etiqOtra = cat === 'producto' ? '→ Creatividad' : '→ Productos';
+        const thumbs = files.map(f => `
+            <div style="position:relative;display:flex;flex-direction:column;gap:3px;align-items:center;width:120px">
+                <video src="/api/contenido/marcas/${State.marcaId}/referencias-video/${encodeURIComponent(f)}?categoria=${cat}"
+                       controls preload="metadata"
+                       style="width:120px;height:120px;object-fit:cover;border-radius:8px;background:#111"></video>
+                <button class="btn btn-sm" style="font-size:10px;padding:1px 5px;width:100%"
+                        onclick="moverRefVideo('${cat}','${otra}','${f}')" title="Mover al otro banco">${etiqOtra}</button>
+                <button class="btn-close" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);border-radius:6px;padding:0 6px"
+                        onclick="eliminarRefVideo('${cat}','${f}')" title="Eliminar">✕</button>
+            </div>`).join('') || `<p class="text-dim text-sm">${vacio}</p>`;
+        return `
+          <div style="border:1px solid var(--borde);border-radius:10px;padding:10px;margin-bottom:10px">
+            <strong>${titulo}</strong>
+            <p class="text-dim text-sm" style="margin:4px 0">${ayuda}</p>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;margin:8px 0">${thumbs}</div>
+            <input type="file" id="refVidFile_${cat}" accept="video/mp4,video/quicktime,video/webm" multiple style="margin-bottom:6px">
+            <button class="btn btn-cyan btn-sm" id="btnSubirVid_${cat}" onclick="subirRefVideo('${cat}')">Subir videos</button>
+          </div>`;
+    };
+
+    modal.innerHTML = `
+      <div class="modal-sheet" style="max-width:600px">
+        <div class="flex-between mb-8">
+          <strong>📹 Videos de referencia — ${esh(marcaActual().nombre || '')}</strong>
+          <button class="btn-close" onclick="closeModal('modalRefVid')">✕</button>
+        </div>
+        <div class="msg" id="msgRefVid"></div>
+        ${seccion('producto', prod, '🏭 Productos reales (base)',
+            'Videos reales de los fustes de la marca. Sirven de referencia de estilo y movimiento para los videos que se generen.',
+            'Aún no hay videos de producto. Sube clips reales de los fustes plásticos (blanco hueso).')}
+        ${seccion('creatividad', crea, '🎨 Creatividad / comparación',
+            'Solo inspiración de estilo, transiciones o ejemplos de comparación. No se copia color ni forma del producto.',
+            'Aún no hay videos de creatividad/comparación.')}
+        <p class="text-dim text-sm">MP4/MOV/WEBM, máx 60 MB por video.</p>
+      </div>`;
+}
+
+window.subirRefVideo = async (cat) => {
+    const inp = document.getElementById(`refVidFile_${cat}`);
+    if (!inp.files || !inp.files.length) { showMsg('Elige uno o más videos.', 'error', '#msgRefVid'); return; }
+    const btn = document.getElementById(`btnSubirVid_${cat}`); setLoading(btn, true);
+    let ok = 0, fail = 0;
+    for (const f of inp.files) {
+        try {
+            const fd = new FormData(); fd.append('file', f);
+            const res = await fetch(`/api/contenido/marcas/${State.marcaId}/referencias-video?categoria=${cat}`, { method: 'POST', credentials: 'include', body: fd });
+            if (res.ok) ok++; else fail++;
+        } catch { fail++; }
+    }
+    setLoading(btn, false);
+    showMsg(`Subidos ${ok}${fail ? ', ' + fail + ' con error' : ''}.`, fail ? 'error' : 'ok', '#msgRefVid');
+    await cargarRefsVideo();
+};
+
+window.moverRefVideo = async (desde, hacia, name) => {
+    try {
+        await apiPost(`/api/contenido/marcas/${State.marcaId}/referencias-video/${encodeURIComponent(name)}/mover?desde=${desde}&hacia=${hacia}`, {});
+        await cargarRefsVideo();
+    } catch (err) { showMsg(err.message, 'error', '#msgRefVid'); }
+};
+
+window.eliminarRefVideo = async (cat, name) => {
+    try {
+        await apiFetch(`/api/contenido/marcas/${State.marcaId}/referencias-video/${encodeURIComponent(name)}?categoria=${cat}`, { method: 'DELETE' });
+        await cargarRefsVideo();
+    } catch (err) { showMsg(err.message, 'error', '#msgRefVid'); }
 };
 render();
