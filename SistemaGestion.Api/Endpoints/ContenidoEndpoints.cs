@@ -836,10 +836,32 @@ namespace SistemaGestion.Api.Endpoints
             {
                 if (!TokenService.EsRedes(ctx.User)) return Results.Forbid();
                 var tipo = (req?.Tipo ?? "armado").Trim().ToLowerInvariant();
-                if (tipo == "ia")
-                    return Results.BadRequest(new { error = "El video con IA (Veo/Kling/Seedance) estará disponible al configurar un motor. Por ahora usa 'Armado'." });
-
                 using var c = Db.Conn();
+
+                // ── IA (Veo, image-to-video, asíncrono) ──────────────────────
+                if (tipo == "ia")
+                {
+                    var motor = (req?.Motor ?? "veo-fast").Trim().ToLowerInvariant();
+                    string model = (motor.Contains("standard") || motor.Contains("calidad"))
+                        ? "veo-3.1-generate-preview" : "veo-3.1-fast-generate-preview";
+                    var (b64, mime, _) = LeerImagenBasePost(c, id, req?.AssetIdBase);
+                    if (b64 == null) return Results.BadRequest(new { error = "El post no tiene imagen base para animar." });
+                    var promptIa = (req?.Prompt ?? "").Trim();
+                    var (op, errIa) = await VeoIniciarAsync(model, b64, mime!, promptIa, "9:16");
+                    if (op == null) return Results.Json(new { error = errIa ?? "No se pudo iniciar Veo." }, statusCode: 500);
+                    using (var ins = c.CreateCommand())
+                    {
+                        ins.CommandText = @"INSERT INTO VideoJobs (PostId, Motor, OperationName, Prompt, Estado, CreatedEn, ActualizadoEn)
+                                            VALUES ($p,$mo,$op,$pr,'procesando',datetime('now','localtime'),datetime('now','localtime'))";
+                        ins.Parameters.AddWithValue("$p", id);
+                        ins.Parameters.AddWithValue("$mo", model);
+                        ins.Parameters.AddWithValue("$op", op);
+                        ins.Parameters.AddWithValue("$pr", string.IsNullOrEmpty(promptIa) ? (object)DBNull.Value : promptIa);
+                        ins.ExecuteNonQuery();
+                    }
+                    return Results.Ok(new { ok = true, estado = "generando", motor = model });
+                }
+
                 var imgs = new List<string>();
                 using (var cmd = c.CreateCommand())
                 {
@@ -878,6 +900,80 @@ namespace SistemaGestion.Api.Endpoints
                 int assetId;
                 using (var q = c.CreateCommand()) { q.CommandText = "SELECT last_insert_rowid()"; assetId = Convert.ToInt32(q.ExecuteScalar() ?? 0); }
                 return Results.Ok(new { ok = true, assetId });
+            }).RequireAuthorization();
+
+            // Verifica el último job de video IA del post; si Veo terminó, descarga y guarda el asset.
+            app.MapPost("/api/contenido/posts/{id:int}/video-check", async (int id, HttpContext ctx) =>
+            {
+                if (!TokenService.EsRedes(ctx.User)) return Results.Forbid();
+                using var c = Db.Conn();
+                int jobId; string op, estado;
+                using (var cmd = c.CreateCommand())
+                {
+                    cmd.CommandText = "SELECT Id, COALESCE(OperationName,''), Estado FROM VideoJobs WHERE PostId=$id ORDER BY Id DESC LIMIT 1";
+                    cmd.Parameters.AddWithValue("$id", id);
+                    using var r = cmd.ExecuteReader();
+                    if (!r.Read()) return Results.Ok(new { estado = "ninguno" });
+                    jobId = Db.I(r, 0); op = Db.S(r, 1); estado = Db.S(r, 2);
+                }
+                if (estado != "procesando") return Results.Ok(new { estado });
+                if (string.IsNullOrEmpty(op)) return Results.Ok(new { estado = "procesando" });
+
+                var (done, uri, err) = await VeoPollAsync(op);
+                if (!done) return Results.Ok(new { estado = "procesando" });
+                if (err != null || string.IsNullOrEmpty(uri))
+                {
+                    using var upd = c.CreateCommand();
+                    upd.CommandText = "UPDATE VideoJobs SET Estado='error', Error=$e, ActualizadoEn=datetime('now','localtime') WHERE Id=$j";
+                    upd.Parameters.AddWithValue("$e", (object?)(err ?? "Veo no devolvió video") ?? DBNull.Value);
+                    upd.Parameters.AddWithValue("$j", jobId);
+                    upd.ExecuteNonQuery();
+                    return Results.Ok(new { estado = "error", error = err ?? "Veo no devolvió video" });
+                }
+
+                var dir = Path.Combine(RutaContenidoDir(), id.ToString());
+                Directory.CreateDirectory(dir);
+                var outPath = Path.Combine(dir, $"veo-{Guid.NewGuid():N}.mp4");
+                var (okDl, errDl) = await VeoDescargarAsync(uri!, outPath);
+                if (!okDl)
+                {
+                    using var upd = c.CreateCommand();
+                    upd.CommandText = "UPDATE VideoJobs SET Estado='error', Error=$e WHERE Id=$j";
+                    upd.Parameters.AddWithValue("$e", (object?)errDl ?? DBNull.Value);
+                    upd.Parameters.AddWithValue("$j", jobId);
+                    upd.ExecuteNonQuery();
+                    return Results.Ok(new { estado = "error", error = errDl });
+                }
+
+                int orden;
+                using (var mx = c.CreateCommand()) { mx.CommandText = "SELECT COALESCE(MAX(Orden),0) FROM PostAssets WHERE PostId=$id"; mx.Parameters.AddWithValue("$id", id); orden = Convert.ToInt32(mx.ExecuteScalar() ?? 0) + 1; }
+                using (var ins = c.CreateCommand())
+                {
+                    ins.CommandText = @"INSERT INTO PostAssets (PostId, Orden, Tipo, RutaArchivo, Origen, ModeloGen, EsFinal)
+                                        VALUES ($p,$o,'video',$rt,'video-ia','veo-3.1',1)";
+                    ins.Parameters.AddWithValue("$p", id); ins.Parameters.AddWithValue("$o", orden); ins.Parameters.AddWithValue("$rt", outPath);
+                    ins.ExecuteNonQuery();
+                }
+                using (var upd = c.CreateCommand())
+                {
+                    upd.CommandText = "UPDATE VideoJobs SET Estado='listo', RutaArchivo=$rt, ActualizadoEn=datetime('now','localtime') WHERE Id=$j";
+                    upd.Parameters.AddWithValue("$rt", outPath); upd.Parameters.AddWithValue("$j", jobId);
+                    upd.ExecuteNonQuery();
+                }
+                return Results.Ok(new { estado = "listo" });
+            }).RequireAuthorization();
+
+            // Ideas de animación: la IA mira la imagen del post y propone cómo animarla (para Veo).
+            app.MapPost("/api/contenido/posts/{id:int}/idea-animacion", async (int id, HttpContext ctx) =>
+            {
+                if (!TokenService.EsRedes(ctx.User)) return Results.Forbid();
+                using var c = Db.Conn();
+                using (var cmd = c.CreateCommand()) { cmd.CommandText = "SELECT 1 FROM Posts WHERE Id=$id"; cmd.Parameters.AddWithValue("$id", id); if (cmd.ExecuteScalar() == null) return Results.NotFound(new { error = "Post no encontrado." }); }
+                var (b64, mime, _) = LeerImagenBasePost(c, id, null);
+                if (b64 == null) return Results.BadRequest(new { error = "El post no tiene imagen base." });
+                var ideas = await IdeasAnimacionAsync(b64, mime!);
+                if (ideas.Count == 0) return Results.Json(new { error = "No se pudieron generar ideas (revisa SG_GEMINI_KEY en el servidor)." }, statusCode: 500);
+                return Results.Ok(new { ideas });
             }).RequireAuthorization();
 
             // ════════════════════ BANDEJA (mensajes / comentarios) ══════════════
@@ -1757,6 +1853,155 @@ namespace SistemaGestion.Api.Endpoints
             return res;
         }
 
+        // ── Video IA con Veo (image-to-video via la API de Gemini) ───────────
+        private const string GeminiBase = "https://generativelanguage.googleapis.com/v1beta/";
+
+        // Lee la imagen base de un post (la elegida o la primera) redimensionada como JPEG base64.
+        private static (string? b64, string? mime, string? ruta) LeerImagenBasePost(SqliteConnection c, int postId, int? assetId)
+        {
+            string? ruta;
+            using (var cmd = c.CreateCommand())
+            {
+                if (assetId is int aid)
+                {
+                    cmd.CommandText = "SELECT RutaArchivo FROM PostAssets WHERE Id=$a AND PostId=$id";
+                    cmd.Parameters.AddWithValue("$a", aid); cmd.Parameters.AddWithValue("$id", postId);
+                }
+                else
+                {
+                    cmd.CommandText = "SELECT RutaArchivo FROM PostAssets WHERE PostId=$id AND (Tipo IS NULL OR Tipo='imagen') ORDER BY Orden LIMIT 1";
+                    cmd.Parameters.AddWithValue("$id", postId);
+                }
+                ruta = cmd.ExecuteScalar() as string;
+            }
+            if (string.IsNullOrWhiteSpace(ruta) || !File.Exists(ruta)) return (null, null, null);
+            try { var jpg = RedimensionarJpeg(File.ReadAllBytes(ruta), 1024, 85); return (Convert.ToBase64String(jpg), "image/jpeg", ruta); }
+            catch { return (null, null, ruta); }
+        }
+
+        private static async Task<(string? op, string? err)> VeoIniciarAsync(string model, string imgB64, string mime, string prompt, string aspect)
+        {
+            var key = GeminiKey();
+            if (string.IsNullOrEmpty(key)) return (null, "Falta SG_GEMINI_KEY en el servidor.");
+            var body = new
+            {
+                instances = new[] { new {
+                    prompt = string.IsNullOrWhiteSpace(prompt) ? "Animacion sutil y realista del producto para un reel vertical." : prompt,
+                    image = new { inlineData = new { mimeType = string.IsNullOrEmpty(mime) ? "image/jpeg" : mime, data = imgB64 } },
+                    aspectRatio = aspect
+                } },
+                parameters = new { sampleCount = 1 }
+            };
+            var url = $"{GeminiBase}models/{model}:predictLongRunning";
+            using var reqMsg = new HttpRequestMessage(HttpMethod.Post, url)
+            { Content = new StringContent(System.Text.Json.JsonSerializer.Serialize(body), System.Text.Encoding.UTF8, "application/json") };
+            reqMsg.Headers.Add("x-goog-api-key", key);
+            try
+            {
+                var resp = await _http.SendAsync(reqMsg);
+                var txt = await resp.Content.ReadAsStringAsync();
+                if (!resp.IsSuccessStatusCode) return (null, $"Veo {(int)resp.StatusCode}: {(txt.Length > 500 ? txt.Substring(0, 500) : txt)}");
+                using var doc = System.Text.Json.JsonDocument.Parse(txt);
+                if (doc.RootElement.TryGetProperty("name", out var n)) return (n.GetString(), null);
+                return (null, "Veo no devolvió el nombre de la operación.");
+            }
+            catch (Exception ex) { return (null, ex.Message); }
+        }
+
+        private static async Task<(bool done, string? uri, string? err)> VeoPollAsync(string operationName)
+        {
+            var key = GeminiKey();
+            if (string.IsNullOrEmpty(key)) return (false, null, "Falta SG_GEMINI_KEY.");
+            using var reqMsg = new HttpRequestMessage(HttpMethod.Get, $"{GeminiBase}{operationName}");
+            reqMsg.Headers.Add("x-goog-api-key", key);
+            try
+            {
+                var resp = await _http.SendAsync(reqMsg);
+                var txt = await resp.Content.ReadAsStringAsync();
+                if (!resp.IsSuccessStatusCode) return (false, null, $"Veo poll {(int)resp.StatusCode}: {(txt.Length > 400 ? txt.Substring(0, 400) : txt)}");
+                using var doc = System.Text.Json.JsonDocument.Parse(txt);
+                var root = doc.RootElement;
+                bool done = root.TryGetProperty("done", out var d) && d.ValueKind == System.Text.Json.JsonValueKind.True;
+                if (!done) return (false, null, null);
+                if (root.TryGetProperty("error", out var e))
+                    return (true, null, "Veo: " + (e.TryGetProperty("message", out var m) ? m.GetString() : "error"));
+                if (root.TryGetProperty("response", out var r))
+                {
+                    var uri = BuscarVeoUri(r);
+                    if (!string.IsNullOrEmpty(uri)) return (true, uri, null);
+                }
+                return (true, null, "Veo terminó pero no encontré el video en la respuesta.");
+            }
+            catch (Exception ex) { return (false, null, ex.Message); }
+        }
+
+        private static string? BuscarVeoUri(System.Text.Json.JsonElement r)
+        {
+            try
+            {
+                if (r.TryGetProperty("generateVideoResponse", out var gvr))
+                {
+                    foreach (var campo in new[] { "generatedSamples", "generatedVideos" })
+                        if (gvr.TryGetProperty(campo, out var arr) && arr.ValueKind == System.Text.Json.JsonValueKind.Array)
+                            foreach (var s in arr.EnumerateArray())
+                                if (s.TryGetProperty("video", out var v) && v.TryGetProperty("uri", out var u)) return u.GetString();
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        private static async Task<(bool ok, string? err)> VeoDescargarAsync(string uri, string outPath)
+        {
+            var key = GeminiKey();
+            try
+            {
+                using var reqMsg = new HttpRequestMessage(HttpMethod.Get, uri);
+                reqMsg.Headers.Add("x-goog-api-key", key);
+                var resp = await _http.SendAsync(reqMsg);
+                if (!resp.IsSuccessStatusCode) return (false, $"Descarga Veo {(int)resp.StatusCode}");
+                var bytes = await resp.Content.ReadAsByteArrayAsync();
+                if (bytes.Length < 1000) return (false, "El video descargado está vacío.");
+                await File.WriteAllBytesAsync(outPath, bytes);
+                return (true, null);
+            }
+            catch (Exception ex) { return (false, ex.Message); }
+        }
+
+        // La IA mira la imagen y propone 3 formas de animarla (para el prompt de Veo).
+        private static async Task<List<string>> IdeasAnimacionAsync(string imgB64, string mime)
+        {
+            var ideas = new List<string>();
+            var key = GeminiKey();
+            if (string.IsNullOrEmpty(key)) return ideas;
+            var prompt = "Eres director creativo de video. Mira esta imagen de producto. " +
+                "La marca fabrica fustes (arboles de montura) de plastico HDPE (NUNCA madera); el producto real es color blanco hueso; tono artesanal-tecnico. " +
+                "Propon 3 formas BREVES y concretas de ANIMAR esta imagen para un reel vertical 9:16 (movimiento de camara, del producto o de la luz), realistas y fieles a la marca. " +
+                "Cada idea en UNA frase en espanol, lista para usar como instruccion de animacion. Responde SOLO JSON: {\"ideas\":[\"...\",\"...\",\"...\"]}.";
+            var body = new { contents = new[] { new { parts = new object[] {
+                new { text = prompt },
+                new { inlineData = new { mimeType = string.IsNullOrEmpty(mime) ? "image/jpeg" : mime, data = imgB64 } }
+            } } } };
+            using var reqMsg = new HttpRequestMessage(HttpMethod.Post, $"{GeminiBase}models/gemini-flash-latest:generateContent")
+            { Content = new StringContent(System.Text.Json.JsonSerializer.Serialize(body), System.Text.Encoding.UTF8, "application/json") };
+            reqMsg.Headers.Add("x-goog-api-key", key);
+            try
+            {
+                var resp = await _http.SendAsync(reqMsg);
+                if (!resp.IsSuccessStatusCode) return ideas;
+                var txt = await resp.Content.ReadAsStringAsync();
+                using var doc = System.Text.Json.JsonDocument.Parse(txt);
+                var ans = doc.RootElement.GetProperty("candidates")[0].GetProperty("content").GetProperty("parts")[0].GetProperty("text").GetString() ?? "";
+                int a = ans.IndexOf('{'), b = ans.LastIndexOf('}');
+                if (a >= 0 && b > a) ans = ans.Substring(a, b - a + 1);
+                using var j = System.Text.Json.JsonDocument.Parse(ans);
+                if (j.RootElement.TryGetProperty("ideas", out var arr) && arr.ValueKind == System.Text.Json.JsonValueKind.Array)
+                    foreach (var it in arr.EnumerateArray()) { var s = it.GetString(); if (!string.IsNullOrWhiteSpace(s)) ideas.Add(s!); }
+            }
+            catch { }
+            return ideas;
+        }
+
         // ── Bandeja: configuración, horario, clasificación IA y escalado ─────
         private static (string ini, string fin, string dias, string kb, string acuse, bool auto, string palabras, bool activa)
             LeerBandejaConfig(SqliteConnection c, int marcaId)
@@ -2406,7 +2651,7 @@ namespace SistemaGestion.Api.Endpoints
     record ContEstadoMsgReq(string Estado);
     record ContBandejaConfigReq(string? HorarioInicio, string? HorarioFin, string? DiasLaborales,
         string? BaseConocimiento, string? PlantillaAcuse, bool? AutoRespuesta, string? PalabrasHumano, bool? Activa);
-    record ContVideoReq(string? Tipo, double? SegundosPorImagen, string? Gancho, string? Motor);
+    record ContVideoReq(string? Tipo, double? SegundosPorImagen, string? Gancho, string? Motor, string? Prompt, int? AssetIdBase);
     record ContPublicarAutoReq(string[]? Plataformas);
 
     // DTOs de generación IA

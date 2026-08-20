@@ -203,7 +203,21 @@ namespace SistemaGestion.Api
                     AutoRespuesta    INTEGER NOT NULL DEFAULT 1,
                     PalabrasHumano   TEXT    DEFAULT 'reclamo,queja,devolucion,demanda,abogado,mayorista,distribuidor,factura,garantia',
                     Activa           INTEGER NOT NULL DEFAULT 1
-                );";
+                );
+
+                CREATE TABLE IF NOT EXISTS VideoJobs (
+                    Id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    PostId        INTEGER NOT NULL,
+                    Motor         TEXT,
+                    OperationName TEXT,
+                    Prompt        TEXT,
+                    Estado        TEXT    NOT NULL DEFAULT 'procesando',  -- procesando|listo|error
+                    RutaArchivo   TEXT,
+                    Error         TEXT,
+                    CreatedEn     TEXT,
+                    ActualizadoEn TEXT
+                );
+                CREATE INDEX IF NOT EXISTS IX_VideoJobs_Post ON VideoJobs(PostId);";
             cmd.ExecuteNonQuery();
         }
 

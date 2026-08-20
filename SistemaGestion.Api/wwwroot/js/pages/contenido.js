@@ -784,39 +784,87 @@ window.abrirVideo = async (id) => {
     const modal = document.getElementById('modalGenPost');
     closeModal('modalPost');
     modal.innerHTML = `
-      <div class="modal-sheet" style="max-width:520px">
+      <div class="modal-sheet" style="max-width:560px">
         <div class="flex-between mb-8"><strong>🎬 Crear video (reel 9:16)</strong>
             <button class="btn-close" onclick="closeModal('modalGenPost')">✕</button></div>
         <div class="msg" id="msgGenPost"></div>
-        <p class="text-dim text-sm" style="margin:0 0 8px">Arma un video vertical con las imágenes del post (movimiento tipo Ken Burns) y un texto de gancho. Queda como un asset más del post.</p>
         <div class="input-group"><label class="input-label">Tipo</label>
-          <select class="input-field" id="vidTipo">
-            <option value="armado">Armado (imágenes + texto) — disponible</option>
-            <option value="ia">IA anima la imagen (Veo/Kling) — próximamente</option>
+          <select class="input-field" id="vidTipo" onchange="vidTipoChange()">
+            <option value="armado">Armado (imágenes + texto) — sin costo</option>
+            <option value="ia">IA anima la imagen (Veo) — de pago</option>
           </select></div>
-        <div class="input-group"><label class="input-label">Segundos por imagen</label>
-          <input class="input-field" id="vidSeg" type="number" min="1" max="10" step="0.5" value="3"></div>
-        <div class="input-group"><label class="input-label">Texto de gancho (opcional, aparece los primeros segundos)</label>
-          <input class="input-field" id="vidGancho" placeholder="Ej: Fustes que no se rompen"></div>
-        <button class="btn btn-cyan" id="btnVideo" onclick="generarVideo(${id})">Generar video</button>
-        <p class="text-dim text-sm" style="margin-top:8px">Requiere ffmpeg en el servidor. Publicar el Reel en IG/FB dependerá del token de Meta.</p>
+        <div id="vidArmado">
+          <div class="input-group"><label class="input-label">Segundos por imagen</label>
+            <input class="input-field" id="vidSeg" type="number" min="1" max="10" step="0.5" value="3"></div>
+          <div class="input-group"><label class="input-label">Texto de gancho (opcional)</label>
+            <input class="input-field" id="vidGancho" placeholder="Ej: Fustes que no se rompen"></div>
+        </div>
+        <div id="vidIA" style="display:none">
+          <div class="input-group"><label class="input-label">Motor</label>
+            <select class="input-field" id="vidMotor">
+              <option value="veo-fast">Veo rápido (~US$0.15/seg)</option>
+              <option value="veo-standard">Veo calidad (~US$0.40/seg)</option>
+            </select></div>
+          <div class="input-group"><label class="input-label">¿Cómo animar la imagen? (cámara / producto / luz)</label>
+            <textarea class="input-field" id="vidPrompt" rows="3" placeholder="Ej: dolly-in lento revelando la textura del fuste; luz cálida que barre de izquierda a derecha"></textarea></div>
+          <button class="btn btn-sm" id="btnIdea" onclick="ideaAnimacion(${id})">💡 Idea de animación</button>
+          <div id="vidIdeas" style="margin-top:6px"></div>
+          <p class="text-dim text-sm" style="margin-top:6px">Veo anima la imagen base del post en un clip de ~5–8s (tarda ~1–2 min). Tiene costo por segundo en tu cuenta de Google.</p>
+        </div>
+        <button class="btn btn-cyan" id="btnVideo" onclick="generarVideo(${id})" style="margin-top:8px">Generar video</button>
+        <p class="text-dim text-sm" style="margin-top:8px">Publicar el Reel en IG/FB dependerá del token de Meta.</p>
       </div>`;
     openModal('modalGenPost');
 };
 
+window.vidTipoChange = () => {
+    const t = document.getElementById('vidTipo').value;
+    document.getElementById('vidArmado').style.display = t === 'armado' ? '' : 'none';
+    document.getElementById('vidIA').style.display = t === 'ia' ? '' : 'none';
+};
+
+window.ideaAnimacion = async (id) => {
+    const btn = document.getElementById('btnIdea'); setLoading(btn, true);
+    try {
+        const r = await apiPost(`/api/contenido/posts/${id}/idea-animacion`, {});
+        const cont = document.getElementById('vidIdeas');
+        cont.innerHTML = (r.ideas || []).map(idea =>
+            `<div class="card-mini" style="cursor:pointer;padding:6px 8px" data-i="${eshA(idea)}" onclick="document.getElementById('vidPrompt').value=this.dataset.i">💡 ${esh(idea)}</div>`).join('');
+    } catch (e) { showMsg(e.message, 'error', '#msgGenPost'); }
+    setLoading(btn, false);
+};
+
 window.generarVideo = async (id) => {
     const tipo = document.getElementById('vidTipo').value;
-    if (tipo === 'ia') { showMsg('El video con IA estará disponible al configurar un motor (Veo/Kling/Seedance). Por ahora usa "Armado".', 'error', '#msgGenPost'); return; }
-    const seg = parseFloat(document.getElementById('vidSeg').value) || 3;
-    const gancho = document.getElementById('vidGancho').value.trim();
     const btn = document.getElementById('btnVideo'); setLoading(btn, true);
-    showMsg('Generando el video… (puede tardar unos segundos según cuántas imágenes tenga)', 'ok', '#msgGenPost');
     try {
-        await apiPost(`/api/contenido/posts/${id}/video`, { tipo, segundosPorImagen: seg, gancho });
-        closeModal('modalGenPost'); showMsg('Video generado. Míralo en el carrusel del post.', 'ok', '#msgPost');
-        abrirPost(id);
+        if (tipo === 'ia') {
+            const motor = document.getElementById('vidMotor').value;
+            const prompt = document.getElementById('vidPrompt').value.trim();
+            if (!prompt) { showMsg('Escribe cómo animar la imagen (o usa 💡 Idea de animación).', 'error', '#msgGenPost'); setLoading(btn, false); return; }
+            showMsg('Enviando a Veo… tarda ~1–2 min. No cierres esta ventana.', 'ok', '#msgGenPost');
+            await apiPost(`/api/contenido/posts/${id}/video`, { tipo: 'ia', motor, prompt });
+            pollVideoIA(id, 0);
+        } else {
+            const seg = parseFloat(document.getElementById('vidSeg').value) || 3;
+            const gancho = document.getElementById('vidGancho').value.trim();
+            showMsg('Generando el video…', 'ok', '#msgGenPost');
+            await apiPost(`/api/contenido/posts/${id}/video`, { tipo: 'armado', segundosPorImagen: seg, gancho });
+            closeModal('modalGenPost'); showMsg('Video generado. Míralo en el carrusel del post.', 'ok', '#msgPost');
+            abrirPost(id);
+        }
     } catch (err) { showMsg(err.message, 'error', '#msgGenPost'); setLoading(btn, false); }
 };
+
+async function pollVideoIA(id, tries) {
+    if (tries > 45) { showMsg('Veo está tardando más de lo normal; vuelve a abrir el post en un rato para ver si quedó.', 'error', '#msgGenPost'); setLoading(document.getElementById('btnVideo'), false); return; }
+    try {
+        const r = await apiPost(`/api/contenido/posts/${id}/video-check`, {});
+        if (r.estado === 'listo') { closeModal('modalGenPost'); showMsg('Video de Veo listo. Míralo en el carrusel.', 'ok', '#msgPost'); abrirPost(id); return; }
+        if (r.estado === 'error') { showMsg('Veo: ' + (r.error || 'error'), 'error', '#msgGenPost'); setLoading(document.getElementById('btnVideo'), false); return; }
+        setTimeout(() => pollVideoIA(id, tries + 1), 8000);
+    } catch (e) { setTimeout(() => pollVideoIA(id, tries + 1), 8000); }
+}
 
 // Modal de opciones de generación de imagen (prompt + elegir referencias)
 window.abrirGenerarPost = async (id, modo) => {
