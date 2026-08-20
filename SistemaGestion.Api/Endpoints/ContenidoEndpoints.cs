@@ -491,13 +491,13 @@ namespace SistemaGestion.Api.Endpoints
                     if (!r.Read()) return Results.NotFound();
                     titulo = Db.S(r, 0); capEs = Db.S(r, 1); capEn = Db.S(r, 2); hashtags = Db.S(r, 3);
                 }
-                var rutas = new List<string>();
+                var rutas = new List<(string ruta, string tipo)>();
                 using (var cmd = c.CreateCommand())
                 {
-                    cmd.CommandText = "SELECT RutaArchivo FROM PostAssets WHERE PostId=$id ORDER BY Orden";
+                    cmd.CommandText = "SELECT RutaArchivo, COALESCE(Tipo,'imagen') FROM PostAssets WHERE PostId=$id ORDER BY Orden";
                     cmd.Parameters.AddWithValue("$id", id);
                     using var r = cmd.ExecuteReader();
-                    while (r.Read()) rutas.Add(Db.S(r, 0));
+                    while (r.Read()) rutas.Add((Db.S(r, 0), Db.S(r, 1)));
                 }
                 using var ms = new MemoryStream();
                 using (var zip = new ZipArchive(ms, ZipArchiveMode.Create, true))
@@ -509,13 +509,15 @@ namespace SistemaGestion.Api.Endpoints
                     sb.AppendLine(); sb.AppendLine("== Hashtags =="); sb.AppendLine(hashtags);
                     var entry = zip.CreateEntry("caption.txt");
                     using (var w = new StreamWriter(entry.Open(), new System.Text.UTF8Encoding(false))) w.Write(sb.ToString());
-                    int n = 0;
-                    foreach (var ruta in rutas)
+                    int nImg = 0, nVid = 0;
+                    foreach (var (ruta, tipo) in rutas)
                     {
                         if (string.IsNullOrEmpty(ruta) || !File.Exists(ruta)) continue;
-                        n++;
                         var ext = Path.GetExtension(ruta);
-                        var e = zip.CreateEntry($"imagen-{n:00}{ext}");
+                        string nombre;
+                        if (tipo == "video") { nVid++; nombre = $"video-{nVid:00}{ext}"; }
+                        else { nImg++; nombre = $"imagen-{nImg:00}{ext}"; }
+                        var e = zip.CreateEntry(nombre);
                         using var zs = e.Open();
                         using var fs = File.OpenRead(ruta);
                         fs.CopyTo(zs);
@@ -589,8 +591,19 @@ namespace SistemaGestion.Api.Endpoints
                 }
                 if (string.IsNullOrEmpty(ruta) || !File.Exists(ruta)) return Results.NotFound();
                 var ext = Path.GetExtension(ruta).ToLowerInvariant();
-                var mime = ext is ".jpg" or ".jpeg" ? "image/jpeg" : ext == ".png" ? "image/png" : "application/octet-stream";
-                return Results.File(File.ReadAllBytes(ruta), mime);
+                var mime = ext switch
+                {
+                    ".jpg" or ".jpeg" => "image/jpeg",
+                    ".png"  => "image/png",
+                    ".webp" => "image/webp",
+                    ".mp4"  => "video/mp4",
+                    ".mov"  => "video/quicktime",
+                    ".webm" => "video/webm",
+                    ".m4v"  => "video/mp4",
+                    _ => "application/octet-stream"
+                };
+                // enableRangeProcessing: Meta suele pedir el video por rangos al descargarlo.
+                return Results.File(File.ReadAllBytes(ruta), mime, enableRangeProcessing: true);
             });
 
             // Configurar una cuenta de red (Page/IG/token) — solo Admin.
@@ -636,18 +649,27 @@ namespace SistemaGestion.Api.Endpoints
                 if (estado is not ("aprobado" or "programado" or "publicado"))
                     return Results.BadRequest(new { error = $"Solo se publica un post aprobado (actual: {estado})." });
 
-                int nAssets;
+                // Leer los assets en orden y detectar si el post es un reel (tiene video).
+                var tipos = new List<string>();
                 using (var cmd = c.CreateCommand())
                 {
-                    cmd.CommandText = "SELECT COUNT(*) FROM PostAssets WHERE PostId=$id";
+                    cmd.CommandText = "SELECT COALESCE(Tipo,'imagen') FROM PostAssets WHERE PostId=$id ORDER BY Orden";
                     cmd.Parameters.AddWithValue("$id", id);
-                    nAssets = Convert.ToInt32(cmd.ExecuteScalar() ?? 0);
+                    using var r = cmd.ExecuteReader();
+                    while (r.Read()) tipos.Add(Db.S(r, 0));
                 }
-                if (nAssets == 0) return Results.BadRequest(new { error = "El post no tiene imagen para publicar." });
+                int nAssets = tipos.Count;
+                if (nAssets == 0) return Results.BadRequest(new { error = "El post no tiene contenido para publicar." });
+
+                int idxVideo = tipos.FindIndex(t => t == "video");
+                bool esVideo = idxVideo >= 0;
 
                 var pubToken = AsegurarPublicToken(c, id);
                 var baseUrl = CallbackUrl("");
                 var urls = Enumerable.Range(0, nAssets).Select(i => $"{baseUrl}/api/contenido/pub/{pubToken}/{i}").ToList();
+                // Para reel se usa un solo video; las imágenes del carrusel se ignoran en modo reel.
+                var urlsImg = urls.Where((_, i) => tipos[i] != "video").ToList();
+                var videoUrl = esVideo ? urls[idxVideo] : "";
                 var caption = string.IsNullOrWhiteSpace(hashtags) ? capEs : (capEs + "\n\n" + hashtags);
 
                 var plataformas = (req.Plataformas != null && req.Plataformas.Length > 0)
@@ -662,11 +684,17 @@ namespace SistemaGestion.Api.Endpoints
                     { resultados.Add(new { plataforma = pl, ok = false, error = "Falta configurar la cuenta y el token en Cuentas." }); continue; }
                     try
                     {
-                        var (extId, permalink) = pl == "facebook"
-                            ? await PublicarFacebook(pageId, tkAcc, urls, caption)
-                            : await PublicarInstagram(igId, tkAcc, urls, caption);
-                        RegistrarPublicacion(c, id, pl, extId, permalink);
-                        resultados.Add(new { plataforma = pl, ok = true, permalink });
+                        (string extId, string permalink) res;
+                        if (esVideo)
+                            res = pl == "facebook"
+                                ? await PublicarFacebookVideo(pageId, tkAcc, videoUrl, caption)
+                                : await PublicarInstagramReel(igId, tkAcc, videoUrl, caption);
+                        else
+                            res = pl == "facebook"
+                                ? await PublicarFacebook(pageId, tkAcc, urlsImg, caption)
+                                : await PublicarInstagram(igId, tkAcc, urlsImg, caption);
+                        RegistrarPublicacion(c, id, pl, res.extId, res.permalink);
+                        resultados.Add(new { plataforma = pl, ok = true, permalink = res.permalink, tipo = esVideo ? "reel" : "imagen" });
                         algunaOk = true;
                     }
                     catch (Exception ex)
@@ -2699,6 +2727,67 @@ namespace SistemaGestion.Api.Endpoints
             var attached = "[" + string.Join(",", media.Select(m => $"{{\"media_fbid\":\"{m}\"}}")) + "]";
             var postId = await GraphPost($"{pageId}/feed", new() { ["message"] = caption, ["attached_media"] = attached, ["access_token"] = token });
             return (postId, $"https://www.facebook.com/{postId}");
+        }
+
+        // Publicar un REEL en Instagram: contenedor media_type=REELS -> sondeo de estado -> media_publish.
+        private static async Task<(string id, string permalink)> PublicarInstagramReel(string igId, string token, string videoUrl, string caption)
+        {
+            if (string.IsNullOrWhiteSpace(igId)) throw new Exception("Falta el ID de la cuenta de Instagram Business.");
+            if (string.IsNullOrWhiteSpace(videoUrl)) throw new Exception("El post no tiene un video para publicar como reel.");
+
+            var creationId = await GraphPost($"{igId}/media", new()
+            {
+                ["media_type"] = "REELS",
+                ["video_url"] = videoUrl,
+                ["caption"] = caption,
+                ["access_token"] = token
+            });
+            if (string.IsNullOrEmpty(creationId)) throw new Exception("Instagram no devolvió el contenedor del reel.");
+
+            // El video se procesa de forma asíncrona: hay que esperar status_code=FINISHED antes de publicar.
+            string estado = "IN_PROGRESS";
+            for (int intento = 0; intento < 40; intento++)   // ~40 x 6s = hasta 4 min
+            {
+                await Task.Delay(6000);
+                var st = await GraphGet(creationId, "fields=status_code,status", token);
+                estado = st.TryGetProperty("status_code", out var sc) ? (sc.GetString() ?? "") : "";
+                if (estado == "FINISHED") break;
+                if (estado == "ERROR")
+                {
+                    var det = st.TryGetProperty("status", out var ss) ? ss.GetString() : null;
+                    throw new Exception($"Instagram falló al procesar el reel: {det ?? "ERROR"}");
+                }
+            }
+            if (estado != "FINISHED")
+                throw new Exception("El reel sigue procesándose (timeout). Intenta publicar de nuevo en unos minutos.");
+
+            var mediaId = await GraphPost($"{igId}/media_publish", new() { ["creation_id"] = creationId, ["access_token"] = token });
+            string permalink = $"IG {mediaId}";
+            try
+            {
+                var resp = await _http.GetAsync($"{GraphBase}{mediaId}?fields=permalink&access_token={Uri.EscapeDataString(token)}");
+                var body = await resp.Content.ReadAsStringAsync();
+                using var doc = System.Text.Json.JsonDocument.Parse(body);
+                if (doc.RootElement.TryGetProperty("permalink", out var pl)) permalink = pl.GetString() ?? permalink;
+            }
+            catch { }
+            return (mediaId, permalink);
+        }
+
+        // Publicar un video en la Página de Facebook (/videos con file_url). El caption va como descripción.
+        private static async Task<(string id, string permalink)> PublicarFacebookVideo(string pageId, string token, string videoUrl, string caption)
+        {
+            if (string.IsNullOrWhiteSpace(pageId)) throw new Exception("Falta el ID de la Página de Facebook.");
+            if (string.IsNullOrWhiteSpace(videoUrl)) throw new Exception("El post no tiene un video para publicar.");
+
+            var el = await GraphPostDoc($"{pageId}/videos", new()
+            {
+                ["file_url"] = videoUrl,
+                ["description"] = caption,
+                ["access_token"] = token
+            });
+            string vid = el.TryGetProperty("id", out var ii) ? (ii.GetString() ?? "") : "";
+            return (vid, $"https://www.facebook.com/{vid}");
         }
 
         private static object? LeerMarcaDict(int marcaId)

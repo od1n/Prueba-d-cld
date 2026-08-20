@@ -310,13 +310,14 @@ window.abrirPost = async (id) => {
         : `<p class="text-dim text-sm">Sin imagen todavía.</p>`;
     const fechaVal = (p.fechaProgramada || '').replace(' ', 'T').slice(0, 16);
     const puedeAprobar = esAdmin();
+    const esVideoPost = assets.some(a => a.tipo === 'video');
     const puedePublicar = ['aprobado', 'programado', 'publicado'].includes(p.estado);
     const seccionPublicar = puedePublicar ? `
         <div class="acciones-gen" style="flex-direction:column;align-items:stretch;gap:10px">
           <strong>📢 Publicar ${p.estado === 'publicado' ? '<span class="badge badge-publicado">Publicado</span>' : ''}</strong>
           <div>
-            <div class="text-dim text-sm" style="margin-bottom:4px">Paso 1 · Descarga las imágenes y el texto</div>
-            <button class="btn btn-sm" onclick="descargarZip(${id})">⬇ Descargar zip (imágenes + texto)</button>
+            <div class="text-dim text-sm" style="margin-bottom:4px">Paso 1 · Descarga ${esVideoPost ? 'el video, las imágenes' : 'las imágenes'} y el texto</div>
+            <button class="btn btn-sm" onclick="descargarZip(${id})">⬇ Descargar zip (${esVideoPost ? 'video + imágenes + texto' : 'imágenes + texto'})</button>
           </div>
           <div>
             <div class="text-dim text-sm" style="margin-bottom:4px">Paso 2 · Copia el texto al portapapeles</div>
@@ -341,8 +342,8 @@ window.abrirPost = async (id) => {
               : `<span class="text-dim text-sm">Este post ya está marcado como publicado.</span>`}
           </div>
           <div style="border-top:1px solid var(--borde);padding-top:8px;margin-top:2px">
-            <div class="text-dim text-sm" style="margin-bottom:4px">O publica automáticamente (requiere cuentas configuradas en ⚙ Cuentas):</div>
-            <button class="btn btn-sm" style="background:#7c3aed;color:#fff" onclick="publicarAhora(${id},'${p.plataformasDestino || 'instagram'}')">🚀 Publicar ahora (auto)</button>
+            <div class="text-dim text-sm" style="margin-bottom:4px">O publica automáticamente (requiere cuentas configuradas en ⚙ Cuentas)${esVideoPost ? ' · este post se publicará como <strong>Reel/Video</strong>' : ''}:</div>
+            <button class="btn btn-sm" style="background:#7c3aed;color:#fff" onclick="publicarAhora(${id},'${p.plataformasDestino || 'instagram'}',${esVideoPost})">🚀 Publicar ${esVideoPost ? 'reel' : 'ahora'} (auto)</button>
           </div>
           <div style="border-top:1px solid var(--borde);padding-top:8px;margin-top:2px">
             <div class="text-dim text-sm" style="margin-bottom:4px">Seguimiento · visualizaciones e interacción</div>
@@ -443,10 +444,13 @@ window.marcarPublicado = async (id) => {
     } catch (err) { showMsg(err.message, 'error', '#msgPost'); }
 };
 
-window.publicarAhora = async (id, plataformasStr) => {
-    if (!confirm('¿Publicar AHORA automáticamente en las redes configuradas? Se subirá la imagen y el texto.')) return;
+window.publicarAhora = async (id, plataformasStr, esVideo) => {
+    const msgConf = esVideo
+        ? '¿Publicar AHORA el video como Reel en las redes configuradas? El procesamiento del video puede tardar hasta ~4 min.'
+        : '¿Publicar AHORA automáticamente en las redes configuradas? Se subirá la imagen y el texto.';
+    if (!confirm(msgConf)) return;
     await guardarSilencioso(id);
-    showMsg('Publicando…', 'ok', '#msgPost');
+    showMsg(esVideo ? 'Publicando reel (procesando video, puede tardar)…' : 'Publicando…', 'ok', '#msgPost');
     const plats = (plataformasStr || 'instagram').split(',').map(s => s.trim()).filter(Boolean);
     try {
         const res = await apiPost(`/api/contenido/posts/${id}/publicar`, { plataformas: plats });
