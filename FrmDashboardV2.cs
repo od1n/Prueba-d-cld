@@ -872,12 +872,26 @@ namespace SistemaGestion
                     br, _pnlGrafica.Width / 2 - 30, _pnlGrafica.Height / 2);
                 return;
             }
-            switch (_idxGrafica)
+            try
             {
-                case 0: PintarLinea(g, _data.VentasDiariasMes, "$ ");        break;
-                case 1: PintarBarras(g, _data.VentasMensuales);              break;
-                case 2: PintarBarrasH(g, _data.TopProductos);                break;
-                case 3: PintarDonut(g, _data.EstadoFacturas);                break;
+                switch (_idxGrafica)
+                {
+                    case 0: PintarLinea(g, _data.VentasDiariasMes, "$ ");        break;
+                    case 1: PintarBarras(g, _data.VentasMensuales);              break;
+                    case 2: PintarBarrasH(g, _data.TopProductos);                break;
+                    case 3: PintarDonut(g, _data.EstadoFacturas);                break;
+                }
+            }
+            catch
+            {
+                // Un fallo de dibujo (p. ej. GDI+) no debe convertirse en un diálogo de error modal.
+                try
+                {
+                    using var br = new SolidBrush(CTextoTen);
+                    g.DrawString("No se pudo dibujar la gráfica.",
+                        new Font("Segoe UI", 10f, FontStyle.Italic), br, 16, 16);
+                }
+                catch { }
             }
         }
 
@@ -885,6 +899,7 @@ namespace SistemaGestion
         {
             if (datos.Count == 0) { DibujarVacio(g); return; }
             int W = _pnlGrafica.Width, H = _pnlGrafica.Height;
+            if (W < 40 || H < 40) return;   // panel aún sin tamaño real
             int padL = Math.Max(50, W * 8 / 100);
             int padR = Math.Max(15, W * 3 / 100);
             int padT = 20, padB = Math.Max(28, H * 12 / 100);
@@ -904,21 +919,26 @@ namespace SistemaGestion
                 g.DrawString(prefijo + v.ToString("N0"), fontLbl, brLbl, 4, y - 8);
             }
             // path area + linea
+            static float ClampC(float v) =>
+                float.IsNaN(v) || float.IsInfinity(v) ? 0f : Math.Max(-100000f, Math.Min(100000f, v));
             var pts = new PointF[n];
             for (int i = 0; i < n; i++)
             {
                 float x = padL + (W - padL - padR) * i / Math.Max(1f, n - 1);
                 float y = padT + (H - padT - padB) * (1 - (float)datos[i].val / maxV);
-                pts[i] = new PointF(x, y);
+                pts[i] = new PointF(ClampC(x), ClampC(y));
             }
-            // area
-            var area = new GraphicsPath();
-            area.AddLine(pts[0].X, H - padB, pts[0].X, pts[0].Y);
-            area.AddLines(pts);
-            area.AddLine(pts[n - 1].X, pts[n - 1].Y, pts[n - 1].X, H - padB);
-            area.CloseFigure();
-            g.FillPath(brArea, area);
-            g.DrawLines(penLine, pts);
+            // area + linea: DrawLines/AddLines exigen 2+ puntos; con 1 solo día se dibuja únicamente el punto.
+            if (n >= 2)
+            {
+                var area = new GraphicsPath();
+                area.AddLine(pts[0].X, H - padB, pts[0].X, pts[0].Y);
+                area.AddLines(pts);
+                area.AddLine(pts[n - 1].X, pts[n - 1].Y, pts[n - 1].X, H - padB);
+                area.CloseFigure();
+                g.FillPath(brArea, area);
+                g.DrawLines(penLine, pts);
+            }
             // ultimo punto destacado
             using var brPt = new SolidBrush(CAzul);
             g.FillEllipse(brPt, pts[n - 1].X - 4, pts[n - 1].Y - 4, 8, 8);
