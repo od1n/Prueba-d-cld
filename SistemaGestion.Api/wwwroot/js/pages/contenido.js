@@ -329,7 +329,7 @@ window.abrirPost = async (id) => {
     const seccionPublicar = puedePublicar ? `
         <div class="acciones-gen" style="flex-direction:column;align-items:stretch;gap:10px">
           <strong>📢 Publicar ${p.estado === 'publicado' ? '<span class="badge badge-publicado">Publicado</span>' : ''}</strong>
-          <div class="text-dim text-sm" style="background:#0d1117;border:1px solid var(--borde);border-radius:8px;padding:6px 8px">🔖 Toda publicación sale con la marca de agua del RIF (J30572871-7) aplicada automáticamente, tanto en el zip como al publicar en las redes.</div>
+          <div class="text-dim text-sm" style="background:#0d1117;border:1px solid var(--borde);border-radius:8px;padding:6px 8px">🔖 Toda publicación sale con la marca de agua del RIF (J-30571871-7) aplicada automáticamente, tanto en el zip como al publicar en las redes.</div>
           <div>
             <div class="text-dim text-sm" style="margin-bottom:4px">Paso 1 · Descarga ${esVideoPost ? 'el video, las imágenes' : 'las imágenes'} y el texto</div>
             <button class="btn btn-sm" onclick="descargarZip(${id})">⬇ Descargar zip (${esVideoPost ? 'video + imágenes + texto' : 'imágenes + texto'})</button>

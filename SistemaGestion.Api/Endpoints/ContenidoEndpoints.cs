@@ -2051,8 +2051,13 @@ namespace SistemaGestion.Api.Endpoints
         // Se aplica SOLO en la salida (ZIP + endpoint público que Meta descarga),
         // nunca sobre el archivo original. Así todo lo que se publica lleva el RIF,
         // sin dañar los assets ni molestar en la edición. Cacheada por archivo.
+        // RIF FIJO por ley — no lo toca la IA ni el usuario (solo override deliberado por env SG_RIF).
+        private const string RIF_EMPRESA = "RIF J-30571871-7";
+        // Versión de la marca de agua: subir este número invalida las copias .wm cacheadas
+        // (cuando cambia el texto o el diseño) sin tener que borrar archivos a mano.
+        private const string WM_VER = "3";
         private static string RifTexto() =>
-            Environment.GetEnvironmentVariable("SG_RIF")?.Trim() is { Length: > 0 } r ? r : "RIF J30572871-7";
+            Environment.GetEnvironmentVariable("SG_RIF")?.Trim() is { Length: > 0 } r ? r : RIF_EMPRESA;
 
         private static async Task<int> ProbeAnchoAsync(string path)
         {
@@ -2089,15 +2094,21 @@ namespace SistemaGestion.Api.Endpoints
                 if (!esVideo && !esImagen) return original;
 
                 var dir = Path.GetDirectoryName(original)!;
-                var wm = Path.Combine(dir, Path.GetFileNameWithoutExtension(original) + ".wm" + ext);
+                var wm = Path.Combine(dir, Path.GetFileNameWithoutExtension(original) + ".wm" + WM_VER + ext);
                 // Reusar caché si es más nueva que el original.
                 if (File.Exists(wm) && File.GetLastWriteTimeUtc(wm) >= File.GetLastWriteTimeUtc(original))
                     return wm;
 
                 int ancho = await ProbeAnchoAsync(original);
-                int fs = Math.Max(22, (int)Math.Round(ancho / 30.0));   // tamaño legible, proporcional
-                int marg = Math.Max(14, (int)Math.Round(ancho * 0.03));
-                int boxb = Math.Max(6, fs / 2);
+                var texto = RifTexto();
+                // Tamaño legible pero SIEMPRE que quepa completo: se limita según el largo del texto.
+                int len = Math.Max(6, texto.Length);
+                double fsPorAncho = ancho / 26.0;                       // objetivo visible
+                double fsQueCabe = (ancho * 0.88) / (len * 0.62);       // máximo para no cortarse
+                int fs = (int)Math.Round(Math.Min(fsPorAncho, fsQueCabe));
+                fs = Math.Max(18, fs);
+                int marg = Math.Max(16, (int)Math.Round(ancho * 0.035));
+                int boxb = Math.Max(6, fs / 3);
 
                 // Fuente y texto por nombre RELATIVO (cwd=dir) para evitar el escape de rutas Windows en el filtro.
                 var fontOrigen = new[] { @"C:\Windows\Fonts\arialbd.ttf", @"C:\Windows\Fonts\segoeuib.ttf", @"C:\Windows\Fonts\arial.ttf", @"C:\Windows\Fonts\segoeui.ttf" }
@@ -2108,10 +2119,11 @@ namespace SistemaGestion.Api.Endpoints
                 var txtAbs = Path.Combine(dir, txtRel);
                 var outRel = Path.GetFileName(wm);
 
+                // Centrado abajo. min/max evitan que se salga si el texto midiera más que el ancho.
                 string drawtext =
                     (fontOrigen != null ? $"fontfile={fontRel}:" : "") +
                     $"textfile={txtRel}:fontcolor=white:fontsize={fs}:borderw=2:bordercolor=black@0.7:" +
-                    $"box=1:boxcolor=black@0.45:boxborderw={boxb}:x=w-tw-{marg}:y=h-th-{marg}";
+                    $"box=1:boxcolor=black@0.5:boxborderw={boxb}:x=max({marg}\\,(w-tw)/2):y=h-th-{marg}";
 
                 try
                 {
@@ -2340,6 +2352,7 @@ namespace SistemaGestion.Api.Endpoints
                 "con una llamada a la accion suave al final. Espanol NEUTRAL, NUNCA argentino. " +
                 (conEn ? "Incluye tambien la version en INGLES natural (no traduccion literal). " : "Deja captionEn vacio. ") +
                 "Propon de 8 a 15 hashtags relevantes (mezcla los de la marca con especificos del tema, sin repetir, cada uno con #). " +
+                "NO incluyas ningun RIF, numero de registro fiscal ni datos legales en el texto (eso lo pone la marca de agua aparte). " +
                 "Responde UNICAMENTE en JSON valido: {\"captionEs\":\"...\",\"captionEn\":\"...\",\"hashtags\":[\"#...\"]}.";
 
             var parts = new List<object> { new { text = prompt } };
