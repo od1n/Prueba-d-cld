@@ -479,7 +479,7 @@ namespace SistemaGestion.Api.Endpoints
             // ════════════════ PUBLICACION ASISTIDA (Fase 4a) ════════════════
 
             // Descargar un ZIP con las imagenes del post + caption.txt (texto listo para pegar).
-            app.MapGet("/api/contenido/posts/{id:int}/paquete.zip", (int id) =>
+            app.MapGet("/api/contenido/posts/{id:int}/paquete.zip", async (int id) =>
             {
                 using var c = Db.Conn();
                 string titulo = "", capEs = "", capEn = "", hashtags = "";
@@ -517,9 +517,11 @@ namespace SistemaGestion.Api.Endpoints
                         string nombre;
                         if (tipo == "video") { nVid++; nombre = $"video-{nVid:00}{ext}"; }
                         else { nImg++; nombre = $"imagen-{nImg:00}{ext}"; }
+                        // Marca de agua del RIF (obligatoria por ley) sobre la copia que se descarga.
+                        var rutaWm = await RutaConMarcaAguaAsync(ruta);
                         var e = zip.CreateEntry(nombre);
                         using var zs = e.Open();
-                        using var fs = File.OpenRead(ruta);
+                        using var fs = File.OpenRead(rutaWm);
                         fs.CopyTo(zs);
                     }
                 }
@@ -568,7 +570,7 @@ namespace SistemaGestion.Api.Endpoints
             // ════════════════ PUBLICACION AUTOMATICA (Fase 4b — Meta Graph API) ════════════════
 
             // Imagen PUBLICA por token (sin login) para que Meta pueda descargarla al publicar.
-            app.MapGet("/api/contenido/pub/{token}/{idx:int}", (string token, int idx) =>
+            app.MapGet("/api/contenido/pub/{token}/{idx:int}", async (string token, int idx) =>
             {
                 if (string.IsNullOrWhiteSpace(token) || token.Length < 16) return Results.NotFound();
                 using var c = Db.Conn();
@@ -590,6 +592,8 @@ namespace SistemaGestion.Api.Endpoints
                     ruta = q.ExecuteScalar()?.ToString() ?? "";
                 }
                 if (string.IsNullOrEmpty(ruta) || !File.Exists(ruta)) return Results.NotFound();
+                // Marca de agua del RIF (obligatoria por ley) sobre lo que Meta descarga para publicar.
+                ruta = await RutaConMarcaAguaAsync(ruta);
                 var ext = Path.GetExtension(ruta).ToLowerInvariant();
                 var mime = ext switch
                 {
@@ -927,6 +931,7 @@ namespace SistemaGestion.Api.Endpoints
                 }
                 int assetId;
                 using (var q = c.CreateCommand()) { q.CommandText = "SELECT last_insert_rowid()"; assetId = Convert.ToInt32(q.ExecuteScalar() ?? 0); }
+                _ = RutaConMarcaAguaAsync(outPath);   // pre-genera la copia con RIF en segundo plano
                 return Results.Ok(new { ok = true, assetId });
             }).RequireAuthorization();
 
@@ -988,6 +993,7 @@ namespace SistemaGestion.Api.Endpoints
                     upd.Parameters.AddWithValue("$rt", outPath); upd.Parameters.AddWithValue("$j", jobId);
                     upd.ExecuteNonQuery();
                 }
+                _ = RutaConMarcaAguaAsync(outPath);   // pre-genera la copia con RIF en segundo plano
                 return Results.Ok(new { estado = "listo" });
             }).RequireAuthorization();
 
@@ -1002,6 +1008,108 @@ namespace SistemaGestion.Api.Endpoints
                 var ideas = await IdeasAnimacionAsync(b64, mime!);
                 if (ideas.Count == 0) return Results.Json(new { error = "No se pudieron generar ideas (revisa SG_GEMINI_KEY en el servidor)." }, statusCode: 500);
                 return Results.Ok(new { ideas });
+            }).RequireAuthorization();
+
+            // Subir un VIDEO creado FUERA de la app y adjuntarlo al post como asset de video.
+            app.MapPost("/api/contenido/posts/{id:int}/video-externo", async (int id, HttpContext ctx, IFormFile file) =>
+            {
+                if (!TokenService.EsRedes(ctx.User)) return Results.Forbid();
+                using var c = Db.Conn();
+                using (var chk = c.CreateCommand()) { chk.CommandText = "SELECT 1 FROM Posts WHERE Id=$id"; chk.Parameters.AddWithValue("$id", id); if (chk.ExecuteScalar() == null) return Results.NotFound(new { error = "Post no encontrado." }); }
+                if (file is null || file.Length == 0) return Results.BadRequest(new { error = "Archivo vacio." });
+                if (file.Length > 100 * 1024 * 1024) return Results.BadRequest(new { error = "Maximo 100 MB por video." });
+                var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
+                if (ext is not (".mp4" or ".mov" or ".webm" or ".m4v"))
+                    return Results.BadRequest(new { error = "Solo MP4, MOV, M4V o WEBM." });
+
+                var dir = Path.Combine(RutaContenidoDir(), id.ToString());
+                Directory.CreateDirectory(dir);
+                var outPath = Path.Combine(dir, $"ext-{Guid.NewGuid():N}{ext}");
+                await using (var fs = File.Create(outPath)) await file.CopyToAsync(fs);
+
+                int orden;
+                using (var mx = c.CreateCommand()) { mx.CommandText = "SELECT COALESCE(MAX(Orden),0) FROM PostAssets WHERE PostId=$id"; mx.Parameters.AddWithValue("$id", id); orden = Convert.ToInt32(mx.ExecuteScalar() ?? 0) + 1; }
+                using (var ins = c.CreateCommand())
+                {
+                    ins.CommandText = @"INSERT INTO PostAssets (PostId, Orden, Tipo, RutaArchivo, Origen, ModeloGen, EsFinal)
+                                        VALUES ($p,$o,'video',$rt,'video-externo','externo',1)";
+                    ins.Parameters.AddWithValue("$p", id); ins.Parameters.AddWithValue("$o", orden); ins.Parameters.AddWithValue("$rt", outPath);
+                    ins.ExecuteNonQuery();
+                }
+                int assetId;
+                using (var q = c.CreateCommand()) { q.CommandText = "SELECT last_insert_rowid()"; assetId = Convert.ToInt32(q.ExecuteScalar() ?? 0); }
+                _ = RutaConMarcaAguaAsync(outPath);   // pre-genera la copia con RIF en segundo plano
+                return Results.Ok(new { ok = true, assetId });
+            }).RequireAuthorization().DisableAntiforgery();
+
+            // Generar el TEXTO del post (caption ES/EN + hashtags) desde una idea y, opcionalmente,
+            // analizando el video del post con la IA. Aplica el resultado al post y lo devuelve.
+            app.MapPost("/api/contenido/posts/{id:int}/texto", async (int id, HttpContext ctx, ContTextoReq req) =>
+            {
+                if (!TokenService.EsRedes(ctx.User)) return Results.Forbid();
+                using var c = Db.Conn();
+                int marcaId; string titulo;
+                using (var cmd = c.CreateCommand())
+                {
+                    cmd.CommandText = "SELECT MarcaId, COALESCE(Titulo,'') FROM Posts WHERE Id=$id";
+                    cmd.Parameters.AddWithValue("$id", id);
+                    using var r = cmd.ExecuteReader();
+                    if (!r.Read()) return Results.NotFound(new { error = "Post no encontrado." });
+                    marcaId = Db.I(r, 0); titulo = Db.S(r, 1);
+                }
+                var idea = (req?.Idea ?? "").Trim();
+                bool analizar = req?.AnalizarVideo ?? false;
+
+                // Cargar el video más reciente del post si se pide analizar (y cabe inline en la petición).
+                string? vidB64 = null, vidMime = null; bool videoUsado = false; string? avisoVideo = null;
+                if (analizar)
+                {
+                    string rutaVid = "";
+                    using (var q = c.CreateCommand())
+                    {
+                        q.CommandText = "SELECT RutaArchivo FROM PostAssets WHERE PostId=$id AND Tipo='video' ORDER BY Id DESC LIMIT 1";
+                        q.Parameters.AddWithValue("$id", id);
+                        rutaVid = q.ExecuteScalar()?.ToString() ?? "";
+                    }
+                    if (string.IsNullOrEmpty(rutaVid) || !File.Exists(rutaVid))
+                        avisoVideo = "No hay video en el post; se generó solo desde la idea.";
+                    else
+                    {
+                        var fi = new FileInfo(rutaVid);
+                        if (fi.Length > 14 * 1024 * 1024)
+                            avisoVideo = "El video es muy pesado para analizarlo (máx ~14 MB); se generó desde la idea. Usa un clip más corto o liviano.";
+                        else
+                        {
+                            vidB64 = Convert.ToBase64String(await File.ReadAllBytesAsync(rutaVid));
+                            var ev = Path.GetExtension(rutaVid).ToLowerInvariant();
+                            vidMime = ev == ".webm" ? "video/webm" : ev == ".mov" ? "video/quicktime" : "video/mp4";
+                            videoUsado = true;
+                        }
+                    }
+                }
+
+                if (string.IsNullOrWhiteSpace(idea) && !videoUsado)
+                    return Results.BadRequest(new { error = "Escribe una idea o adjunta un video para analizar." });
+
+                var (capEs, capEn, hashtags, errGen) = await GenerarTextoPostAsync(marcaId, titulo, idea, vidB64, vidMime);
+                if (errGen != null) return Results.Json(new { error = errGen }, statusCode: 500);
+
+                var htStr = hashtags != null && hashtags.Count > 0 ? string.Join(" ", hashtags) : "";
+                using (var upd = c.CreateCommand())
+                {
+                    upd.CommandText = @"UPDATE Posts SET
+                                          CaptionEs = $ces,
+                                          CaptionEn = COALESCE($cen, CaptionEn),
+                                          Hashtags  = $ht,
+                                          FechaActualizacion = datetime('now','localtime')
+                                        WHERE Id=$id";
+                    upd.Parameters.AddWithValue("$ces", (object?)capEs ?? DBNull.Value);
+                    upd.Parameters.AddWithValue("$cen", string.IsNullOrWhiteSpace(capEn) ? (object)DBNull.Value : capEn);
+                    upd.Parameters.AddWithValue("$ht", (object?)htStr ?? DBNull.Value);
+                    upd.Parameters.AddWithValue("$id", id);
+                    upd.ExecuteNonQuery();
+                }
+                return Results.Ok(new { ok = true, captionEs = capEs, captionEn = capEn, hashtags = htStr, videoAnalizado = videoUsado, aviso = avisoVideo });
             }).RequireAuthorization();
 
             // ════════════════════ BANDEJA (mensajes / comentarios) ══════════════
@@ -1939,6 +2047,99 @@ namespace SistemaGestion.Api.Endpoints
             return res;
         }
 
+        // ── MARCA DE AGUA con el RIF (obligatorio por ley en las publicaciones) ──
+        // Se aplica SOLO en la salida (ZIP + endpoint público que Meta descarga),
+        // nunca sobre el archivo original. Así todo lo que se publica lleva el RIF,
+        // sin dañar los assets ni molestar en la edición. Cacheada por archivo.
+        private static string RifTexto() =>
+            Environment.GetEnvironmentVariable("SG_RIF")?.Trim() is { Length: > 0 } r ? r : "RIF J30572871-7";
+
+        private static async Task<int> ProbeAnchoAsync(string path)
+        {
+            try
+            {
+                var psi = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "ffprobe",
+                    RedirectStandardOutput = true, RedirectStandardError = true,
+                    UseShellExecute = false, CreateNoWindow = true
+                };
+                foreach (var a in new[] { "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width", "-of", "csv=p=0", path })
+                    psi.ArgumentList.Add(a);
+                using var p = System.Diagnostics.Process.Start(psi);
+                if (p == null) return 1080;
+                var outp = await p.StandardOutput.ReadToEndAsync();
+                if (!p.WaitForExit(15000)) { try { p.Kill(true); } catch { } return 1080; }
+                var digits = new string(outp.Trim().TakeWhile(char.IsDigit).ToArray());
+                return int.TryParse(digits, out var w) && w > 0 ? w : 1080;
+            }
+            catch { return 1080; }
+        }
+
+        // Devuelve la ruta de una copia del asset con la marca de agua del RIF.
+        // Genera y cachea la copia; si algo falla, devuelve el original (no bloquea la publicación).
+        private static async Task<string> RutaConMarcaAguaAsync(string original)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(original) || !File.Exists(original)) return original;
+                var ext = Path.GetExtension(original).ToLowerInvariant();
+                bool esVideo = ext is ".mp4" or ".mov" or ".webm" or ".m4v";
+                bool esImagen = ext is ".jpg" or ".jpeg" or ".png" or ".webp";
+                if (!esVideo && !esImagen) return original;
+
+                var dir = Path.GetDirectoryName(original)!;
+                var wm = Path.Combine(dir, Path.GetFileNameWithoutExtension(original) + ".wm" + ext);
+                // Reusar caché si es más nueva que el original.
+                if (File.Exists(wm) && File.GetLastWriteTimeUtc(wm) >= File.GetLastWriteTimeUtc(original))
+                    return wm;
+
+                int ancho = await ProbeAnchoAsync(original);
+                int fs = Math.Max(22, (int)Math.Round(ancho / 30.0));   // tamaño legible, proporcional
+                int marg = Math.Max(14, (int)Math.Round(ancho * 0.03));
+                int boxb = Math.Max(6, fs / 2);
+
+                // Fuente y texto por nombre RELATIVO (cwd=dir) para evitar el escape de rutas Windows en el filtro.
+                var fontOrigen = new[] { @"C:\Windows\Fonts\arialbd.ttf", @"C:\Windows\Fonts\segoeuib.ttf", @"C:\Windows\Fonts\arial.ttf", @"C:\Windows\Fonts\segoeui.ttf" }
+                    .FirstOrDefault(File.Exists);
+                var fontRel = $"wmfont-{Guid.NewGuid():N}.ttf";
+                var txtRel = $"wmtext-{Guid.NewGuid():N}.txt";
+                var fontAbs = Path.Combine(dir, fontRel);
+                var txtAbs = Path.Combine(dir, txtRel);
+                var outRel = Path.GetFileName(wm);
+
+                string drawtext =
+                    (fontOrigen != null ? $"fontfile={fontRel}:" : "") +
+                    $"textfile={txtRel}:fontcolor=white:fontsize={fs}:borderw=2:bordercolor=black@0.7:" +
+                    $"box=1:boxcolor=black@0.45:boxborderw={boxb}:x=w-tw-{marg}:y=h-th-{marg}";
+
+                try
+                {
+                    if (fontOrigen != null) File.Copy(fontOrigen, fontAbs, true);
+                    await File.WriteAllTextAsync(txtAbs, RifTexto(), new System.Text.UTF8Encoding(false));
+
+                    var args = new List<string> { "-y", "-loglevel", "error", "-i", original, "-vf", "drawtext=" + drawtext };
+                    if (esVideo)
+                    {
+                        args.AddRange(new[] { "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
+                                              "-c:a", "copy", "-movflags", "+faststart", outRel });
+                    }
+                    else
+                    {
+                        args.AddRange(new[] { "-q:v", "3", outRel });
+                    }
+                    var (ok, _) = await CorrerFfmpegAsync(args, dir, esVideo ? 180000 : 60000);
+                    return ok && File.Exists(wm) ? wm : original;
+                }
+                finally
+                {
+                    try { if (File.Exists(fontAbs)) File.Delete(fontAbs); } catch { }
+                    try { if (File.Exists(txtAbs)) File.Delete(txtAbs); } catch { }
+                }
+            }
+            catch { return original; }
+        }
+
         // ── Video IA con Veo (image-to-video via la API de Gemini) ───────────
         private const string GeminiBase = "https://generativelanguage.googleapis.com/v1beta/";
 
@@ -2102,6 +2303,80 @@ namespace SistemaGestion.Api.Endpoints
             }
             catch { }
             return ideas;
+        }
+
+        // Genera caption ES (+EN si la marca exporta) y hashtags desde una idea y/o un video.
+        private static async Task<(string? capEs, string? capEn, List<string>? hashtags, string? err)>
+            GenerarTextoPostAsync(int marcaId, string titulo, string idea, string? vidB64, string? vidMime)
+        {
+            var key = GeminiKey();
+            if (string.IsNullOrEmpty(key)) return (null, null, null, "Falta SG_GEMINI_KEY en el servidor.");
+
+            string nombre = "", voz = "", guia = "", htBase = "", pilares = "", idiomas = "es";
+            using (var c = Db.Conn())
+            using (var cmd = c.CreateCommand())
+            {
+                cmd.CommandText = "SELECT Nombre, COALESCE(Idiomas,'es'), COALESCE(VozTono,''), COALESCE(GuiaEstilo,''), COALESCE(HashtagsBase,''), COALESCE(Pilares,'') FROM Marcas WHERE Id=$id";
+                cmd.Parameters.AddWithValue("$id", marcaId);
+                using var r = cmd.ExecuteReader();
+                if (r.Read())
+                {
+                    nombre = Db.S(r, 0); idiomas = Db.S(r, 1); voz = Db.S(r, 2);
+                    guia = Db.S(r, 3); htBase = Db.S(r, 4); pilares = Db.S(r, 5);
+                }
+            }
+            bool conEn = (idiomas ?? "es").ToLowerInvariant().Contains("en");
+
+            var prompt =
+                "Eres redactor de redes sociales de la marca \"" + nombre + "\".\n" +
+                (string.IsNullOrWhiteSpace(voz) ? "" : "Voz y tono: " + voz + "\n") +
+                (string.IsNullOrWhiteSpace(guia) ? "" : "Guia de estilo OBLIGATORIA (respetala siempre): " + guia + "\n") +
+                (string.IsNullOrWhiteSpace(pilares) ? "" : "Pilares de contenido: " + pilares + "\n") +
+                (string.IsNullOrWhiteSpace(htBase) ? "" : "Hashtags base de la marca: " + htBase + "\n") +
+                (string.IsNullOrWhiteSpace(titulo) ? "" : "Titulo/tema del post: " + titulo + "\n") +
+                (vidB64 != null ? "Se adjunta un VIDEO corto del contenido: analiza lo que se ve (producto, escena, accion) y basa el texto en ello.\n" : "") +
+                (string.IsNullOrWhiteSpace(idea) ? "" : "Idea o indicacion del usuario: \"" + idea + "\"\n") +
+                "Escribe el texto del post para Instagram/Facebook: un caption atractivo, natural y breve (2 a 5 lineas), " +
+                "con una llamada a la accion suave al final. Espanol NEUTRAL, NUNCA argentino. " +
+                (conEn ? "Incluye tambien la version en INGLES natural (no traduccion literal). " : "Deja captionEn vacio. ") +
+                "Propon de 8 a 15 hashtags relevantes (mezcla los de la marca con especificos del tema, sin repetir, cada uno con #). " +
+                "Responde UNICAMENTE en JSON valido: {\"captionEs\":\"...\",\"captionEn\":\"...\",\"hashtags\":[\"#...\"]}.";
+
+            var parts = new List<object> { new { text = prompt } };
+            if (vidB64 != null)
+                parts.Add(new { inlineData = new { mimeType = string.IsNullOrEmpty(vidMime) ? "video/mp4" : vidMime, data = vidB64 } });
+            var body = new { contents = new[] { new { parts = parts.ToArray() } } };
+
+            using var reqMsg = new HttpRequestMessage(HttpMethod.Post, $"{GeminiBase}models/gemini-flash-latest:generateContent")
+            { Content = new StringContent(System.Text.Json.JsonSerializer.Serialize(body), System.Text.Encoding.UTF8, "application/json") };
+            reqMsg.Headers.Add("x-goog-api-key", key);
+            try
+            {
+                var resp = await _http.SendAsync(reqMsg);
+                var txt = await resp.Content.ReadAsStringAsync();
+                if (!resp.IsSuccessStatusCode)
+                    return (null, null, null, $"Gemini {(int)resp.StatusCode}: {(txt.Length > 300 ? txt.Substring(0, 300) : txt)}");
+                using var doc = System.Text.Json.JsonDocument.Parse(txt);
+                var ans = doc.RootElement.GetProperty("candidates")[0].GetProperty("content").GetProperty("parts")[0].GetProperty("text").GetString() ?? "";
+                int a = ans.IndexOf('{'), b = ans.LastIndexOf('}');
+                if (a >= 0 && b > a) ans = ans.Substring(a, b - a + 1);
+                using var j = System.Text.Json.JsonDocument.Parse(ans);
+                var root = j.RootElement;
+                string capEs = root.TryGetProperty("captionEs", out var ce) ? (ce.GetString() ?? "") : "";
+                string capEn = root.TryGetProperty("captionEn", out var cn) ? (cn.GetString() ?? "") : "";
+                var hs = new List<string>();
+                if (root.TryGetProperty("hashtags", out var arr) && arr.ValueKind == System.Text.Json.JsonValueKind.Array)
+                    foreach (var it in arr.EnumerateArray())
+                    {
+                        var s = (it.GetString() ?? "").Trim();
+                        if (string.IsNullOrWhiteSpace(s)) continue;
+                        if (!s.StartsWith("#")) s = "#" + s.Replace(" ", "");
+                        hs.Add(s);
+                    }
+                if (string.IsNullOrWhiteSpace(capEs)) return (null, null, null, "La IA no devolvió texto. Reintenta.");
+                return (capEs, conEn ? capEn : "", hs, null);
+            }
+            catch (Exception ex) { return (null, null, null, ex.Message); }
         }
 
         // ── Bandeja: configuración, horario, clasificación IA y escalado ─────
@@ -2833,6 +3108,7 @@ namespace SistemaGestion.Api.Endpoints
     record ContBandejaConfigReq(string? HorarioInicio, string? HorarioFin, string? DiasLaborales,
         string? BaseConocimiento, string? PlantillaAcuse, bool? AutoRespuesta, string? PalabrasHumano, bool? Activa);
     record ContVideoReq(string? Tipo, double? SegundosPorImagen, string? Gancho, string? Motor, string? Prompt, int? AssetIdBase);
+    record ContTextoReq(string? Idea, bool? AnalizarVideo);
     record ContPublicarAutoReq(string[]? Plataformas);
 
     // DTOs de generación IA

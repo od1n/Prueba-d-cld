@@ -315,6 +315,7 @@ window.abrirPost = async (id) => {
     const seccionPublicar = puedePublicar ? `
         <div class="acciones-gen" style="flex-direction:column;align-items:stretch;gap:10px">
           <strong>📢 Publicar ${p.estado === 'publicado' ? '<span class="badge badge-publicado">Publicado</span>' : ''}</strong>
+          <div class="text-dim text-sm" style="background:#0d1117;border:1px solid var(--borde);border-radius:8px;padding:6px 8px">🔖 Toda publicación sale con la marca de agua del RIF (J30572871-7) aplicada automáticamente, tanto en el zip como al publicar en las redes.</div>
           <div>
             <div class="text-dim text-sm" style="margin-bottom:4px">Paso 1 · Descarga ${esVideoPost ? 'el video, las imágenes' : 'las imágenes'} y el texto</div>
             <button class="btn btn-sm" onclick="descargarZip(${id})">⬇ Descargar zip (${esVideoPost ? 'video + imágenes + texto' : 'imágenes + texto'})</button>
@@ -365,6 +366,19 @@ window.abrirPost = async (id) => {
         <div class="asset-add">
             <input type="file" id="assetFile" accept="image/png,image/jpeg,image/webp">
             <button class="btn btn-sm" id="btnAsset" onclick="subirAssetPost(${id})">＋ Agregar imagen</button>
+        </div>
+        <div style="border:1px solid var(--borde);border-radius:10px;padding:10px;margin-bottom:10px">
+          <strong style="font-size:13px">🎞️ Video externo + texto con IA</strong>
+          <p class="text-dim text-sm" style="margin:4px 0 8px">Sube un video hecho fuera de la app y/o escribe la idea; la IA arma el texto del post (puede analizar el video).</p>
+          <div class="asset-add" style="margin:0 0 8px">
+            <input type="file" id="vidExtFile" accept="video/mp4,video/quicktime,video/webm">
+            <button class="btn btn-sm" id="btnVidExt" onclick="subirVideoExterno(${id})">⬆ Subir video</button>
+          </div>
+          <textarea class="input-field" id="pIdea" rows="2" placeholder="Idea del post (ej: mostramos el fuste montado, resaltar resistencia y liviandad)"></textarea>
+          <label style="display:flex;align-items:center;gap:6px;margin:6px 0;font-size:13px" class="text-dim">
+            <input type="checkbox" id="pAnalizarVid" ${esVideoPost ? 'checked' : ''}> Analizar el video del post
+          </label>
+          <button class="btn btn-sm btn-cyan" id="btnGenTexto" onclick="generarTextoPost(${id})">✍️ Generar texto del post</button>
         </div>
         <div class="input-group"><label class="input-label">Caption (ES)</label>
             <textarea class="input-field" id="pCapEs" rows="4">${esh(p.captionEs || '')}</textarea></div>
@@ -751,8 +765,38 @@ window.subirAssetPost = async (id) => {
     } catch (err) { showMsg(err.message, 'error', '#msgPost'); setLoading(btn, false); }
 };
 
+window.subirVideoExterno = async (id) => {
+    const inp = document.getElementById('vidExtFile');
+    if (!inp.files || !inp.files.length) { showMsg('Elige un video.', 'error', '#msgPost'); return; }
+    const btn = document.getElementById('btnVidExt'); setLoading(btn, true);
+    try {
+        const fd = new FormData(); fd.append('file', inp.files[0]);
+        const res = await fetch(`/api/contenido/posts/${id}/video-externo`, { method: 'POST', credentials: 'include', body: fd });
+        if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.error || 'No se pudo subir el video.'); }
+        showMsg('Video subido.', 'ok', '#msgPost');
+        await abrirPost(id);
+    } catch (err) { showMsg(err.message, 'error', '#msgPost'); setLoading(btn, false); }
+};
+
+window.generarTextoPost = async (id) => {
+    const idea = (document.getElementById('pIdea')?.value || '').trim();
+    const analizar = document.getElementById('pAnalizarVid')?.checked || false;
+    if (!idea && !analizar) { showMsg('Escribe una idea o marca "Analizar el video".', 'error', '#msgPost'); return; }
+    const btn = document.getElementById('btnGenTexto'); setLoading(btn, true);
+    showMsg(analizar ? 'Generando texto (analizando video)…' : 'Generando texto…', 'ok', '#msgPost');
+    try {
+        const res = await apiPost(`/api/contenido/posts/${id}/texto`, { idea, analizarVideo: analizar });
+        const capEs = document.getElementById('pCapEs'); if (capEs) capEs.value = res.captionEs || '';
+        const capEn = document.getElementById('pCapEn'); if (capEn && res.captionEn) capEn.value = res.captionEn;
+        const hash = document.getElementById('pHash'); if (hash) hash.value = res.hashtags || '';
+        const extra = res.videoAnalizado ? ' (con análisis de video)' : '';
+        showMsg('Texto generado' + extra + '. Revísalo y guarda.' + (res.aviso ? ' ' + res.aviso : ''), 'ok', '#msgPost');
+    } catch (err) { showMsg(err.message, 'error', '#msgPost'); }
+    setLoading(btn, false);
+};
+
 window.eliminarAssetPost = async (id, assetId) => {
-    if (!confirm('¿Eliminar esta imagen del post?')) return;
+    if (!confirm('¿Eliminar este elemento del post?')) return;
     try {
         await apiFetch(`/api/contenido/posts/${id}/assets/${assetId}`, { method: 'DELETE' });
         await abrirPost(id);
