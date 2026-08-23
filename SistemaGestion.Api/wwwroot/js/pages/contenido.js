@@ -241,6 +241,16 @@ window.crearPostDesdeIdea = async (ideaId) => {
     } catch (err) { showMsg(err.message, 'error'); }
 };
 
+// Crea un post EN BLANCO para usar un video hecho fuera (sin generar imagen con IA).
+window.nuevoPostVideo = async () => {
+    try {
+        const res = await apiPost('/api/contenido/posts', { marcaId: State.marcaId, formato: 'video', titulo: 'Post de video' });
+        State.tab = 'posts';
+        await cargarPosts();
+        await abrirPost(res.id);
+    } catch (err) { showMsg(err.message, 'error'); }
+};
+
 // ── POSTS ──────────────────────────────────────────────────────────────
 async function cargarPosts() {
     const cont = document.getElementById('tabContent');
@@ -248,11 +258,15 @@ async function cargarPosts() {
         const posts = await apiGet(`/api/contenido/posts?marca=${State.marcaId}`) || [];
         if (!posts.length) {
             cont.innerHTML = `<div class="empty-state"><span style="font-size:48px">🗂️</span>
-                <p>Todavía no hay posts. Genera uno desde una idea.</p></div>`;
+                <p>Todavía no hay posts. Genera uno desde una idea o crea uno de video.</p>
+                <button class="btn btn-sm btn-cyan" style="margin-top:10px" onclick="nuevoPostVideo()">➕ Post de video</button></div>`;
             return;
         }
         cont.innerHTML = `<div class="flex-between mb-8"><span class="text-dim text-sm">${posts.length} post(s)</span>
-            <button class="btn btn-sm" onclick="limpiarPosts()">🗑 Limpiar posts</button></div>
+            <div style="display:flex;gap:6px">
+              <button class="btn btn-sm btn-cyan" onclick="nuevoPostVideo()">➕ Post de video</button>
+              <button class="btn btn-sm" onclick="limpiarPosts()">🗑 Limpiar posts</button>
+            </div></div>
             <div class="lista">${posts.map(tarjetaPost).join('')}</div>`;
         const generando = posts.some(p => p.estado === 'generando');
         if (generando && !State.pollActivo) {
