@@ -27,6 +27,8 @@ Documentación de diseño y referencia de **todo SistemaGestion**: el ERP de EL 
 | 4 | [App Flow](04-AppFlow.md) | Flujos end-to-end de los procesos clave del negocio |
 | 5 | [Backend](05-Backend.md) | Base de datos (tablas), API (endpoints por módulo), servicios e integraciones |
 | 6 | [Plan / Estado](06-Plan.md) | Qué está hecho, versiones, pendientes y hoja de ruta |
+| 7 | [Web EHP](07-EHP-Web.md) | La web pública www.ehp-saddles.com (proyecto aparte, repo propio) |
+| 8 | [Repos y carpetas](08-Repos-y-Carpetas.md) | Cuál es el repo real, qué carpetas sobran y plan de limpieza |
 
 ## Empresa
 

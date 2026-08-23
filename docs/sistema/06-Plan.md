@@ -12,6 +12,15 @@
 | Nómina (LOTTT, USD) | ✅ En uso | IVSS/RPVH, préstamos, aportes patronales, beneficios, planillas PDF |
 | Dashboard / Reportes | ✅ En uso | KPIs + gráficas GDI+; fix gráfica de 1 solo día |
 | Cambio de precios | ✅ En uso | Individual / grupo / masivo, sobre inventario real |
+| Cuentas por Pagar | ✅ Construido | `FrmCuentasPagar` / `DB_CuentasPagar` |
+| Flujo de Caja | ✅ Construido | `FrmFlujoCaja` |
+| Punto de Equilibrio | ✅ Construido | `FrmPuntoEquilibrio` / `DB_PuntoEquilibrio` |
+| Control de Mermas | ✅ Construido | `FrmMermas` / `DB_Mermas` |
+| ISLR estimado | ✅ Construido | `FrmISLR` / `DB_ISLR` |
+| Libro de IVA | ✅ Construido | `FrmLibroIVA` / `DB_LibroIVA` |
+| Tasa de cambio (BCV/paralelo) | ✅ Construido | `TasaCambioService`, `FrmActualizarTasa`, `FrmTrazabilidadTasa` |
+| Pronóstico de reorden | ✅ Construido | `DB_PronosticoReorden` |
+| Alertas | ✅ Construido | `AlertasService` / `FrmAlertas` |
 | Portal web (API + SPA) | ✅ En uso | Auth JWT, impresión, módulos operativos |
 | Digitalizador OCR | ✅ Integrado | Factura venta/compra, planilla |
 | Cámaras / CCTV (EZVIZ) | ✅ Integrado | Snapshots por proxy, permisos por usuario |
@@ -34,10 +43,13 @@
 - Asignar PINs de operador; reimportar el workflow de n8n cuando cambie.
 
 ## 5. Módulos sugeridos a futuro (no comprometidos)
-- Cuentas por Pagar (proveedores) para cerrar el ciclo contable.
-- Flujo de caja (proyección 30/60/90), punto de equilibrio, control de mermas, gestión de cheques, ISLR estimado.
-- Alertas al inicio de sesión (stock bajo + cobros vencidos).
+> Nota: varios módulos que figuraban como "pendientes" en documentos antiguos **ya están construidos** (Cuentas por Pagar, Flujo de Caja, Punto de Equilibrio, Mermas, ISLR, Libro IVA, tasa de cambio, pronóstico de reorden). Ver la tabla de la §1.
+
+Realmente pendientes / ideas:
+- Gestión de cheques con formulario completo (el modelo existe).
+- Alertas al inicio de sesión (stock bajo + cobros vencidos) unificadas.
 - Redes: publicación recurrente/programada y "aprender el movimiento" de un video de referencia para alimentar a Veo.
+- Web EHP: pasar a producción (fotos propias, Google Business Profile, newsletter, imágenes OG) — ver [07-EHP-Web](07-EHP-Web.md).
 
 ## 6. Cómo se despliega (recordatorio)
 1. **CHAOS**: `git add` + `commit` + `push` (único lugar de push; revisar que `git status` no deje ` M`; si hay `.git\index.lock`, borrarlo).
