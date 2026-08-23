@@ -2055,7 +2055,7 @@ namespace SistemaGestion.Api.Endpoints
         private const string RIF_EMPRESA = "RIF J-30571871-7";
         // Versión de la marca de agua: subir este número invalida las copias .wm cacheadas
         // (cuando cambia el texto o el diseño) sin tener que borrar archivos a mano.
-        private const string WM_VER = "3";
+        private const string WM_VER = "4";
         private static string RifTexto() =>
             Environment.GetEnvironmentVariable("SG_RIF")?.Trim() is { Length: > 0 } r ? r : RIF_EMPRESA;
 
@@ -2119,11 +2119,15 @@ namespace SistemaGestion.Api.Endpoints
                 var txtAbs = Path.Combine(dir, txtRel);
                 var outRel = Path.GetFileName(wm);
 
-                // Centrado abajo. min/max evitan que se salga si el texto midiera más que el ancho.
+                // Posición: por defecto CENTRADO ARRIBA (los posts suelen llevar texto abajo).
+                // Cambiable sin recompilar con env SG_RIF_POS = "arriba" | "abajo".
+                var pos = (Environment.GetEnvironmentVariable("SG_RIF_POS") ?? "arriba").Trim().ToLowerInvariant();
+                string yExpr = pos is "abajo" or "bottom" or "inferior" ? $"h-th-{marg}" : $"{marg}";
+                // x centrado (max evita que se salga si el texto midiera más que el ancho).
                 string drawtext =
                     (fontOrigen != null ? $"fontfile={fontRel}:" : "") +
                     $"textfile={txtRel}:fontcolor=white:fontsize={fs}:borderw=2:bordercolor=black@0.7:" +
-                    $"box=1:boxcolor=black@0.5:boxborderw={boxb}:x=max({marg}\\,(w-tw)/2):y=h-th-{marg}";
+                    $"box=1:boxcolor=black@0.5:boxborderw={boxb}:x=max({marg}\\,(w-tw)/2):y={yExpr}";
 
                 try
                 {
