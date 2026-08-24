@@ -49,4 +49,4 @@ docs/    google-business-profile.md
 ## 7. Relación con el resto del sistema
 - **Marca compartida** con el módulo de redes (Estudio de Contenido) del ERP: mismos productos, tono e identidad. El contenido generado en el ERP puede referir a esta web.
 - **Independiente en código y deploy**: repo `ehp-web`, hosting web propio. No toca la BD del ERP ni corre en OLIMPO/SERVO.
-- Existe además una carpeta `ehp-bot/` **dentro del repo del ERP** (`Prueba d cld/ehp-bot/`): revisar su propósito (posible bot/automatización asociada a EHP) y decidir si se mantiene ahí o se mueve al repo de la web.
+- Existe además una carpeta `ehp-bot/` **dentro del repo del ERP** (`Prueba d cld/ehp-bot/`): es el **bot de Telegram de EHP Saddles** y **forma parte de SistemaGestion** (se mantiene en ese repo). Documentado en [09-EHP-Bot](09-EHP-Bot.md).

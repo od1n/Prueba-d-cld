@@ -1,120 +1,59 @@
-# EHP Saddles Bot — Guía de instalación y deploy
+# EHP Bot (Telegram) — Instalación y deploy
 
-## Requisitos previos
+Bot de Telegram **espejo del bot de WhatsApp** de SistemaGestion. Usa los mismos
+endpoints `/api/wa/*` del ERP (catálogo, producto, estado de cuenta, abonos, pedido),
+con el mismo `X-Internal-Token`. No tiene catálogo ni precios propios: todo en vivo.
 
-| Cuenta gratuita | Para qué |
+## Requisitos
+
+| Cuenta | Para qué |
 |---|---|
-| [Telegram](https://telegram.org) | Tener la app y acceso a BotFather |
-| [Groq](https://console.groq.com) | API key gratuita para el LLM |
-| [Railway](https://railway.app) | Hosting gratuito para el bot |
+| Telegram + @BotFather | Crear el bot y obtener su token |
+| SistemaGestion accesible | Por el túnel `api-sg.hato-pascher.com` (o IP en la LAN) |
+| `SG_INTERNAL_TOKEN` | El mismo token interno de la API / n8n |
+| Railway (o cualquier host Python) | Correr el bot 24/7 |
 
----
+## Comandos del bot (iguales al de WhatsApp)
+- `catalogo` — lista de productos con precio.
+- `buscar <texto>` — busca productos.
+- `precio <codigo>` — ficha y precio de un producto.
+- `estado <PIN> <CLIENTE>` — estado de cuenta (requiere PIN de operador).
+- `abonos <PIN> <CLIENTE>` — últimos abonos (requiere PIN de operador).
+- `pedido Nombre, Teléfono, productos` — registra el pedido y envía el email.
+
+Funcionan como texto o como `/comando`. Los atajos numéricos 1–5 también sirven.
 
 ## Paso 1 — Crear el bot en Telegram
+1. En Telegram, abre **@BotFather** → `/newbot`.
+2. Elige nombre y username (termina en `bot`).
+3. Copia el **token** que te da.
 
-1. Abre Telegram y busca **@BotFather**
-2. Envía `/newbot`
-3. Elige un nombre para mostrar, por ejemplo: `EHP Saddles`
-4. Elige un username (debe terminar en `bot`), por ejemplo: `EHPSaddlesBot`
-5. Copia el **token** que te da BotFather — lo necesitarás más adelante
-6. Opcional: personaliza el bot con `/setdescription`, `/setuserpic`, `/setabouttext`
+## Paso 2 — (opcional) ID del operador
+Abre **@userinfobot** → `/start` → copia tu ID numérico (para recibir aviso de pedidos).
 
-## Paso 2 — Obtener tu ID de operador
-
-1. Abre Telegram y busca **@userinfobot**
-2. Envía `/start`
-3. Te responde con tu ID numérico — por ejemplo `987654321`
-
-## Paso 3 — Obtener API key de Groq (gratis)
-
-1. Ve a [console.groq.com](https://console.groq.com)
-2. Crea una cuenta gratuita
-3. En **API Keys** → **Create API Key**
-4. Copia la key (empieza con `gsk_...`)
-
-## Paso 4 — Deploy en Railway
-
-### Opción A — Desde GitHub (recomendado)
-
-1. Sube la carpeta `ehp-bot/` a un repositorio GitHub
-2. Ve a [railway.app](https://railway.app) → **New Project** → **Deploy from GitHub repo**
-3. Selecciona el repo
-4. En **Variables**, agrega:
+## Paso 3 — Variables de entorno
+Copia `.env.example` a `.env` y completa:
 
 ```
-TELEGRAM_TOKEN    = (el token de BotFather)
-OPERATOR_CHAT_ID  = (tu ID numérico de Telegram)
-GROQ_API_KEY      = (la key de Groq)
-GROQ_MODEL        = llama-3.1-8b-instant
+TELEGRAM_TOKEN     = (token de BotFather)
+OPERATOR_CHAT_ID   = (tu ID de Telegram, opcional)
+SG_API_URL         = https://api-sg.hato-pascher.com
+SG_INTERNAL_TOKEN  = (el MISMO SG_INTERNAL_TOKEN de la API / n8n)
 ```
 
-5. Railway detecta el `Procfile` y arranca el bot automáticamente
-
-### Opción B — Railway CLI
-
+## Paso 4 — Correr
+Local:
 ```bash
-npm install -g @railway/cli
-railway login
-railway init
-railway up
-railway variables set TELEGRAM_TOKEN=xxx OPERATOR_CHAT_ID=xxx GROQ_API_KEY=xxx
-```
-
----
-
-## Paso 5 — Actualizar el username del bot en el sitio web
-
-Una vez registrado el username del bot, busca y reemplaza `EHPSaddlesBot` por tu username real en todos los archivos HTML:
-
-```bash
-# En la carpeta ehp web/
-grep -rn "EHPSaddlesBot" . --include="*.html"
-# Luego reemplazar con el username real
-```
-
----
-
-## Comandos del bot
-
-| Comando | Función |
-|---|---|
-| `/start` | Inicia la conversación, reinicia el historial |
-| `/catalogo` | Lista todos los modelos y códigos |
-| `/cotizar` | Guía al usuario para pedir una cotización |
-| `/reset` | Reinicia el historial de chat |
-
----
-
-## Actualizar precios
-
-Abre `catalog.py` y edita el diccionario `PRECIOS`:
-
-```python
-PRECIOS: dict[str, float | str] = {
-    "EHP-W14":  85.0,    # McCleallan 14" → $85 USD
-    "EHP-W12S": 75.0,    # McCleallan 12" pequeño → $75 USD
-    # etc.
-}
-```
-
-Haz commit y Railway vuelve a deployar automáticamente.
-
----
-
-## Desarrollo local
-
-```bash
-cd ehp-bot
-python -m venv .venv
-source .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-cp .env.example .env            # Completar con tus keys
 python bot.py
 ```
+Railway: New Project → Deploy from GitHub repo → agregar las Variables de arriba →
+Railway detecta el `Procfile` (`worker: python bot.py`) y arranca.
 
----
-
-## Fase 2 — Instagram y Facebook (futuro)
-
-Requiere aprobación de Meta Business y un servidor con IP pública para el webhook.
-El bot ya está diseñado para conectarse a esos canales sin cambios en la lógica de respuesta.
+## Notas
+- El bot llama a `/api/wa/*` con `X-Internal-Token`; si el token o la URL están mal,
+  responde "No autorizado" o "No se pudo conectar con SistemaGestion".
+- Los comandos `estado` y `abonos` exigen un **PIN de operador** válido (Admin/Ventas),
+  con bloqueo tras 5 intentos — igual que en WhatsApp.
+- Requiere que la API de SistemaGestion (OLIMPO) esté accesible desde donde corra el bot
+  (por eso se usa el túnel de Cloudflare si el bot vive en la nube).

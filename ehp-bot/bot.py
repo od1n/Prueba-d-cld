@@ -1,24 +1,29 @@
 """
-EHP Saddles — Bot de Telegram (menú estructurado con botones)
-─────────────────────────────────────────────────────────────
-Flujo: categoría → producto → ficha + precio → pedido → email
-Sin LLM para el flujo de ventas; confiable, sin alucinaciones.
+EHP Bot (Telegram) — ESPEJO del bot de WhatsApp (n8n).
+
+Mismos comandos y datos que el bot de WhatsApp, servidos por los endpoints
+/api/wa/* de SistemaGestion. No hay catalogo ni precios locales: todo en vivo.
+
+Comandos (funcionan como texto o como /comando):
+  catalogo                      -> lista de productos con precio
+  buscar <texto>                -> busca productos
+  precio <codigo>               -> ficha de un producto
+  estado <PIN> <CLIENTE>        -> estado de cuenta (requiere PIN de operador)
+  abonos <PIN> <CLIENTE>        -> ultimos abonos (requiere PIN de operador)
+  pedido Nombre, Telefono, productos   -> registra pedido y envia email
 """
 import asyncio
 import logging
-from datetime import datetime
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    Application, CommandHandler, CallbackQueryHandler,
-    MessageHandler, ConversationHandler, ContextTypes, filters,
-)
+from telegram import Update
 from telegram.constants import ParseMode
+from telegram.ext import (
+    Application, CommandHandler, MessageHandler, ContextTypes, filters,
+)
 
 import config
-import email_sender
-from catalog import PRODUCTOS, buscar_producto
-from prices import precio_de
+import sg_api
+from sg_api import SGError
 
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
@@ -26,380 +31,218 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-# ── Estados del ConversationHandler ──────────────────────────────────────────
-(
-    MENU,
-    SHOW_CAT,
-    SHOW_PROD,
-    ASK_NAME,
-    ASK_LOCATION,
-    ASK_QUANTITY,
-    ASK_CONTACT,
-    CONFIRM,
-) = range(8)
-
-# ── Categorías ─────────────────────────────────────────────────────────────────
-CATS = {
-    "trabajo":    "🔧 Trabajo (McCleallan)",
-    "deporte":    "🏇 Fustes con Pico",
-    "recreativa": "🌄 Recreativa / Paseo",
-    "accesorios": "🪜 Accesorios",
-}
+MENU = (
+    "*EHP · SistemaGestion*\n"
+    "Escribe una opcion o el comando:\n\n"
+    "1) `catalogo` — lista de productos\n"
+    "2) `buscar <texto>` — buscar producto\n"
+    "3) `precio <codigo>` — detalle y precio\n"
+    "4) `estado <PIN> <CLIENTE>` — estado de cuenta (operador)\n"
+    "5) `pedido Nombre, Telefono, productos` — registrar pedido\n\n"
+    "Ej: `buscar tubo` · `precio TUB001` · `pedido Juan, 0414-1234567, 2xTUB001`"
+)
 
 
-# ── Teclados ──────────────────────────────────────────────────────────────────
-
-def kb_menu() -> InlineKeyboardMarkup:
-    btns = [[InlineKeyboardButton(label, callback_data=f"cat:{key}")]
-            for key, label in CATS.items()]
-    btns.append([InlineKeyboardButton("📋 Ver catálogo completo", callback_data="cat:all")])
-    return InlineKeyboardMarkup(btns)
+def _money(v) -> str:
+    try:
+        return f"${float(v):,.2f}"
+    except Exception:
+        return str(v)
 
 
-def kb_productos(categoria: str) -> InlineKeyboardMarkup:
-    if categoria == "all":
-        prods = PRODUCTOS
+# ── Acciones (compartidas por texto y por slash-comando) ──────────────────────
+
+async def do_catalogo(update: Update, q: str | None) -> None:
+    try:
+        data = await sg_api.catalogo(q)
+    except SGError as e:
+        await update.message.reply_text(f"⚠️ {e}")
+        return
+    prods = data.get("productos", [])
+    if not prods:
+        await update.message.reply_text("No se encontraron productos." + (f" (busqueda: {q})" if q else ""))
+        return
+    lineas = [f"*Catalogo* ({data.get('total', len(prods))})" + (f" · _{q}_" if q else ""), ""]
+    for p in prods[:30]:
+        lineas.append(f"`{p['codigo']}` — {p['descripcion']}\n   {_money(p['precio'])} / {p.get('unidad','') or 'u'}")
+    lineas.append("\nPara detalle: `precio <codigo>`")
+    await update.message.reply_text("\n".join(lineas), parse_mode=ParseMode.MARKDOWN)
+
+
+async def do_precio(update: Update, codigo: str) -> None:
+    if not codigo:
+        await update.message.reply_text("Uso: `precio <codigo>`", parse_mode=ParseMode.MARKDOWN)
+        return
+    try:
+        p = await sg_api.producto(codigo.strip())
+    except SGError as e:
+        await update.message.reply_text(f"⚠️ {e}")
+        return
+    if p.get("_status") == 404 or not p.get("codigo"):
+        await update.message.reply_text(f"Producto `{codigo}` no encontrado.", parse_mode=ParseMode.MARKDOWN)
+        return
+    txt = (
+        f"*{p['descripcion']}*\n"
+        f"`{p['codigo']}`\n"
+        f"Departamento: {p.get('departamento','') or '—'}\n"
+        f"Unidad: {p.get('unidad','') or '—'}\n"
+        f"💵 *{_money(p['precio'])}*"
+    )
+    await update.message.reply_text(txt, parse_mode=ParseMode.MARKDOWN)
+
+
+async def do_estado(update: Update, args: list[str]) -> None:
+    if len(args) < 2:
+        await update.message.reply_text("Uso: `estado <PIN> <CLIENTE>`", parse_mode=ParseMode.MARKDOWN)
+        return
+    pin, cliente = args[0], args[1]
+    try:
+        d = await sg_api.estado_cuenta(pin, cliente)
+    except SGError as e:
+        await update.message.reply_text(f"⚠️ {e}")
+        return
+    if d.get("_status") == 403 or d.get("error"):
+        await update.message.reply_text(f"🔒 {d.get('error', 'PIN incorrecto.')}")
+        return
+    cli = d.get("cliente", {})
+    lineas = [
+        "*Estado de cuenta*",
+        f"Cliente: {cli.get('nombre','—')} (`{cli.get('codigo','')}`)",
+        f"Deuda total: *{_money(d.get('totalDeuda',0))}*",
+        f"Abonos: {_money(d.get('totalAbonos',0))} · A favor: {_money(d.get('saldoFavor',0))}",
+    ]
+    fac = d.get("facturasPendientes", [])
+    if fac:
+        lineas.append("\n*Pendientes:*")
+        for f in fac[:15]:
+            venc = " ⚠️VENCIDA" if f.get("vencida") else ""
+            lineas.append(f"· {f.get('concepto','')} — saldo {_money(f.get('saldo',0))} (vence {f.get('vence','')}){venc}")
     else:
-        prods = [p for p in PRODUCTOS if p["categoria"] == categoria]
-    btns = [[InlineKeyboardButton(p["nombre"], callback_data=f"prod:{p['codigo']}")]
-            for p in prods]
-    btns.append([InlineKeyboardButton("⬅️ Volver", callback_data="back:menu")])
-    return InlineKeyboardMarkup(btns)
+        lineas.append("\nSin facturas pendientes.")
+    await update.message.reply_text("\n".join(lineas), parse_mode=ParseMode.MARKDOWN)
 
 
-def kb_producto(codigo: str) -> InlineKeyboardMarkup:
-    prod = next((p for p in PRODUCTOS if p["codigo"] == codigo), None)
-    cat = prod["categoria"] if prod else "all"
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📦 Solicitar cotización", callback_data=f"order:{codigo}")],
-        [InlineKeyboardButton("⬅️ Volver", callback_data=f"cat:{cat}")],
-    ])
+async def do_abonos(update: Update, args: list[str]) -> None:
+    if len(args) < 2:
+        await update.message.reply_text("Uso: `abonos <PIN> <CLIENTE>`", parse_mode=ParseMode.MARKDOWN)
+        return
+    pin, cliente = args[0], args[1]
+    try:
+        d = await sg_api.abonos(pin, cliente, 10)
+    except SGError as e:
+        await update.message.reply_text(f"⚠️ {e}")
+        return
+    if d.get("_status") == 403 or d.get("error"):
+        await update.message.reply_text(f"🔒 {d.get('error', 'PIN incorrecto.')}")
+        return
+    ab = d.get("abonos", [])
+    if not ab:
+        await update.message.reply_text("Sin abonos registrados.")
+        return
+    lineas = [f"*Ultimos abonos* ({d.get('total', len(ab))})", ""]
+    for a in ab:
+        lineas.append(f"· {a.get('fecha','')} — {_money(a.get('monto',0))} ({a.get('metodo','')}) {a.get('estado','')}")
+    await update.message.reply_text("\n".join(lineas), parse_mode=ParseMode.MARKDOWN)
 
 
-def kb_confirmar() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Confirmar pedido", callback_data="confirm:yes")],
-        [InlineKeyboardButton("❌ Cancelar",          callback_data="confirm:no")],
-    ])
-
-
-def kb_volver_menu() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🏠 Menú principal", callback_data="back:menu")],
-    ])
-
-
-# ── Texto de ficha de producto ─────────────────────────────────────────────────
-
-async def texto_producto(prod: dict) -> str:
-    precio = await precio_de(prod["codigo"])
-    medidas_str = ""
-    if prod.get("medidas"):
-        medidas_str = "\n\n📏 *Medidas:*\n" + "\n".join(
-            f"  · {k}: {v}" for k, v in prod["medidas"].items()
-        )
-    return (
-        f"*{prod['nombre']}*\n"
-        f"`{prod['codigo']}` · {prod['peso']}\n\n"
-        f"{prod['descripcion']}"
-        f"{medidas_str}\n\n"
-        f"💵 *{precio}*"
-    )
-
-
-# ── Handlers ──────────────────────────────────────────────────────────────────
-
-async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
-    ctx.user_data.clear()
-    nombre = update.effective_user.first_name or "Hola"
-    await update.message.reply_text(
-        f"👋 Bienvenido a *EHP Saddles*, {nombre}.\n\n"
-        "Fabricamos árboles de montura en polietileno de alta densidad "
-        "— resistentes, livianos y terminados a mano.\n\n"
-        "¿Qué categoría te interesa?",
-        parse_mode=ParseMode.MARKDOWN,
-        reply_markup=kb_menu(),
-    )
-    return MENU
-
-
-async def cb_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
-    q = update.callback_query
-    await q.answer()
-    await q.edit_message_text(
-        "Selecciona una categoría:",
-        reply_markup=kb_menu(),
-    )
-    return MENU
-
-
-async def cb_categoria(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
-    q = update.callback_query
-    await q.answer()
-    _, cat = q.data.split(":", 1)
-    # Validar que la categoría sea conocida
-    if cat not in CATS and cat != "all":
-        await q.answer("Categoría no válida.", show_alert=True)
-        return MENU
-    ctx.user_data["cat"] = cat
-    label = "Catálogo completo" if cat == "all" else CATS.get(cat, cat)
-    await q.edit_message_text(
-        f"*{label}*\n\nSelecciona un modelo:",
-        parse_mode=ParseMode.MARKDOWN,
-        reply_markup=kb_productos(cat),
-    )
-    return SHOW_CAT
-
-
-async def cb_producto(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
-    q = update.callback_query
-    await q.answer()
-    _, codigo = q.data.split(":", 1)
-    # Validar que el código sea alfanumérico corto (evita inyección en callback_data)
-    if not codigo.replace("-", "").replace("_", "").isalnum() or len(codigo) > 30:
-        await q.answer("Producto no válido.", show_alert=True)
-        return MENU
-    prod = next((p for p in PRODUCTOS if p["codigo"] == codigo), None)
-    if not prod:
-        await q.edit_message_text("Producto no encontrado.", reply_markup=kb_volver_menu())
-        return MENU
-
-    ctx.user_data["prod_codigo"] = codigo
-    ctx.user_data["prod_nombre"] = prod["nombre"]
-    texto = await texto_producto(prod)
-    await q.edit_message_text(
-        texto,
-        parse_mode=ParseMode.MARKDOWN,
-        reply_markup=kb_producto(codigo),
-    )
-    return SHOW_PROD
-
-
-async def cb_order(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
-    q = update.callback_query
-    await q.answer()
-    _, codigo = q.data.split(":", 1)
-    prod = next((p for p in PRODUCTOS if p["codigo"] == codigo), None)
-    if prod:
-        ctx.user_data["prod_codigo"] = codigo
-        ctx.user_data["prod_nombre"] = prod["nombre"]
-
-    # Verificar rate limit antes de iniciar el flujo
-    ok, motivo = email_sender.puede_enviar(update.effective_user.id)
-    if not ok:
-        await q.edit_message_text(motivo, reply_markup=kb_volver_menu())
-        return MENU
-
-    await q.edit_message_text(
-        f"📦 *Cotización — {ctx.user_data.get('prod_nombre', '')}*\n\n"
-        "Necesito algunos datos para preparar tu cotización.\n\n"
-        "¿Cuál es tu *nombre completo*?",
-        parse_mode=ParseMode.MARKDOWN,
-    )
-    return ASK_NAME
-
-
-async def ask_location(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
-    ctx.user_data["nombre"] = update.message.text.strip()[:150]
-    await update.message.reply_text(
-        f"Gracias, {ctx.user_data['nombre']}.\n\n¿En qué *país y ciudad* estás?"
-        " (Ej: Venezuela, Barinas / Colombia, Bogotá)",
-        parse_mode=ParseMode.MARKDOWN,
-    )
-    return ASK_LOCATION
-
-
-async def ask_quantity(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
-    ctx.user_data["ubicacion"] = update.message.text.strip()[:150]
-    await update.message.reply_text(
-        "¿Qué *cantidad* de unidades necesitas aproximadamente?",
-        parse_mode=ParseMode.MARKDOWN,
-    )
-    return ASK_QUANTITY
-
-
-async def ask_contact(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
-    texto = update.message.text.strip()
-    # Validación básica de cantidad
-    if not any(c.isdigit() for c in texto):
+async def do_pedido(update: Update, resto: str) -> None:
+    # Formato: pedido Nombre, Telefono, productos
+    partes = [x.strip() for x in resto.split(",")]
+    if len(partes) < 3 or not partes[0]:
         await update.message.reply_text(
-            "Por favor indica una cantidad numérica (Ej: 1, 5, 20)."
+            "Uso: `pedido Nombre, Telefono, productos`\n"
+            "Ej: `pedido Juan Perez, 0414-1234567, 2xTUB001, 5xSLA002`",
+            parse_mode=ParseMode.MARKDOWN,
         )
-        return ASK_QUANTITY
-    ctx.user_data["cantidad"] = texto[:30]
-    await update.message.reply_text(
-        "¿Cuál es tu *teléfono o email* de contacto para que el taller te responda?",
-        parse_mode=ParseMode.MARKDOWN,
-    )
-    return ASK_CONTACT
-
-
-async def mostrar_confirmacion(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
-    ctx.user_data["contacto"] = update.message.text.strip()[:150]
-    d = ctx.user_data
-    resumen = (
-        f"📋 *Resumen de tu solicitud:*\n\n"
-        f"🔹 Producto: {d.get('prod_nombre','—')} (`{d.get('prod_codigo','—')}`)\n"
-        f"🔹 Cantidad: {d.get('cantidad','—')}\n"
-        f"🔹 Nombre: {d.get('nombre','—')}\n"
-        f"🔹 Ubicación: {d.get('ubicacion','—')}\n"
-        f"🔹 Contacto: {d.get('contacto','—')}\n\n"
-        "¿Confirmas el envío de esta solicitud al taller?"
-    )
-    await update.message.reply_text(
-        resumen,
-        parse_mode=ParseMode.MARKDOWN,
-        reply_markup=kb_confirmar(),
-    )
-    return CONFIRM
-
-
-async def cb_confirmar(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
-    q = update.callback_query
-    await q.answer()
-    _, resp = q.data.split(":", 1)
-
-    if resp == "no":
-        await q.edit_message_text(
-            "Solicitud cancelada. ¿En qué más puedo ayudarte?",
-            reply_markup=kb_volver_menu(),
-        )
-        return MENU
-
-    user = update.effective_user
-    d = ctx.user_data
-
-    # Verificar rate limit de nuevo al confirmar
-    ok, motivo = email_sender.puede_enviar(user.id)
-    if not ok:
-        await q.edit_message_text(motivo, reply_markup=kb_volver_menu())
-        return MENU
-
-    pedido = {
-        "prod_nombre":   d.get("prod_nombre", "—"),
-        "prod_codigo":   d.get("prod_codigo", "—"),
-        "cantidad":      d.get("cantidad", "—"),
-        "nombre":        d.get("nombre", "—"),
-        "ubicacion":     d.get("ubicacion", "—"),
-        "contacto":      d.get("contacto", "—"),
-        "user_id":       user.id,
-        "username":      user.username or "—",
-        "ts":            datetime.now().strftime("%Y-%m-%d %H:%M UTC"),
-    }
-
-    # Enviar email (en hilo aparte para no bloquear)
-    loop = asyncio.get_running_loop()
-    exito = await loop.run_in_executor(None, email_sender.enviar_pedido, pedido)
-
-    if exito:
-        email_sender.registrar_envio(user.id)
-        # Notificar al operador por Telegram también
-        resumen_tg = (
-            f"📦 *Nuevo pedido — EHP Bot*\n"
-            f"──────────────────────\n"
-            f"🔹 {pedido['prod_nombre']} × {pedido['cantidad']}\n"
-            f"👤 {pedido['nombre']} — {pedido['ubicacion']}\n"
-            f"📞 {pedido['contacto']}\n"
-            f"🆔 @{pedido['username']} (`{pedido['user_id']}`)\n"
-            f"🕐 {pedido['ts']}"
-        )
+        return
+    nombre = partes[0]
+    tel = partes[1]
+    items = ", ".join(partes[2:])
+    wa = str(update.effective_user.id)
+    try:
+        d = await sg_api.pedido(nombre, tel, items, wa)
+    except SGError as e:
+        await update.message.reply_text(f"⚠️ {e}")
+        return
+    msg = d.get("mensaje", "Pedido registrado.")
+    await update.message.reply_text(f"✅ {msg}")
+    if config.OPERATOR_CHAT_ID:
         try:
-            await q.get_bot().send_message(
+            await update.get_bot().send_message(
                 chat_id=config.OPERATOR_CHAT_ID,
-                text=resumen_tg,
+                text=(f"📦 *Pedido (Telegram)*\n{nombre} — {tel}\n{items}\nTG id: `{wa}`"),
                 parse_mode=ParseMode.MARKDOWN,
             )
         except Exception as exc:
-            log.error("No se pudo notificar al operador: %s", exc)
+            log.warning("No se pudo avisar al operador: %s", exc)
 
-        await q.edit_message_text(
-            "✅ *¡Solicitud enviada!*\n\n"
-            "El taller recibirá tu cotización y te contactará por el medio que indicaste. "
-            "Normalmente respondemos el mismo día en horario hábil.\n\n"
-            "¿Necesitas algo más?",
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=kb_volver_menu(),
-        )
+
+# ── Slash-comandos ────────────────────────────────────────────────────────────
+
+async def cmd_start(update, ctx): await update.message.reply_text(MENU, parse_mode=ParseMode.MARKDOWN)
+async def h_catalogo(update, ctx): await do_catalogo(update, " ".join(ctx.args) or None)
+async def h_buscar(update, ctx):   await do_catalogo(update, " ".join(ctx.args) or None)
+async def h_precio(update, ctx):   await do_precio(update, " ".join(ctx.args))
+async def h_estado(update, ctx):   await do_estado(update, ctx.args)
+async def h_abonos(update, ctx):   await do_abonos(update, ctx.args)
+async def h_pedido(update, ctx):   await do_pedido(update, " ".join(ctx.args))
+
+
+# ── Texto libre: mapea la primera palabra al comando ──────────────────────────
+
+async def h_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    texto = (update.message.text or "").strip()
+    if not texto:
+        return
+    palabras = texto.split()
+    primera = palabras[0].lower()
+    resto = texto[len(palabras[0]):].strip()
+
+    if primera in ("catalogo", "catálogo", "1"):
+        await do_catalogo(update, resto or None)
+    elif primera in ("menu", "menú"):
+        await update.message.reply_text(MENU, parse_mode=ParseMode.MARKDOWN)
+    elif primera in ("buscar", "2"):
+        await do_catalogo(update, resto or None)
+    elif primera in ("precio", "3"):
+        await do_precio(update, resto)
+    elif primera in ("estado", "4"):
+        await do_estado(update, resto.split())
+    elif primera in ("abonos",):
+        await do_abonos(update, resto.split())
+    elif primera in ("pedido", "5"):
+        await do_pedido(update, resto)
     else:
-        await q.edit_message_text(
-            "❌ Hubo un problema al enviar tu solicitud. "
-            "Por favor escribe directamente a info@ehp-saddles.com "
-            "o a hatopascher@gmail.com con tu consulta.",
-            reply_markup=kb_volver_menu(),
-        )
-
-    return MENU
-
-
-async def cmd_cancelar(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
-    ctx.user_data.clear()
-    await update.message.reply_text(
-        "Proceso cancelado. ¿En qué puedo ayudarte?",
-        reply_markup=kb_menu(),
-    )
-    return MENU
-
-
-async def msg_fuera_de_flujo(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-    """Mensajes de texto fuera del flujo de pedido."""
-    await update.message.reply_text(
-        "Usa los botones del menú para navegar el catálogo y hacer una solicitud. "
-        "Escribe /start para comenzar.",
-        reply_markup=kb_menu(),
-    )
+        await update.message.reply_text("No entendi. " + MENU, parse_mode=ParseMode.MARKDOWN)
 
 
 # ── Arranque ──────────────────────────────────────────────────────────────────
 
 async def main() -> None:
-    log.info("Iniciando EHP Bot (menú estructurado)…")
+    log.info("Iniciando EHP Bot (espejo de WhatsApp)…")
 
     async def post_init(app: Application) -> None:
         from telegram import BotCommand
         await app.bot.set_my_commands([
-            BotCommand("start",    "Inicio / Menú principal"),
-            BotCommand("cancelar", "Cancelar proceso actual"),
+            BotCommand("start",    "Menu / ayuda"),
+            BotCommand("catalogo", "Lista de productos"),
+            BotCommand("buscar",   "Buscar producto"),
+            BotCommand("precio",   "Detalle y precio de un producto"),
+            BotCommand("estado",   "Estado de cuenta (PIN operador)"),
+            BotCommand("abonos",   "Ultimos abonos (PIN operador)"),
+            BotCommand("pedido",   "Registrar un pedido"),
         ])
 
-    app = (
-        Application.builder()
-        .token(config.TELEGRAM_TOKEN)
-        .post_init(post_init)
-        .build()
-    )
+    app = Application.builder().token(config.TELEGRAM_TOKEN).post_init(post_init).build()
 
-    conv = ConversationHandler(
-        entry_points=[CommandHandler("start", cmd_start)],
-        states={
-            MENU: [
-                CallbackQueryHandler(cb_categoria, pattern=r"^cat:"),
-                CallbackQueryHandler(cb_menu,      pattern=r"^back:menu$"),
-            ],
-            SHOW_CAT: [
-                CallbackQueryHandler(cb_producto, pattern=r"^prod:"),
-                CallbackQueryHandler(cb_menu,     pattern=r"^back:menu$"),
-                CallbackQueryHandler(cb_categoria, pattern=r"^cat:"),
-            ],
-            SHOW_PROD: [
-                CallbackQueryHandler(cb_order,    pattern=r"^order:"),
-                CallbackQueryHandler(cb_categoria, pattern=r"^cat:"),
-                CallbackQueryHandler(cb_menu,     pattern=r"^back:menu$"),
-            ],
-            ASK_NAME:     [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_location)],
-            ASK_LOCATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_quantity)],
-            ASK_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_contact)],
-            ASK_CONTACT:  [MessageHandler(filters.TEXT & ~filters.COMMAND, mostrar_confirmacion)],
-            CONFIRM: [
-                CallbackQueryHandler(cb_confirmar, pattern=r"^confirm:"),
-                CallbackQueryHandler(cb_menu,      pattern=r"^back:menu$"),
-            ],
-        },
-        fallbacks=[CommandHandler("cancelar", cmd_cancelar)],
-        allow_reentry=True,
-    )
-
-    app.add_handler(conv)
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, msg_fuera_de_flujo))
+    app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CommandHandler("catalogo", h_catalogo))
+    app.add_handler(CommandHandler("buscar", h_buscar))
+    app.add_handler(CommandHandler("precio", h_precio))
+    app.add_handler(CommandHandler("estado", h_estado))
+    app.add_handler(CommandHandler("abonos", h_abonos))
+    app.add_handler(CommandHandler("pedido", h_pedido))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, h_texto))
 
     log.info("Bot activo. Ctrl+C para detener.")
     async with app:
@@ -407,8 +250,6 @@ async def main() -> None:
         await app.start()
         await app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
         await asyncio.Event().wait()
-        await app.updater.stop()
-        await app.stop()
 
 
 if __name__ == "__main__":
