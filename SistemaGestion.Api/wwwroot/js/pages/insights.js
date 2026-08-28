@@ -157,7 +157,7 @@ async function seleccionarMes(mes) {
 
     <div style="margin:0 16px 4px;color:var(--texto-dim);font-size:8.5pt">Categoría: ${esh(dg.categoria)}</div>
 
-    <div class="section-header" style="padding:8px 16px 6px">Explicación 🅰 <span style="color:var(--texto-dim);font-weight:normal">· generada, sobre estos números</span></div>
+    <div class="section-header" style="padding:8px 16px 6px">Explicación 🧠 <span style="color:var(--texto-dim);font-weight:normal">· generada localmente, sobre estos números</span></div>
     <div class="card" id="narracionBox" style="margin:0 16px 16px;padding:12px 14px;line-height:1.5">
       <span style="color:var(--texto-dim)">Generando explicación…</span>
     </div>`;

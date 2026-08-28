@@ -7,20 +7,25 @@ namespace SistemaGestion.Api.Endpoints
     /// Agente de Insights + RCA — endpoints del portal.
     ///   GET  /api/insights/serie?desde=YYYY-MM-DD&hasta=YYYY-MM-DD  → Capas 1 + 2
     ///   GET  /api/insights/desglose?mes=YYYY-MM                     → Capa 3
-    ///   POST /api/insights/narrar   { mes }                        → Capa 4 (narración con Claude)
+    ///   POST /api/insights/narrar   { mes }                        → Capa 4 (narración con Ollama local)
     ///
-    /// Las Capas 1-3 son SQL determinístico (DbInsights). La Capa 4 es lo ÚNICO que llama a
-    /// Claude, y solo para narrar números YA calculados — nunca calcula ni inventa cifras.
-    /// Reutiliza el mismo patrón de AyudaEndpoints (cliente "anthropic", ANTHROPIC_API_KEY).
+    /// Las Capas 1-3 son SQL determinístico (DbInsights). La Capa 4 es lo ÚNICO que llama a un
+    /// modelo, y solo para narrar números YA calculados — nunca calcula ni inventa cifras.
+    /// Usa el MISMO Ollama local que el digitalizador y la app WinForms:
+    ///   endpoint http://localhost:11434/api/generate (configurable con la variable SG_OLLAMA_URL),
+    ///   modelo desde la config OllamaModelo (igual que FrmSistema / OllamaService).
     /// </summary>
     public static class InsightsEndpoints
     {
-        private const string ANTHROPIC_URL     = "https://api.anthropic.com/v1/messages";
-        private const string ANTHROPIC_VERSION = "2023-06-01";
-        private const string MODEL             = "claude-opus-4-6";
-        private const int    MAX_TOKENS        = 700;
+        // Mismo host que OllamaService (WinForms). Se puede sobreescribir con SG_OLLAMA_URL
+        // (útil en Servo, que puede apuntar al Ollama de Olimpo si no corre uno propio).
+        private static readonly string OLLAMA_URL =
+            (Environment.GetEnvironmentVariable("SG_OLLAMA_URL")?.TrimEnd('/')
+             ?? "http://localhost:11434") + "/api/generate";
 
-        // Prompt de la Capa 4 — español neutro, grounding estricto (capa4_prompt_narracion.md)
+        private const int NUM_PREDICT = 500;
+
+        // Instrucciones de la Capa 4 — español neutro, grounding estricto (capa4_prompt_narracion.md)
         private const string SISTEMA_PROMPT =
             "Eres el motor de narración de un agente de insights de ventas para una empresa " +
             "manufacturera (EHP / SistemaGestion). Se te pasa un objeto JSON con los números YA " +
@@ -42,7 +47,8 @@ namespace SistemaGestion.Api.Endpoints
             "misma seguridad. " +
             "6. Tono directo, en español neutro, para el dueño del negocio — sin jerga de bases de datos " +
             "(nunca \"JOIN\", \"query\", \"tabla\"). " +
-            "7. 3-5 oraciones. No repitas todos los números del JSON, solo los que explican el cambio.";
+            "7. Responde en 3-5 oraciones y SOLO la explicación, sin preámbulo ni encabezados. No repitas " +
+            "todos los números del JSON, solo los que explican el cambio.";
 
         public static void MapInsightsEndpoints(this WebApplication app)
         {
@@ -78,15 +84,11 @@ namespace SistemaGestion.Api.Endpoints
                 }
             }).RequireAuthorization();
 
-            // ── Capa 4 — narración con Claude ──────────────────────────────
+            // ── Capa 4 — narración con Ollama local ────────────────────────
             app.MapPost("/api/insights/narrar", async (NarrarRequest req, IHttpClientFactory http) =>
             {
                 if (req?.Mes == null || req.Mes.Length != 7 || req.Mes[4] != '-')
                     return Results.BadRequest(new { error = "Parámetro 'mes' inválido. Formato esperado: YYYY-MM." });
-
-                var apiKey = Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY");
-                if (string.IsNullOrEmpty(apiKey))
-                    return Results.Json(new { error = "Narración no configurada. Contacta al administrador." }, statusCode: 503);
 
                 DesgloseResult dg;
                 try { dg = DbInsights.Desglose(req.Mes); }
@@ -96,10 +98,10 @@ namespace SistemaGestion.Api.Endpoints
                     return Results.Json(new { error = "No se pudo preparar el desglose para narrar." }, statusCode: 500);
                 }
 
-                // JSON del evento — se arma en el servidor a partir de la Capa 3 (nunca lo genera Claude)
+                // JSON del evento — se arma en el servidor a partir de la Capa 3 (nunca lo genera el modelo)
                 var evento = new
                 {
-                    mes           = dg.Mes,
+                    mes            = dg.Mes,
                     valor_anterior = dg.ValorAnterior,
                     valor_actual   = dg.ValorActual,
                     delta_abs      = dg.DeltaAbs,
@@ -114,41 +116,52 @@ namespace SistemaGestion.Api.Endpoints
                 };
                 string eventoJson = JsonSerializer.Serialize(evento);
 
+                // Ollama /api/generate no tiene rol "system": se antepone la instrucción al prompt.
+                string prompt = SISTEMA_PROMPT +
+                    "\n\nDatos del evento (JSON), ya calculados:\n" + eventoJson +
+                    "\n\nEscribe ahora la explicación, en español neutro, siguiendo las reglas:";
+
+                string modelo = Db.ObtenerConfig("OllamaModelo", "gemma4:31b-cloud");
+
+                var payload = new
+                {
+                    model   = modelo,
+                    prompt  = prompt,
+                    stream  = false,
+                    options = new { num_predict = NUM_PREDICT }
+                };
+                string jsonBody = JsonSerializer.Serialize(payload);
+
                 try
                 {
-                    var cli = http.CreateClient("anthropic");
-                    var payload = new
-                    {
-                        model      = MODEL,
-                        max_tokens = MAX_TOKENS,
-                        system     = SISTEMA_PROMPT,
-                        messages   = new[] { new { role = "user", content = eventoJson } }
-                    };
-                    var jsonBody = JsonSerializer.Serialize(payload);
-
-                    using var requestMsg = new HttpRequestMessage(HttpMethod.Post, ANTHROPIC_URL);
-                    requestMsg.Headers.Add("x-api-key", apiKey);
-                    requestMsg.Headers.Add("anthropic-version", ANTHROPIC_VERSION);
-                    requestMsg.Content = new StringContent(jsonBody, Encoding.UTF8, "application/json");
-
-                    var resp = await cli.SendAsync(requestMsg);
+                    var cli = http.CreateClient();
+                    cli.Timeout = TimeSpan.FromSeconds(120); // modelos locales pueden tardar
+                    using var content = new StringContent(jsonBody, Encoding.UTF8, "application/json");
+                    var resp = await cli.PostAsync(OLLAMA_URL, content);
                     var body = await resp.Content.ReadAsStringAsync();
+
                     if (!resp.IsSuccessStatusCode)
                     {
-                        Console.WriteLine($"[INSIGHTS] Anthropic error {(int)resp.StatusCode}: {body[..Math.Min(200, body.Length)]}");
-                        return Results.Json(new { error = "Error al generar la narración. Intenta nuevamente." }, statusCode: 503);
+                        Console.WriteLine($"[INSIGHTS] Ollama error {(int)resp.StatusCode}: {body[..Math.Min(200, body.Length)]}");
+                        return Results.Json(new { error = $"El modelo local devolvió un error. Verifica que el modelo '{modelo}' esté descargado en Ollama." }, statusCode: 503);
                     }
 
-                    using var doc = JsonDocument.Parse(body);
-                    var texto = doc.RootElement.GetProperty("content")[0].GetProperty("text").GetString() ?? "";
-                    return Results.Ok(new { mes = dg.Mes, narracion = texto });
+                    string texto = "";
+                    using (var doc = JsonDocument.Parse(body))
+                    {
+                        if (doc.RootElement.TryGetProperty("response", out var r))
+                            texto = r.GetString() ?? "";
+                        else if (doc.RootElement.TryGetProperty("text", out var t))
+                            texto = t.GetString() ?? "";
+                    }
+                    return Results.Ok(new { mes = dg.Mes, narracion = texto.Trim() });
                 }
                 catch (Exception ex)
                 {
                     Console.WriteLine($"[INSIGHTS ERROR narrar] {ex}");
-                    return Results.Json(new { error = "Narración temporalmente no disponible." }, statusCode: 503);
+                    return Results.Json(new { error = $"Narración no disponible: Ollama no responde en {OLLAMA_URL}. Verifica que el servidor Ollama esté corriendo." }, statusCode: 503);
                 }
-            }).RequireAuthorization().RequireRateLimiting("ayuda-opus");
+            }).RequireAuthorization();
         }
     }
 
