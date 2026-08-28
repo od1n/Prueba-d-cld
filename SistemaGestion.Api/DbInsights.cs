@@ -175,7 +175,7 @@ namespace SistemaGestion.Api
             cmd.CommandText = $@"
                 SELECT df.Codigo, i.Descripcion, SUM(df.Cantidad * {PrecioExpr()}) AS Venta
                 FROM DetallesFactura df
-                JOIN Facturas f   ON f.NumeroF = df.IdFactura
+                JOIN Facturas f   ON f.rowid = df.IdFactura
                 JOIN Inventario i ON i.Codigo  = df.Codigo
                 WHERE f.Anulada = 0 AND f.Fecha >= $i AND f.Fecha < $f
                 GROUP BY df.Codigo, i.Descripcion";
@@ -219,7 +219,7 @@ namespace SistemaGestion.Api
                     SELECT COALESCE(NULLIF(i.Departamento,''), '(sin departamento)') AS Categoria,
                            SUM(df.Cantidad * {PrecioExpr()}) AS Venta
                     FROM DetallesFactura df
-                    JOIN Facturas f   ON f.NumeroF = df.IdFactura
+                    JOIN Facturas f   ON f.rowid = df.IdFactura
                     JOIN Inventario i ON i.Codigo  = df.Codigo
                     WHERE f.Anulada = 0 AND f.Fecha >= $i AND f.Fecha < $f
                     GROUP BY Categoria ORDER BY Venta DESC";
