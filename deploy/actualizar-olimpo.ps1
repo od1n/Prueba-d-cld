@@ -93,6 +93,10 @@ Info "4/5  Publicando la app de escritorio (WinForms) a $appPub ..."
 try {
     New-Item -ItemType Directory -Force -Path $appPub | Out-Null
     & dotnet publish $appProj -c Release -r win-x64 --self-contained false -o $appPub --nologo -v minimal
+    if ($LASTEXITCODE -ne 0) {
+        Warn "Publicacion de la app fallo (posible red/NuGet). Reintentando SIN restaurar, con la cache local..."
+        & dotnet publish $appProj -c Release -r win-x64 --self-contained false --no-restore -o $appPub --nologo -v minimal
+    }
     if ($LASTEXITCODE -eq 0) { Ok "App de escritorio publicada: $appPub" }
     else { Warn "La app de escritorio no compilo; la API SI quedo actualizada. Revisa el error arriba." }
 }
