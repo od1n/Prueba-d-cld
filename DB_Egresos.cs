@@ -88,7 +88,7 @@ namespace SistemaGestion
 
         public static void GuardarCategoriaGasto(CategoriaGasto cat)
         {
-            string rol = Sesion.Rol ?? "";
+            string rol = Sesion.RolesEfectivos;
             if (!Sesion.EsAdmin && !PermisosRol.Permite(rol, "EgresosCategorias"))
                 throw new UnauthorizedAccessException(
                     "Tu rol no tiene permiso para gestionar categorías de gasto.");
@@ -131,7 +131,7 @@ namespace SistemaGestion
             if (string.IsNullOrWhiteSpace(g.Concepto)) throw new Exception("Concepto requerido.");
             if (g.MontoOriginal <= 0) throw new Exception("El monto debe ser mayor que cero.");
 
-            string rol = Sesion.Rol ?? "";
+            string rol = Sesion.RolesEfectivos;
             if (!Sesion.EsAdmin && !PermisosRol.Permite(rol, "EgresosRegistrar"))
                 throw new UnauthorizedAccessException(
                     "Tu rol (" + rol + ") no tiene permiso para registrar egresos.");
@@ -290,7 +290,7 @@ namespace SistemaGestion
 
         public static void AnularEgreso(int id, string motivo)
         {
-            string rol = Sesion.Rol ?? "";
+            string rol = Sesion.RolesEfectivos;
             if (!Sesion.EsAdmin && !PermisosRol.Permite(rol, "EgresosAnular"))
                 throw new UnauthorizedAccessException(
                     "Tu rol no tiene permiso para anular egresos.");
@@ -309,7 +309,7 @@ namespace SistemaGestion
 
         public static void MarcarEgresoPagado(int id, DateTime fechaPago)
         {
-            string rol = Sesion.Rol ?? "";
+            string rol = Sesion.RolesEfectivos;
             if (!Sesion.EsAdmin && !PermisosRol.Permite(rol, "EgresosRegistrar"))
                 throw new UnauthorizedAccessException(
                     "Tu rol no tiene permiso para marcar pagos.");

@@ -176,7 +176,7 @@ namespace SistemaGestion
             // ── Permisos ────────────────────────────────────────────────────
             var anterior = ObtenerTasaPorFechaExacta(t.Fecha);
             string permisoNecesario = anterior == null ? "TasaIngreso" : "TasaModificar";
-            string rol = Sesion.Rol ?? "";
+            string rol = Sesion.RolesEfectivos;
             if (!string.IsNullOrEmpty(rol) && !PermisosRol.Permite(rol, permisoNecesario))
             {
                 RegistrarAuditoria("TASA_DENEGADA", "TasaCambio",

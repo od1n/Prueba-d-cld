@@ -3420,7 +3420,7 @@ namespace SistemaGestion
             var cmd = c.CreateCommand();
             cmd.CommandText = @"SELECT Id,NombreUsuario,NombreCompleto,PasswordHash,Rol,
                                        Activo,FechaCreacion,UltimoAcceso,RequiereCambioPassword,
-                                       IntentosHoy,BloqueadoHasta
+                                       IntentosHoy,BloqueadoHasta,COALESCE(Roles,'')
                                 FROM Usuarios
                                 WHERE NombreUsuario=$u AND Activo=1";
             cmd.Parameters.AddWithValue("$u", nombreUsuario);
@@ -3476,6 +3476,7 @@ namespace SistemaGestion
                 FechaCreacion         = DateTime.Parse(r.GetString(6)),
                 UltimoAcceso          = r.IsDBNull(7) ? null : DateTime.Parse(r.GetString(7)),
                 RequiereCambioPassword= r.IsDBNull(8) ? false : r.GetInt32(8) == 1,
+                Roles                 = r.IsDBNull(11) ? "" : r.GetString(11),
             };
 
             // Paso 4: Migrar hash legacy SHA-256 a PBKDF2 automáticamente en el login
@@ -3526,7 +3527,7 @@ namespace SistemaGestion
                                         RequiereCambioPassword,IntentosHoy,BloqueadoHasta,
                                         COALESCE(PinBotHash,''),
                                         COALESCE(PinBotIntentos,0),
-                                        PinBotBloqueadoHasta
+                                        PinBotBloqueadoHasta,COALESCE(Roles,'')
                                  FROM Usuarios ORDER BY NombreCompleto";
             using var r = cmd.ExecuteReader();
             while (r.Read())
@@ -3546,6 +3547,7 @@ namespace SistemaGestion
                     PinBotHash            = r.GetString(11),
                     PinBotIntentos        = r.GetInt32(12),
                     PinBotBloqueadoHasta  = r.IsDBNull(13) ? null : DateTime.Parse(r.GetString(13)),
+                    Roles                 = r.IsDBNull(14) ? "" : r.GetString(14),
                 });
             return list;
         }
@@ -3555,14 +3557,15 @@ namespace SistemaGestion
             using var c = Conn();
             var cmd = c.CreateCommand();
             cmd.CommandText = @"INSERT INTO Usuarios
-                (NombreUsuario,NombreCompleto,PasswordHash,Rol,Activo,FechaCreacion,
+                (NombreUsuario,NombreCompleto,PasswordHash,Rol,Roles,Activo,FechaCreacion,
                  RequiereCambioPassword,IntentosHoy,BloqueadoHasta,
                  PinBotHash,PinBotIntentos,PinBotBloqueadoHasta)
-                VALUES ($u,$nc,$ph,$r,$a,$fc,$rcp,0,NULL,$pbh,0,NULL)";
+                VALUES ($u,$nc,$ph,$r,$roles,$a,$fc,$rcp,0,NULL,$pbh,0,NULL)";
             cmd.Parameters.AddWithValue("$u",   u.NombreUsuario);
             cmd.Parameters.AddWithValue("$nc",  u.NombreCompleto);
             cmd.Parameters.AddWithValue("$ph",  u.PasswordHash);
             cmd.Parameters.AddWithValue("$r",   u.Rol);
+            cmd.Parameters.AddWithValue("$roles", u.RolesCSV);
             cmd.Parameters.AddWithValue("$a",   u.Activo ? 1 : 0);
             cmd.Parameters.AddWithValue("$fc",  u.FechaCreacion.ToString("yyyy-MM-dd HH:mm:ss"));
             cmd.Parameters.AddWithValue("$rcp", u.RequiereCambioPassword ? 1 : 0);
@@ -3577,12 +3580,13 @@ namespace SistemaGestion
             using var c = Conn();
             var cmd = c.CreateCommand();
             cmd.CommandText = @"UPDATE Usuarios
-                SET NombreCompleto=$nc,PasswordHash=$ph,Rol=$r,Activo=$a,
+                SET NombreCompleto=$nc,PasswordHash=$ph,Rol=$r,Roles=$roles,Activo=$a,
                     RequiereCambioPassword=$rcp
                 WHERE Id=$id";
             cmd.Parameters.AddWithValue("$nc",  u.NombreCompleto);
             cmd.Parameters.AddWithValue("$ph",  u.PasswordHash);
             cmd.Parameters.AddWithValue("$r",   u.Rol);
+            cmd.Parameters.AddWithValue("$roles", u.RolesCSV);
             cmd.Parameters.AddWithValue("$a",   u.Activo ? 1 : 0);
             cmd.Parameters.AddWithValue("$rcp", u.RequiereCambioPassword ? 1 : 0);
             cmd.Parameters.AddWithValue("$id",  u.Id);
@@ -6003,10 +6007,15 @@ namespace SistemaGestion
         public static int    UsuarioId    { get; set; }
         public static string NombreUsuario { get; set; }
         public static string NombreCompleto{ get; set; }
-        public static string Rol          { get; set; }  // Admin / Ventas / Almacen / Contabilidad
+        public static string Rol          { get; set; }  // rol primario (compat)
+        public static string Roles        { get; set; }  // CSV de TODOS los roles (multi-rol)
 
-        public static bool EsAdmin        => Rol == "Admin";
-        public static bool TienePermiso(string modulo) => PermisosRol.Permite(Rol, modulo);
+        /// <summary>CSV de roles efectivos (Roles; si vacio, Rol).</summary>
+        public static string RolesEfectivos => string.IsNullOrWhiteSpace(Roles) ? (Rol ?? "") : Roles;
+
+        public static bool EsAdmin        => TieneRol("Admin");
+        public static bool TieneRol(string rol) => PermisosRol.ContieneRol(RolesEfectivos, rol);
+        public static bool TienePermiso(string modulo) => PermisosRol.Permite(RolesEfectivos, modulo);
 
         // ── Visibilidad de Notas de Entrega (v22) ───────────────────────────
         // Default false. Sólo Admin puede activarla con UsarMostrarNotasEntrega.
@@ -6046,6 +6055,7 @@ namespace SistemaGestion
             NombreUsuario  = u.NombreUsuario;
             NombreCompleto = u.NombreCompleto;
             Rol            = u.Rol;
+            Roles          = u.RolesCSV;
             _mostrarNE     = false;   // siempre false en cada login
         }
 
@@ -6055,14 +6065,33 @@ namespace SistemaGestion
             NombreUsuario  = null;
             NombreCompleto = null;
             Rol            = null;
+            Roles          = null;
             _mostrarNE     = false;
         }
     }
 
     public static class PermisosRol
     {
-        // Devuelve true si el rol tiene acceso al módulo
-        public static bool Permite(string rol, string modulo)
+        // Permite si CUALQUIERA de los roles del usuario (CSV) da acceso al modulo.
+        public static bool Permite(string rolesCsv, string modulo)
+        {
+            if (string.IsNullOrEmpty(rolesCsv)) return false;
+            foreach (var _p in rolesCsv.Split(','))
+                if (PermiteUno(_p.Trim(), modulo)) return true;
+            return false;
+        }
+
+        /// <summary>True si el CSV de roles contiene el rol indicado.</summary>
+        public static bool ContieneRol(string rolesCsv, string rol)
+        {
+            if (string.IsNullOrEmpty(rolesCsv)) return false;
+            foreach (var _p in rolesCsv.Split(','))
+                if (string.Equals(_p.Trim(), rol, StringComparison.OrdinalIgnoreCase)) return true;
+            return false;
+        }
+
+        // Devuelve true si UN rol tiene acceso al modulo
+        private static bool PermiteUno(string rol, string modulo)
         {
             if (rol == "Admin") return true;   // Admin accede a todo
             return (rol, modulo) switch
@@ -6075,14 +6104,15 @@ namespace SistemaGestion
                 ("Ventas",       "TasaIngreso")      => true,  // ingreso/aceptación rutinaria
                 ("Almacen",      "Inventario")       => true,
                 ("Almacen",      "Kardex")           => true,
-                ("Almacen",      "Compras")          => true,
                 ("Almacen",      "Proveedores")      => true,
+                ("Compras",      "Compras")          => true,
+                ("Compras",      "Proveedores")      => true,
+                ("Compras",      "TasaConsulta")     => true,
                 ("Almacen",      "IngresoProduccion")=> true,
                 ("Almacen",      "Moldes")           => true,
                 ("Almacen",      "TasaConsulta")     => true,
                 ("Contabilidad", "Reportes")         => true,
                 ("Contabilidad", "Facturas")         => true,
-                ("Contabilidad", "Compras")          => true,
                 ("Contabilidad", "Gastos")           => true,
                 ("Contabilidad", "CambioPrecios")    => true,
                 ("Contabilidad", "TasaConsulta")     => true,
@@ -6145,25 +6175,60 @@ namespace SistemaGestion
         /// <summary>True si el usuario tiene un PIN de bot asignado.</summary>
         public bool TienePinBot => !string.IsNullOrEmpty(PinBotHash);
 
-        // ── Helpers de rol ───────────────────────────────────────────────
+        // ── Helpers de rol (MULTI-ROL) ───────────────────────────────────
+        /// <summary>CSV de todos los roles asignados (fuente de verdad). Vacio => usa Rol.</summary>
+        public string Roles { get; set; } = "";
+
+        /// <summary>Lista de roles efectivos (desde Roles; si vacio, desde Rol).</summary>
+        public System.Collections.Generic.List<string> RolesLista
+        {
+            get
+            {
+                var fuente = string.IsNullOrWhiteSpace(Roles) ? (Rol ?? "") : Roles;
+                var res = new System.Collections.Generic.List<string>();
+                foreach (var part in fuente.Split(','))
+                {
+                    var t = part.Trim();
+                    if (t.Length == 0) continue;
+                    bool dup = false;
+                    foreach (var e in res)
+                        if (string.Equals(e, t, StringComparison.OrdinalIgnoreCase)) { dup = true; break; }
+                    if (!dup) res.Add(t);
+                }
+                return res;
+            }
+        }
+
         /// <summary>True si el usuario tiene rol Admin.</summary>
-        public bool EsAdmin => Rol == "Admin";
+        public bool EsAdmin => TieneRol("Admin");
 
-        /// <summary>True si el usuario tiene el rol especificado.</summary>
-        public bool TieneRol(string rol) =>
-            string.Equals(Rol, rol, StringComparison.OrdinalIgnoreCase);
+        /// <summary>True si el usuario tiene el rol especificado (entre todos sus roles).</summary>
+        public bool TieneRol(string rol)
+        {
+            foreach (var r in RolesLista)
+                if (string.Equals(r, rol, StringComparison.OrdinalIgnoreCase)) return true;
+            return false;
+        }
 
-        /// <summary>Descripción legible del rol para mostrar en la UI.</summary>
-        public string RolesDescripcion => Rol ?? "(sin rol)";
+        /// <summary>Descripción legible de los roles para la UI.</summary>
+        public string RolesDescripcion =>
+            RolesLista.Count > 0 ? string.Join(", ", RolesLista) : "(sin rol)";
 
-        /// <summary>
-        /// CSV de roles. Asignar este campo actualiza Rol automáticamente.
-        /// Mantiene compatibilidad con código que usaba multi-rol.
-        /// </summary>
+        /// <summary>CSV de roles. Asignar actualiza Roles (todos) y Rol (primario).</summary>
         public string RolesCSV
         {
-            get => Rol ?? "";
-            set => Rol = string.IsNullOrWhiteSpace(value) ? "" : value.Split(',')[0].Trim();
+            get => string.IsNullOrWhiteSpace(Roles) ? (Rol ?? "") : Roles;
+            set
+            {
+                var lista = new System.Collections.Generic.List<string>();
+                foreach (var part in (value ?? "").Split(','))
+                {
+                    var t = part.Trim();
+                    if (t.Length > 0) lista.Add(t);
+                }
+                Roles = string.Join(",", lista);
+                Rol   = lista.Count > 0 ? lista[0] : "";
+            }
         }
     }
 

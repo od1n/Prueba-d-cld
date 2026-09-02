@@ -264,7 +264,7 @@ namespace SistemaGestion
         private TextBox       txtNombreUsuario, txtNombreCompleto;
         private TextBox       txtPassword, txtConfirmar;
         private CheckBox      chkAdmin;
-        private CheckBox      chkVentas, chkAlmacen, chkContabilidad, chkRedes;
+        private CheckBox      chkVentas, chkAlmacen, chkContabilidad, chkCompras, chkRedes;
         private CheckBox      chkActivo;
         private Label         lblRolesError;
         private Label         lblPinEstado;
@@ -327,15 +327,16 @@ namespace SistemaGestion
 
             // Caja de roles
             var panelRoles = new Panel {
-                Location = new Point(15, y), Size = new Size(430, 160),
+                Location = new Point(15, y), Size = new Size(430, 185),
                 BorderStyle = BorderStyle.FixedSingle,
                 BackColor = Color.FromArgb(245, 250, 245) };
 
             chkAdmin        = Chk("Admin (acceso total — exclusivo)",      new Point(12, 10));
             chkVentas       = Chk("Ventas (Facturas, Clientes, CxC)",      new Point(12, 38));
-            chkAlmacen      = Chk("Almacén (Inventario, Kardex, Moldes, Compras)", new Point(12, 64));
+            chkAlmacen      = Chk("Almacén (Inventario, Kardex, Moldes)",  new Point(12, 64));
             chkContabilidad = Chk("Contabilidad (Reportes, Gastos, IVA)",  new Point(12, 90));
-            chkRedes        = Chk("Redes (solo Estudio de Contenido — exclusivo)", new Point(12, 116));
+            chkCompras      = Chk("Compras (Órdenes de compra, Proveedores)", new Point(12, 116));
+            chkRedes        = Chk("Redes (solo Estudio de Contenido — exclusivo)", new Point(12, 142));
 
             // Admin exclusivo: al marcarlo deshabilita el resto
             chkAdmin.CheckedChanged += (s, e) => {
@@ -343,10 +344,11 @@ namespace SistemaGestion
                 chkVentas.Enabled       = !esAdmin;
                 chkAlmacen.Enabled      = !esAdmin;
                 chkContabilidad.Enabled = !esAdmin;
+                chkCompras.Enabled      = !esAdmin;
                 chkRedes.Enabled        = !esAdmin;
                 if (esAdmin)
                 {
-                    chkVentas.Checked = chkAlmacen.Checked = chkContabilidad.Checked = chkRedes.Checked = false;
+                    chkVentas.Checked = chkAlmacen.Checked = chkContabilidad.Checked = chkCompras.Checked = chkRedes.Checked = false;
                 }
                 ValidarRoles();
             };
@@ -355,6 +357,7 @@ namespace SistemaGestion
             chkVentas.CheckedChanged       += (s, e) => { if(chkVentas.Checked) { chkAdmin.Checked=false; chkRedes.Checked=false; } ValidarRoles(); };
             chkAlmacen.CheckedChanged      += (s, e) => { if(chkAlmacen.Checked) { chkAdmin.Checked=false; chkRedes.Checked=false; } ValidarRoles(); };
             chkContabilidad.CheckedChanged += (s, e) => { if(chkContabilidad.Checked) { chkAdmin.Checked=false; chkRedes.Checked=false; } ValidarRoles(); };
+            chkCompras.CheckedChanged      += (s, e) => { if(chkCompras.Checked) { chkAdmin.Checked=false; chkRedes.Checked=false; } ValidarRoles(); };
 
             // Redes exclusivo: solo acceso al Estudio de Contenido
             chkRedes.CheckedChanged += (s, e) => {
@@ -362,18 +365,19 @@ namespace SistemaGestion
                 chkVentas.Enabled       = !esRedes;
                 chkAlmacen.Enabled      = !esRedes;
                 chkContabilidad.Enabled = !esRedes;
+                chkCompras.Enabled      = !esRedes;
                 if (esRedes)
                 {
                     chkAdmin.Checked = false;
-                    chkVentas.Checked = chkAlmacen.Checked = chkContabilidad.Checked = false;
+                    chkVentas.Checked = chkAlmacen.Checked = chkContabilidad.Checked = chkCompras.Checked = false;
                 }
                 ValidarRoles();
             };
 
             panelRoles.Controls.AddRange(new Control[] {
-                chkAdmin, chkVentas, chkAlmacen, chkContabilidad, chkRedes });
+                chkAdmin, chkVentas, chkAlmacen, chkContabilidad, chkCompras, chkRedes });
             Controls.Add(panelRoles);
-            y += 168;
+            y += 193;
 
             // Error de roles
             lblRolesError = new Label {
@@ -476,6 +480,7 @@ namespace SistemaGestion
                     chkVentas.Checked       = usuarioExistente.TieneRol("Ventas");
                     chkAlmacen.Checked      = usuarioExistente.TieneRol("Almacen");
                     chkContabilidad.Checked = usuarioExistente.TieneRol("Contabilidad");
+                    chkCompras.Checked      = usuarioExistente.TieneRol("Compras");
                     chkRedes.Checked        = usuarioExistente.TieneRol("Redes");
                 }
 
@@ -645,6 +650,7 @@ namespace SistemaGestion
             if (chkVentas.Checked)       r.Add("Ventas");
             if (chkAlmacen.Checked)      r.Add("Almacen");
             if (chkContabilidad.Checked) r.Add("Contabilidad");
+            if (chkCompras.Checked)      r.Add("Compras");
             if (chkRedes.Checked)        r.Add("Redes");
             return r;
         }

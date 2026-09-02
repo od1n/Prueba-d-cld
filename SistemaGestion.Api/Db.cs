@@ -41,7 +41,8 @@ namespace SistemaGestion.Api
                     "ALTER TABLE Clientes ADD COLUMN PinBot TEXT DEFAULT ''",
                     "ALTER TABLE Usuarios ADD COLUMN PinBotHash TEXT DEFAULT ''",
                     "ALTER TABLE Usuarios ADD COLUMN PinBotIntentos INTEGER NOT NULL DEFAULT 0",
-                    "ALTER TABLE Usuarios ADD COLUMN PinBotBloqueadoHasta TEXT"
+                    "ALTER TABLE Usuarios ADD COLUMN PinBotBloqueadoHasta TEXT",
+                    "ALTER TABLE Usuarios ADD COLUMN Roles TEXT DEFAULT ''"
                 };
                 foreach (var sql in fixes)
                 {
@@ -74,6 +75,19 @@ namespace SistemaGestion.Api
                 catch (Exception ex)
                 {
                     Console.WriteLine($"[API] WARN backfill PrecioUnit: {ex.Message}");
+                }
+
+                // Backfill Roles (multi-rol) desde el Rol primario donde este vacio
+                try
+                {
+                    using var cmdBr = c.CreateCommand();
+                    cmdBr.CommandText = "UPDATE Usuarios SET Roles=Rol WHERE Roles IS NULL OR Roles=''";
+                    int rows = cmdBr.ExecuteNonQuery();
+                    if (rows > 0) Console.WriteLine($"[API] Backfill Roles: {rows} filas");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[API] WARN backfill Roles: {ex.Message}");
                 }
             }
             catch (Exception ex)

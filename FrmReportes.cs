@@ -66,7 +66,7 @@ namespace SistemaGestion
             tabs.TabPages.Add(TabMermas());
             tabs.TabPages.Add(TabReorden());
             tabs.TabPages.Add(TabComparacion());
-            if (Sesion.EsAdmin || Sesion.Rol == "Contabilidad")
+            if (Sesion.EsAdmin || Sesion.TieneRol("Contabilidad"))
                 tabs.TabPages.Add(TabISLR());
 
             var footer = new Panel { Dock = DockStyle.Bottom, Height = 40,

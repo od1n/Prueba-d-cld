@@ -26,7 +26,7 @@ namespace SistemaGestion.Api.Endpoints
                     // Verificar bloqueo
                     var cmdB = c.CreateCommand();
                     cmdB.CommandText = @"SELECT Id, NombreUsuario, NombreCompleto, PasswordHash, Rol,
-                        Activo, IntentosHoy, BloqueadoHasta
+                        Activo, IntentosHoy, BloqueadoHasta, COALESCE(Roles,'')
                         FROM Usuarios WHERE NombreUsuario=$u AND Activo=1";
                     cmdB.Parameters.AddWithValue("$u", req.Usuario.Trim().ToLower());
                     using var r = cmdB.ExecuteReader();
@@ -45,6 +45,8 @@ namespace SistemaGestion.Api.Endpoints
                     string nomComp  = Db.S(r, 2);
                     string hash     = Db.S(r, 3);
                     string rol      = Db.S(r, 4);
+                    string rolesCsv = Db.S(r, 8);
+                    if (string.IsNullOrWhiteSpace(rolesCsv)) rolesCsv = rol;
                     int    intentos = Db.I(r, 6);
                     string bloqStr  = Db.S(r, 7);
                     r.Close();
@@ -107,7 +109,7 @@ namespace SistemaGestion.Api.Endpoints
 
                     RegistrarAuditoria(c, "LOGIN_MOVIL", "Usuarios", $"Login portal móvil: {nombre} ({rol})");
 
-                    var (token, jti) = TokenService.GenerarToken(id, nombre, nomComp, rol);
+                    var (token, jti) = TokenService.GenerarToken(id, nombre, nomComp, rolesCsv);
                     var ip = ctx.Connection.RemoteIpAddress?.ToString();
                     SesionesActivas.Registrar(id, nombre, jti, ip, DateTime.UtcNow.AddHours(8));
 
