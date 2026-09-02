@@ -17,7 +17,7 @@ echo.
 
 :: ── 1. Digitalizador (Python, puerto 8080) ──────────────────────
 echo [1/2] Iniciando Digitalizador...
-start "Digitalizador" cmd /c "cd /d C:\SistemaGestion\digitalizador && set SG_INTERNAL_TOKEN=%SG_INTERNAL_TOKEN% && python main.py"
+start "Digitalizador" cmd /c "cd /d C:\SistemaGestion\digitalizador && python main.py"
 timeout /t 3 /nobreak >nul
 
 :: ── 2. API (.NET, puertos 5050/5443) ────────────────────────────
