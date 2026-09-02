@@ -11,7 +11,7 @@ namespace SistemaGestion.Api.Endpoints
                 cmd.CommandText = @"SELECT Codigo,Descripcion,Departamento,Unidad,
                     Existencia,ExistenMin,ExistenMax,
                     Precio,CostoActual,UltimaActualz
-                    FROM Inventario ORDER BY Descripcion";
+                    FROM Inventario ORDER BY Codigo";
                 var lista = new List<object>();
                 using var r = cmd.ExecuteReader();
                 while (r.Read())

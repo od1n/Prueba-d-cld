@@ -268,3 +268,116 @@ document.addEventListener('keydown', e => {
         }
     } catch (e) {}
 })();
+
+// ════════════════════════════════════════════════════════════════════════
+//  Búsqueda "type-ahead" en dropdowns largos (productos, clientes, moldes,
+//  insumos, etc.): al escribir, filtra las opciones para no hacer scroll.
+//  Envuelve el <select> nativo (que queda oculto como fuente de verdad, así
+//  no se rompe el código que lee .value ni los listeners 'change').
+//  Se aplica solo a los <select> con más de UMBRAL opciones y también a los
+//  que se renderizan dinámicamente. Para excluir uno: <select data-nosearch>.
+// ════════════════════════════════════════════════════════════════════════
+(function () {
+  const UMBRAL = 8;
+
+  function inyectarEstilos() {
+    if (document.getElementById('sg-search-style')) return;
+    const st = document.createElement('style');
+    st.id = 'sg-search-style';
+    st.textContent =
+      '.sg-search{position:relative;display:inline-block}' +
+      '.sg-search>input.sg-search-input{width:100%;box-sizing:border-box;padding:6px 8px;' +
+      'background:var(--fondo-inp,#fff);color:var(--texto,#111);border:1px solid var(--borde,#ccc);' +
+      'border-radius:6px;font:inherit}' +
+      '.sg-search-panel{position:absolute;z-index:9999;left:0;right:0;top:100%;max-height:260px;' +
+      'overflow-y:auto;margin-top:2px;background:var(--fondo-inp,#fff);border:1px solid var(--borde,#ccc);' +
+      'border-radius:6px;box-shadow:0 6px 20px rgba(0,0,0,.18)}' +
+      '.sg-search-panel .it{padding:6px 9px;cursor:pointer;font-size:9.5pt;white-space:nowrap;' +
+      'overflow:hidden;text-overflow:ellipsis}' +
+      '.sg-search-panel .it:hover,.sg-search-panel .it.act{background:var(--cyan-dim,rgba(0,150,200,.18))}' +
+      '.sg-search-panel .vacio{padding:8px 9px;color:var(--texto-dim,#888);font-size:9pt}';
+    document.head.appendChild(st);
+  }
+
+  const textoDe = opt => (opt.textContent || '').trim();
+
+  function enhanceSelect(sel) {
+    if (!sel || sel.multiple || sel.dataset.sgsearch === '1' || sel.hasAttribute('data-nosearch')) return;
+    if (sel.options.length <= UMBRAL) return;
+    sel.dataset.sgsearch = '1';
+
+    const wrap = document.createElement('span');
+    wrap.className = 'sg-search';
+    if (sel.offsetWidth) wrap.style.width = sel.offsetWidth + 'px';
+
+    const input = document.createElement('input');
+    input.type = 'text'; input.className = 'sg-search-input';
+    input.autocomplete = 'off'; input.spellcheck = false; input.placeholder = 'Buscar…';
+
+    const panel = document.createElement('div');
+    panel.className = 'sg-search-panel'; panel.hidden = true;
+
+    sel.parentNode.insertBefore(wrap, sel);
+    wrap.appendChild(input); wrap.appendChild(panel); wrap.appendChild(sel);
+    sel.style.display = 'none';
+
+    const opcActual = () => sel.options[sel.selectedIndex] || null;
+    const sincronizar = () => { const o = opcActual(); input.value = o ? textoDe(o) : ''; };
+    sincronizar();
+
+    let items = [], idx = -1;
+    function construir(filtro) {
+      const f = (filtro || '').toLowerCase();
+      panel.innerHTML = ''; idx = -1; items = [];
+      for (const opt of sel.options) {
+        const t = textoDe(opt);
+        if (f && !t.toLowerCase().includes(f)) continue;
+        const div = document.createElement('div');
+        div.className = 'it'; div.textContent = t || '(vacío)';
+        div.addEventListener('mousedown', ev => { ev.preventDefault(); elegir(opt); });
+        panel.appendChild(div); items.push(div);
+      }
+      if (!items.length) {
+        const v = document.createElement('div'); v.className = 'vacio';
+        v.textContent = 'Sin coincidencias'; panel.appendChild(v);
+      }
+    }
+    const abrir  = () => { construir(''); panel.hidden = false; };
+    const cerrar = () => { panel.hidden = true; idx = -1; };
+    function elegir(opt) {
+      sel.value = opt.value;
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      input.value = textoDe(opt); cerrar();
+    }
+
+    input.addEventListener('focus', () => { input.select(); abrir(); });
+    input.addEventListener('input', () => { construir(input.value); panel.hidden = false; });
+    input.addEventListener('blur',  () => { setTimeout(() => { cerrar(); sincronizar(); }, 150); });
+    input.addEventListener('keydown', e => {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (panel.hidden) { abrir(); return; }
+        idx += (e.key === 'ArrowDown' ? 1 : -1);
+        if (idx < 0) idx = items.length - 1;
+        if (idx >= items.length) idx = 0;
+        items.forEach((el, i) => el.classList.toggle('act', i === idx));
+        if (items[idx]) items[idx].scrollIntoView({ block: 'nearest' });
+      } else if (e.key === 'Enter') {
+        if (!panel.hidden && idx >= 0 && items[idx]) { e.preventDefault(); items[idx].dispatchEvent(new MouseEvent('mousedown')); }
+      } else if (e.key === 'Escape') { cerrar(); sincronizar(); }
+    });
+    sel.addEventListener('change', sincronizar);
+  }
+
+  function enhanceSelects(root) {
+    inyectarEstilos();
+    (root || document).querySelectorAll('select:not([data-sgsearch])').forEach(enhanceSelect);
+  }
+  window.enhanceSelects = enhanceSelects;
+
+  let t = null;
+  const obs = new MutationObserver(() => { clearTimeout(t); t = setTimeout(() => enhanceSelects(document), 120); });
+  function init() { enhanceSelects(document); obs.observe(document.body, { childList: true, subtree: true }); }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else init();
+})();

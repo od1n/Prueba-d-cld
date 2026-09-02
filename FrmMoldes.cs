@@ -241,7 +241,8 @@ namespace SistemaGestion
                 Font = new Font("Segoe UI", 10f, FontStyle.Bold),
                 Location = new Point(10, 12) });
 
-            var inv = DatabaseService.ObtenerInventario();
+            var inv = DatabaseService.ObtenerInventario()
+                .OrderBy(i => i.Codigo, System.StringComparer.Ordinal).ToList();
             int y   = 60;
 
             // Helper local
@@ -254,6 +255,7 @@ namespace SistemaGestion
                 cmb.Items.Add("-- No aplica --");
                 inv.ForEach(i => cmb.Items.Add(i.Codigo + " — " + i.Descripcion));
                 cmb.SelectedIndex = 0;
+                UiSearch.Enable(cmb);
                 Controls.Add(cmb);
                 return cmb;
             }
@@ -325,9 +327,7 @@ namespace SistemaGestion
                 { cmb.SelectedIndex = i; return; }
         }
 
-        private string ObtenerCod(ComboBox cmb) =>
-            cmb.SelectedIndex <= 0 ? null
-            : cmb.SelectedItem.ToString().Split('—')[0].Trim();
+        private string ObtenerCod(ComboBox cmb) => UiSearch.CodigoDe(cmb);
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -368,9 +368,12 @@ namespace SistemaGestion
                 Size = new Size(285, 24), DropDownStyle = ComboBoxStyle.DropDownList };
             cmbProducto.Items.Add("-- Sin producto --");
             DatabaseService.ObtenerInventario()
+                .OrderBy(i => i.Codigo, System.StringComparer.Ordinal).ToList()
                 .ForEach(i => cmbProducto.Items.Add(i.Codigo + " — " + i.Descripcion));
             cmbProducto.SelectedIndex = 0;
+            UiSearch.Enable(cmbProducto);
             cmbProducto.SelectedIndexChanged += ActualizarSugerencia;
+            cmbProducto.TextChanged          += ActualizarSugerencia;
             Controls.Add(cmbProducto); y += 33;
 
             L("Descripcion:",   y); txtDesc     = T(y); y += 33;
@@ -414,8 +417,8 @@ namespace SistemaGestion
         private void ActualizarSugerencia(object sender, EventArgs e)
         {
             if (_original != null) { lblSugerencia.Text = ""; return; }
-            if (cmbProducto.SelectedIndex <= 0) { lblSugerencia.Text = ""; return; }
-            string codProd = cmbProducto.SelectedItem.ToString().Split('—')[0].Trim();
+            string codProd = UiSearch.CodigoDe(cmbProducto);
+            if (codProd == null) { lblSugerencia.Text = ""; return; }
             int count = DatabaseService.ObtenerMoldes()
                 .Count(m => m.CodigoProducto == codProd) + 1;
             string sug = "M" + codProd + count.ToString("D3");
@@ -428,8 +431,7 @@ namespace SistemaGestion
             if (string.IsNullOrWhiteSpace(txtCod.Text))
             { Warn("El codigo del molde es obligatorio."); return; }
 
-            string codProd = cmbProducto.SelectedIndex <= 0 ? ""
-                : cmbProducto.SelectedItem.ToString().Split('—')[0].Trim();
+            string codProd = UiSearch.CodigoDe(cmbProducto) ?? "";
 
             Resultado = _original ?? new TbMolde();
             Resultado.CodigoMold     = txtCod.Text.Trim();
