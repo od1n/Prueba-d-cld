@@ -1,0 +1,1111 @@
+=== DB.cs ===
+            CREATE TABLE IF NOT EXISTS Inventario (
+                Codigo        TEXT PRIMARY KEY,
+                Descripcion   TEXT,
+                Departamento  TEXT,
+                Unidad        TEXT,
+                Enser         TEXT,
+                CostoActual   REAL DEFAULT 0,
+                CostoAnt      REAL DEFAULT 0,
+                CostoPro      REAL DEFAULT 0,
+                Precio        REAL DEFAULT 0,
+                Existencia    REAL DEFAULT 0,
+                ExistenMin    REAL DEFAULT 0,
+                ExistenMax    REAL DEFAULT 0,
+                Proveedores   TEXT,
+                UltimaActualz TEXT,
+                CodProveedor  TEXT
+            );
+---
+            CREATE TABLE IF NOT EXISTS Clientes (
+                Codigo        TEXT PRIMARY KEY,
+                Descripcion   TEXT,
+                Direccion     TEXT,
+                Ciudad        TEXT,
+                Estado        TEXT,
+                CiRif         TEXT,
+                Nit           TEXT,
+                Fax           TEXT,
+                Telefono      TEXT,
+                Telefono2     TEXT,
+                Credito       REAL DEFAULT 0,
+                TipoCliente   TEXT,
+                Fecha         TEXT,
+                Observaciones TEXT,
+                Descuento     REAL DEFAULT 0,
+                AFavor        REAL DEFAULT 0
+            );
+---
+            CREATE TABLE IF NOT EXISTS Proveedores (
+                Codigo        TEXT PRIMARY KEY,
+                Descripcion   TEXT,
+                Representante TEXT,
+                Direccion     TEXT,
+                Telefono1     TEXT,
+                Telefono2     TEXT,
+                Fax1          TEXT,
+                Fax2          TEXT,
+                DiasCredito   INTEGER DEFAULT 0,
+                PctRetencion  REAL DEFAULT 0,
+                FechaInicio   TEXT,
+                CiRif         TEXT,
+                Nit           TEXT,
+                Tipo          TEXT,
+                Observaciones TEXT
+            );
+---
+            CREATE TABLE IF NOT EXISTS Facturas (
+                NumeroF       TEXT PRIMARY KEY,
+                Fecha         TEXT NOT NULL,
+                Codigo        TEXT,
+                Descuento     REAL DEFAULT 0,
+                Transporte    TEXT,
+                Observaciones TEXT,
+                FormaDePago   TEXT,
+                Abono         REAL DEFAULT 0,
+                IvaF          REAL DEFAULT 0,
+                DiasCreditoF  INTEGER DEFAULT 0,
+                TotalF        REAL DEFAULT 0,
+                FOREIGN KEY(Codigo) REFERENCES Clientes(Codigo)
+            );
+---
+            CREATE TABLE IF NOT EXISTS DetallesFactura (
+                IdFactura  INTEGER,
+                Codigo     TEXT,
+                Cantidad   REAL DEFAULT 0,
+                PRIMARY KEY(IdFactura, Codigo),
+                FOREIGN KEY(Codigo) REFERENCES Inventario(Codigo)
+            );
+---
+            CREATE TABLE IF NOT EXISTS Compras (
+                CompraN       TEXT PRIMARY KEY,
+                FechaC        TEXT NOT NULL,
+                CodigoP       TEXT,
+                DescuentoC    REAL DEFAULT 0,
+                FormaDePago   TEXT,
+                AbonoC        REAL DEFAULT 0,
+                IvaC          REAL DEFAULT 0,
+                DiasDeCred    INTEGER DEFAULT 0,
+                TotalC        REAL DEFAULT 0,
+                Transporte    TEXT,
+                Observaciones TEXT,
+                FOREIGN KEY(CodigoP) REFERENCES Proveedores(Codigo)
+            );
+---
+            CREATE TABLE IF NOT EXISTS DetallesCompra (
+                IdCompra  INTEGER,
+                CodigoI   TEXT,
+                Cantidad  REAL DEFAULT 0,
+                PrecioC   REAL DEFAULT 0,
+                PRIMARY KEY(IdCompra, CodigoI),
+                FOREIGN KEY(CodigoI) REFERENCES Inventario(Codigo)
+            );
+---
+            CREATE TABLE IF NOT EXISTS Produccion (
+                Codigo   TEXT,
+                Fecha    TEXT,
+                Cantidad REAL DEFAULT 0,
+                PRIMARY KEY(Codigo, Fecha),
+                FOREIGN KEY(Codigo) REFERENCES Inventario(Codigo)
+            );
+---
+            CREATE TABLE IF NOT EXISTS Abonos (
+                NumAbono  INTEGER PRIMARY KEY AUTOINCREMENT,
+                NumeroF   TEXT,
+                Fecha     TEXT NOT NULL,
+                Monto     REAL DEFAULT 0,
+                Cliente   TEXT,
+                FOREIGN KEY(NumeroF) REFERENCES Facturas(NumeroF)
+            );
+---
+            CREATE TABLE IF NOT EXISTS TbMoldes (
+                CodigoMold     TEXT PRIMARY KEY,
+                Descripcion    TEXT,
+                Fecha          TEXT,
+                FechaLastMant  TEXT,
+                DescMant       TEXT,
+                ModeloQfabrica TEXT,
+                Observaciones  TEXT,
+                CantMatXunid   REAL DEFAULT 0
+            );
+---
+            CREATE TABLE IF NOT EXISTS LineaProducDia (
+                FechaLinea TEXT,
+                Molde      TEXT,
+                Puesto     TEXT,
+                PRIMARY KEY(FechaLinea, Molde, Puesto),
+                FOREIGN KEY(Molde) REFERENCES TbMoldes(CodigoMold)
+            );
+---
+            CREATE TABLE IF NOT EXISTS ProduccionDelDiaEnLinea (
+                FechaLinea        TEXT,
+                CantidadProducida REAL DEFAULT 0,
+                SacosConsumidos   REAL DEFAULT 0,
+                FustesMalos       REAL DEFAULT 0,
+                PRIMARY KEY(FechaLinea)
+            );
+---
+            CREATE TABLE IF NOT EXISTS MovimientosInventario (
+                IdMovimiento   INTEGER PRIMARY KEY AUTOINCREMENT,
+                FechaHora      TEXT    NOT NULL,
+                CodigoProducto TEXT    NOT NULL,
+                TipoMovimiento TEXT    NOT NULL,
+                Concepto       TEXT,
+                Cantidad       REAL    NOT NULL DEFAULT 0,
+                SaldoAnterior  REAL    NOT NULL DEFAULT 0,
+                NuevoSaldo     REAL    NOT NULL DEFAULT 0,
+                Referencia     TEXT,
+                Usuario        TEXT,
+                FOREIGN KEY(CodigoProducto) REFERENCES Inventario(Codigo)
+            );
+---
+                        CREATE TABLE IF NOT EXISTS IngresoProduccion (
+                Id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                Producto    TEXT NOT NULL,
+                Lote        TEXT,
+                Cantidad    INTEGER DEFAULT 0,
+                Unidad      TEXT,
+                Fecha       TEXT NOT NULL,
+                Responsable TEXT,
+                Observacion TEXT,
+                Estado      TEXT NOT NULL
+            );
+---
+            CREATE TABLE IF NOT EXISTS CuentasCobrar (
+                Id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                Cliente      TEXT NOT NULL,
+                Concepto     TEXT NOT NULL,
+                Monto        REAL NOT NULL,
+                Pagado       REAL DEFAULT 0,
+                FechaEmision TEXT NOT NULL,
+                FechaVence   TEXT NOT NULL,
+                Estado       TEXT NOT NULL
+            );
+---
+            CREATE TABLE IF NOT EXISTS ProductosPrecios (
+                Id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                Codigo              TEXT NOT NULL,
+                Nombre              TEXT NOT NULL,
+                Categoria           TEXT,
+                CostoActual         REAL DEFAULT 0,
+                PrecioActual        REAL DEFAULT 0,
+                CostoNuevo          REAL DEFAULT 0,
+                PrecioNuevo         REAL DEFAULT 0,
+                UltimaActualizacion TEXT NOT NULL
+            );
+---
+            CREATE TABLE IF NOT EXISTS Usuarios (
+                Id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                NombreUsuario  TEXT NOT NULL UNIQUE,
+                NombreCompleto TEXT NOT NULL,
+                PasswordHash   TEXT NOT NULL,
+                Rol            TEXT NOT NULL DEFAULT 'Ventas',
+                Activo         INTEGER NOT NULL DEFAULT 1,
+                FechaCreacion  TEXT NOT NULL,
+                UltimoAcceso   TEXT
+            );
+---
+            CREATE TABLE IF NOT EXISTS Empleados (
+                Id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                Cedula           TEXT    NOT NULL UNIQUE,
+                Nombre           TEXT    NOT NULL,
+                Apellido         TEXT    NOT NULL,
+                Cargo            TEXT,
+                TipoEmpleado     TEXT    NOT NULL DEFAULT 'Fijo',
+                FechaIngreso     TEXT    NOT NULL,
+                Activo           INTEGER NOT NULL DEFAULT 1,
+                Telefono         TEXT,
+                Email            TEXT,
+                SueldoDiarioUSD  REAL    NOT NULL DEFAULT 0,
+                TarifaPiezaUSD   REAL    NOT NULL DEFAULT 0,
+                TarifaVentaUSD   REAL    NOT NULL DEFAULT 0,
+                SalarioNormalUSD REAL    NOT NULL DEFAULT 0
+            );
+---
+            CREATE TABLE IF NOT EXISTS PeriodosNomina (
+                Id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                FechaDesde       TEXT    NOT NULL,
+                FechaHasta       TEXT    NOT NULL,
+                TasaBCV          REAL    NOT NULL DEFAULT 1,
+                Estado           TEXT    NOT NULL DEFAULT 'Abierto',
+                Observaciones    TEXT
+            );
+---
+            CREATE TABLE IF NOT EXISTS DetallesNomina (
+                Id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                IdPeriodo        INTEGER NOT NULL,
+                IdEmpleado       INTEGER NOT NULL,
+                NombreEmpleado   TEXT,
+                TipoEmpleado     TEXT,
+                DiasTrabajados   REAL    DEFAULT 0,
+                DiasInasistencia REAL    DEFAULT 0,
+                PiezasProducidas REAL    DEFAULT 0,
+                VentasCerradas   REAL    DEFAULT 0,
+                SueldoDiarioUSD  REAL    DEFAULT 0,
+                DevengadoSueldo  REAL    DEFAULT 0,
+                DevengadoPiezas  REAL    DEFAULT 0,
+                DevengadoVentas  REAL    DEFAULT 0,
+                OtrosIngresos    REAL    DEFAULT 0,
+                DeduccionIVSS    REAL    DEFAULT 0,
+                DeduccionRPVH    REAL    DEFAULT 0,
+                DescuentoFaltas  REAL    DEFAULT 0,
+                CuotaPrestamo    REAL    DEFAULT 0,
+                OtrasDeduccion   REAL    DEFAULT 0,
+                TasaBCV          REAL    DEFAULT 1,
+                Observaciones    TEXT,
+                FOREIGN KEY(IdPeriodo)  REFERENCES PeriodosNomina(Id),
+                FOREIGN KEY(IdEmpleado) REFERENCES Empleados(Id)
+            );
+---
+            CREATE TABLE IF NOT EXISTS PrestamosEmpleado (
+                Id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                IdEmpleado       INTEGER NOT NULL,
+                NombreEmpleado   TEXT,
+                FechaOtorgado    TEXT    NOT NULL,
+                MontoTotalUSD    REAL    NOT NULL DEFAULT 0,
+                CuotaSemanalUSD  REAL    NOT NULL DEFAULT 0,
+                SaldoPendiente   REAL    NOT NULL DEFAULT 0,
+                Estado           TEXT    NOT NULL DEFAULT 'Activo',
+                Descripcion      TEXT,
+                FOREIGN KEY(IdEmpleado) REFERENCES Empleados(Id)
+            );
+---
+            CREATE TABLE IF NOT EXISTS BeneficiosAnuales (
+                Id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                IdEmpleado       INTEGER NOT NULL,
+                NombreEmpleado   TEXT,
+                Anio             INTEGER NOT NULL,
+                TipoBeneficio    TEXT    NOT NULL,
+                DiasCorresponden REAL    DEFAULT 0,
+                SalarioDiarioUSD REAL    DEFAULT 0,
+                MontoUSD         REAL    DEFAULT 0,
+                MontoGerenciaUSD REAL    DEFAULT 0,
+                TasaBCV          REAL    DEFAULT 1,
+                FechaPago        TEXT,
+                Estado           TEXT    NOT NULL DEFAULT 'Pendiente',
+                Observaciones    TEXT,
+                FOREIGN KEY(IdEmpleado) REFERENCES Empleados(Id)
+            );
+---
+            CREATE TABLE IF NOT EXISTS AportesPatronales (
+                Id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                IdPeriodo       INTEGER NOT NULL,
+                IdEmpleado      INTEGER NOT NULL,
+                NombreEmpleado  TEXT,
+                SalarioNormalBs REAL    DEFAULT 0,
+                TasaBCV         REAL    DEFAULT 1,
+                PorcentajeIVSS  REAL    DEFAULT 9.0,
+                IVSSPatronBs    REAL    DEFAULT 0,
+                RPVHPatronBs    REAL    DEFAULT 0,
+                INCESBs         REAL    DEFAULT 0,
+                DiasLaborales   REAL    DEFAULT 0,
+                ValorUTBs       REAL    DEFAULT 0,
+                CestaBs         REAL    DEFAULT 0,
+                FOREIGN KEY(IdPeriodo)  REFERENCES PeriodosNomina(Id),
+                FOREIGN KEY(IdEmpleado) REFERENCES Empleados(Id)
+            );
+---
+            CREATE TABLE IF NOT EXISTS PreferenciasUsuario (
+                NombreUsuario    TEXT PRIMARY KEY,
+                Tema             TEXT DEFAULT 'Claro',
+                ColorAcento      TEXT DEFAULT 'Azul',
+                MostrarKpis      INTEGER DEFAULT 1,
+                SonidoAlertas    INTEGER DEFAULT 0,
+                FilasPorPagina   INTEGER DEFAULT 50,
+                ConfirmarEliminar INTEGER DEFAULT 1,
+                AbrirUltimoModulo INTEGER DEFAULT 0,
+                NombreCompleto   TEXT DEFAULT '',
+                Email            TEXT DEFAULT '',
+                Telefono         TEXT DEFAULT ''
+            );
+---
+            CREATE TABLE IF NOT EXISTS LogAuditoria (
+                Id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                FechaHora TEXT    NOT NULL,
+                Usuario   TEXT    NOT NULL,
+                Accion    TEXT    NOT NULL,
+                Tabla     TEXT,
+                Detalle   TEXT
+            );
+---
+            CREATE TABLE IF NOT EXISTS RegistrosMantenimiento (
+                Id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                CodigoMolde    TEXT    NOT NULL,
+                FechaRealizada TEXT    NOT NULL,
+                TipoMant       TEXT    NOT NULL DEFAULT 'Preventivo',
+                Tecnico        TEXT,
+                Descripcion    TEXT,
+                CostoMant      REAL    DEFAULT 0,
+                DuracionHoras  INTEGER DEFAULT 0,
+                Resultado      TEXT    DEFAULT 'Completado',
+                Observaciones  TEXT,
+                ProximoMant    TEXT,
+                FOREIGN KEY(CodigoMolde) REFERENCES TbMoldes(CodigoMold)
+            );
+---
+            CREATE TABLE IF NOT EXISTS ProgramasMantenimiento (
+                Id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                CodigoMolde    TEXT    NOT NULL UNIQUE,
+                DescMolde      TEXT,
+                TipoMant       TEXT    NOT NULL DEFAULT 'Preventivo',
+                FrecuenciaDias INTEGER NOT NULL DEFAULT 90,
+                UltimoMant     TEXT    NOT NULL,
+                Activo         INTEGER NOT NULL DEFAULT 1,
+                FOREIGN KEY(CodigoMolde) REFERENCES TbMoldes(CodigoMold)
+            );
+---
+            CREATE TABLE IF NOT EXISTS InspeccionesCalidad (
+                Id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                IdIngreso         INTEGER NOT NULL,
+                Lote              TEXT,
+                ProductoCod       TEXT,
+                FechaInspeccion   TEXT    NOT NULL,
+                Inspector         TEXT,
+                CantidadTotal     REAL    DEFAULT 0,
+                CantidadAprobada  REAL    DEFAULT 0,
+                CantidadRechazada REAL    DEFAULT 0,
+                CantidadRetrabajo REAL    DEFAULT 0,
+                PuntajeDimensiones INTEGER DEFAULT 3,
+                PuntajeApariencia  INTEGER DEFAULT 3,
+                PuntajeFuncional   INTEGER DEFAULT 3,
+                PuntajeEtiquetado  INTEGER DEFAULT 3,
+                Resultado         TEXT    DEFAULT 'Aprobado',
+                Observaciones     TEXT,
+                AccionCorrectiva  TEXT,
+                FOREIGN KEY(IdIngreso) REFERENCES IngresoProduccion(Id)
+            );
+---
+            CREATE TABLE IF NOT EXISTS DefectosCalidad (
+                IdInspeccion INTEGER NOT NULL,
+                TipoDefecto  TEXT    NOT NULL,
+                Cantidad     INTEGER DEFAULT 0,
+                Descripcion  TEXT,
+                Severidad    TEXT    DEFAULT 'Menor',
+                PRIMARY KEY(IdInspeccion, TipoDefecto),
+                FOREIGN KEY(IdInspeccion) REFERENCES InspeccionesCalidad(Id)
+            );
+---
+            CREATE TABLE IF NOT EXISTS OrdenesProduccion (
+                Id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                NumOrden      TEXT    NOT NULL UNIQUE,
+                ProductoCod   TEXT    NOT NULL,
+                ProductoDesc  TEXT,
+                CantidadPlan  REAL    NOT NULL DEFAULT 0,
+                CantidadReal  REAL    NOT NULL DEFAULT 0,
+                FechaInicio   TEXT    NOT NULL,
+                FechaFin      TEXT    NOT NULL,
+                Estado        TEXT    NOT NULL DEFAULT 'Borrador',
+                Responsable   TEXT,
+                Observaciones TEXT,
+                FechaCreacion TEXT    NOT NULL,
+                FOREIGN KEY(ProductoCod) REFERENCES Inventario(Codigo)
+            );
+---
+            CREATE TABLE IF NOT EXISTS LineasOrden (
+                IdOrden      INTEGER NOT NULL,
+                MateriaCod   TEXT    NOT NULL,
+                MateriaDesc  TEXT,
+                CantidadReq  REAL    NOT NULL DEFAULT 0,
+                CantidadTot  REAL    NOT NULL DEFAULT 0,
+                PRIMARY KEY(IdOrden, MateriaCod),
+                FOREIGN KEY(IdOrden)    REFERENCES OrdenesProduccion(Id),
+                FOREIGN KEY(MateriaCod) REFERENCES Inventario(Codigo)
+            );
+---
+            CREATE TABLE IF NOT EXISTS Gastos (
+                Id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                Categoria   TEXT NOT NULL,
+                Descripcion TEXT NOT NULL,
+                Monto       REAL NOT NULL,
+                Fecha       TEXT NOT NULL,
+                Proveedor   TEXT,
+                Estado      TEXT NOT NULL
+            );
+---
+                CREATE TABLE IF NOT EXISTS TasaCambio (
+                    Id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    Fecha        TEXT    NOT NULL UNIQUE,
+                    TasaBCV      REAL    NOT NULL DEFAULT 0,
+                    TasaParalelo REAL    NOT NULL DEFAULT 0,
+                    Usuario      TEXT
+                );";
+---
+                        CREATE TABLE IF NOT EXISTS InspeccionesCalidad (
+                            Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            IdIngreso INTEGER NOT NULL,
+                            Lote TEXT, ProductoCod TEXT,
+                            FechaInspeccion TEXT NOT NULL,
+                            Inspector TEXT,
+                            CantidadTotal REAL DEFAULT 0, CantidadAprobada REAL DEFAULT 0,
+                            CantidadRechazada REAL DEFAULT 0, CantidadRetrabajo REAL DEFAULT 0,
+                            PuntajeDimensiones INTEGER DEFAULT 3, PuntajeApariencia INTEGER DEFAULT 3,
+                            PuntajeFuncional INTEGER DEFAULT 3, PuntajeEtiquetado INTEGER DEFAULT 3,
+                            Resultado TEXT DEFAULT 'Aprobado',
+                            Observaciones TEXT, AccionCorrectiva TEXT
+                        );
+---
+                        CREATE TABLE IF NOT EXISTS DefectosCalidad (
+                            IdInspeccion INTEGER NOT NULL, TipoDefecto TEXT NOT NULL,
+                            Cantidad INTEGER DEFAULT 0, Descripcion TEXT,
+                            Severidad TEXT DEFAULT 'Menor',
+                            PRIMARY KEY(IdInspeccion, TipoDefecto)
+                        )");
+---
+                        CREATE TABLE IF NOT EXISTS RegistrosMantenimiento (
+                            Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            CodigoMolde TEXT NOT NULL,
+                            FechaRealizada TEXT NOT NULL,
+                            TipoMant TEXT NOT NULL DEFAULT 'Preventivo',
+                            Tecnico TEXT, Descripcion TEXT,
+                            CostoMant REAL DEFAULT 0, DuracionHoras INTEGER DEFAULT 0,
+                            Resultado TEXT DEFAULT 'Completado',
+                            Observaciones TEXT, ProximoMant TEXT
+                        );
+---
+                        CREATE TABLE IF NOT EXISTS ProgramasMantenimiento (
+                            Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            CodigoMolde TEXT NOT NULL UNIQUE,
+                            DescMolde TEXT, TipoMant TEXT NOT NULL DEFAULT 'Preventivo',
+                            FrecuenciaDias INTEGER NOT NULL DEFAULT 90,
+                            UltimoMant TEXT NOT NULL, Activo INTEGER NOT NULL DEFAULT 1
+                        )");
+---
+                        CREATE TABLE IF NOT EXISTS Empleados (
+                            Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            Cedula TEXT NOT NULL UNIQUE, Nombre TEXT NOT NULL,
+                            Apellido TEXT NOT NULL, Cargo TEXT,
+                            TipoEmpleado TEXT NOT NULL DEFAULT 'Fijo',
+                            FechaIngreso TEXT NOT NULL, Activo INTEGER NOT NULL DEFAULT 1,
+                            Telefono TEXT, Email TEXT,
+                            SueldoDiarioUSD REAL NOT NULL DEFAULT 0,
+                            TarifaPiezaUSD REAL NOT NULL DEFAULT 0,
+                            TarifaVentaUSD REAL NOT NULL DEFAULT 0,
+                            SalarioNormalUSD REAL NOT NULL DEFAULT 0
+                        );
+---
+                        CREATE TABLE IF NOT EXISTS PeriodosNomina (
+                            Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            FechaDesde TEXT NOT NULL, FechaHasta TEXT NOT NULL,
+                            TasaBCV REAL NOT NULL DEFAULT 1,
+                            Estado TEXT NOT NULL DEFAULT 'Abierto', Observaciones TEXT
+                        );
+---
+                        CREATE TABLE IF NOT EXISTS DetallesNomina (
+                            Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            IdPeriodo INTEGER NOT NULL, IdEmpleado INTEGER NOT NULL,
+                            NombreEmpleado TEXT, TipoEmpleado TEXT,
+                            DiasTrabajados REAL DEFAULT 0, DiasInasistencia REAL DEFAULT 0,
+                            PiezasProducidas REAL DEFAULT 0, VentasCerradas REAL DEFAULT 0,
+                            SueldoDiarioUSD REAL DEFAULT 0,
+                            DevengadoSueldo REAL DEFAULT 0, DevengadoPiezas REAL DEFAULT 0,
+                            DevengadoVentas REAL DEFAULT 0, OtrosIngresos REAL DEFAULT 0,
+                            DeduccionIVSS REAL DEFAULT 0, DeduccionRPVH REAL DEFAULT 0,
+                            DescuentoFaltas REAL DEFAULT 0, CuotaPrestamo REAL DEFAULT 0,
+                            OtrasDeduccion REAL DEFAULT 0,
+                            TasaBCV REAL DEFAULT 1, Observaciones TEXT
+                        );
+---
+                        CREATE TABLE IF NOT EXISTS PrestamosEmpleado (
+                            Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            IdEmpleado INTEGER NOT NULL, NombreEmpleado TEXT,
+                            FechaOtorgado TEXT NOT NULL,
+                            MontoTotalUSD REAL NOT NULL DEFAULT 0,
+                            CuotaSemanalUSD REAL NOT NULL DEFAULT 0,
+                            SaldoPendiente REAL NOT NULL DEFAULT 0,
+                            Estado TEXT NOT NULL DEFAULT 'Activo', Descripcion TEXT
+                        );
+---
+                        CREATE TABLE IF NOT EXISTS BeneficiosAnuales (
+                            Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            IdEmpleado INTEGER NOT NULL, NombreEmpleado TEXT,
+                            Anio INTEGER NOT NULL, TipoBeneficio TEXT NOT NULL,
+                            DiasCorresponden REAL DEFAULT 0, SalarioDiarioUSD REAL DEFAULT 0,
+                            MontoUSD REAL DEFAULT 0, MontoGerenciaUSD REAL DEFAULT 0,
+                            TasaBCV REAL DEFAULT 1,
+                            FechaPago TEXT, Estado TEXT NOT NULL DEFAULT 'Pendiente',
+                            Observaciones TEXT
+                        )");
+---
+                        CREATE TABLE IF NOT EXISTS PreferenciasUsuario (
+                            NombreUsuario TEXT PRIMARY KEY,
+                            Tema TEXT DEFAULT 'Claro', ColorAcento TEXT DEFAULT 'Azul',
+                            MostrarKpis INTEGER DEFAULT 1, SonidoAlertas INTEGER DEFAULT 0,
+                            FilasPorPagina INTEGER DEFAULT 50,
+                            ConfirmarEliminar INTEGER DEFAULT 1,
+                            AbrirUltimoModulo INTEGER DEFAULT 0,
+                            NombreCompleto TEXT DEFAULT '',
+                            Email TEXT DEFAULT '', Telefono TEXT DEFAULT ''
+                        );
+---
+                        CREATE TABLE IF NOT EXISTS AportesPatronales (
+                            Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            IdPeriodo INTEGER NOT NULL, IdEmpleado INTEGER NOT NULL,
+                            NombreEmpleado TEXT,
+                            SalarioNormalBs REAL DEFAULT 0, TasaBCV REAL DEFAULT 1,
+                            PorcentajeIVSS REAL DEFAULT 9.0,
+                            IVSSPatronBs REAL DEFAULT 0, RPVHPatronBs REAL DEFAULT 0,
+                            INCESBs REAL DEFAULT 0, DiasLaborales REAL DEFAULT 0,
+                            ValorUTBs REAL DEFAULT 0, CestaBs REAL DEFAULT 0
+                        )");
+---
+                        CREATE TABLE IF NOT EXISTS ProduccionDiaria (
+                            Id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                            Codigo        TEXT    NOT NULL,
+                            Fecha         TEXT    NOT NULL,
+                            Cantidad      REAL    NOT NULL DEFAULT 0,
+                            CostoUnitario REAL    NOT NULL DEFAULT 0,
+                            Observacion   TEXT,
+                            IdEmpleado    INTEGER,
+                            FOREIGN KEY(Codigo) REFERENCES Inventario(Codigo)
+                        );
+---
+                        CREATE TABLE IF NOT EXISTS TarifasBonoProduccion (
+                            Id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                            IdEmpleado      INTEGER NOT NULL,
+                            CodigoProducto  TEXT    NOT NULL,
+                            TarifaBs        REAL    NOT NULL DEFAULT 0,
+                            FechaDesde      TEXT    NOT NULL,
+                            FechaHasta      TEXT,
+                            FOREIGN KEY(IdEmpleado)     REFERENCES Empleados(Id),
+                            FOREIGN KEY(CodigoProducto) REFERENCES Inventario(Codigo)
+                        );
+---
+                        CREATE TABLE IF NOT EXISTS RegistroProduccionDia (
+                            Id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                            Fecha       TEXT    NOT NULL UNIQUE,
+                            Observacion TEXT
+                        );
+---
+                        CREATE TABLE IF NOT EXISTS DetalleProduccionMolde (
+                            Id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                            IdRegistro      INTEGER NOT NULL,
+                            CodigoMolde     TEXT    NOT NULL,
+                            CodigoProducto  TEXT    NOT NULL,
+                            Cantidad        REAL    NOT NULL DEFAULT 0,
+                            FOREIGN KEY(IdRegistro)     REFERENCES RegistroProduccionDia(Id),
+                            FOREIGN KEY(CodigoProducto) REFERENCES Inventario(Codigo)
+                        );
+---
+                        CREATE TABLE IF NOT EXISTS MaterialProduccionDia (
+                            Id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                            IdRegistro   INTEGER NOT NULL,
+                            CodigoInsumo TEXT    NOT NULL,
+                            Cantidad     REAL    NOT NULL DEFAULT 0,
+                            FOREIGN KEY(IdRegistro) REFERENCES RegistroProduccionDia(Id)
+                        );
+---
+                        CREATE TABLE IF NOT EXISTS TarifasBonoVentas (
+                            Id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                            IdEmpleado      INTEGER NOT NULL,
+                            CodigoProducto  TEXT    NOT NULL,
+                            TarifaBs        REAL    NOT NULL DEFAULT 0,
+                            FechaDesde      TEXT    NOT NULL,
+                            FechaHasta      TEXT,
+                            FOREIGN KEY(IdEmpleado)     REFERENCES Empleados(Id),
+                            FOREIGN KEY(CodigoProducto) REFERENCES Inventario(Codigo)
+                        );
+---
+                        CREATE TABLE IF NOT EXISTS PreferenciasVentana (
+                            NombreUsuario  TEXT NOT NULL,
+                            NombreVentana  TEXT NOT NULL,
+                            Datos          TEXT NOT NULL,
+                            PRIMARY KEY(NombreUsuario, NombreVentana)
+                        );
+---
+                        CREATE TABLE IF NOT EXISTS ProductosProveedor (
+                            Id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                            CodigoInterno    TEXT    NOT NULL UNIQUE,
+                            CodigoProveedor  TEXT,
+                            IdProveedorPrinc INTEGER,
+                            Descripcion      TEXT    NOT NULL,
+                            TipoInsumo       TEXT    NOT NULL DEFAULT 'Materia prima',
+                            Unidad           TEXT    NOT NULL DEFAULT 'kg',
+                            PrecioUltCompra  REAL    DEFAULT 0,
+                            PrecioPromedio   REAL    DEFAULT 0,
+                            StockActual      REAL    DEFAULT 0,
+                            StockMinimo      REAL    DEFAULT 0,
+                            Activo           INTEGER DEFAULT 1,
+                            Observaciones    TEXT,
+                            FOREIGN KEY(IdProveedorPrinc) REFERENCES Proveedores(Codigo)
+                        );
+---
+                        CREATE TABLE IF NOT EXISTS ProductoProveedorAlt (
+                            IdProducto   INTEGER NOT NULL,
+                            IdProveedor  TEXT    NOT NULL,
+                            PrecioRef    REAL    DEFAULT 0,
+                            PRIMARY KEY(IdProducto, IdProveedor),
+                            FOREIGN KEY(IdProducto)  REFERENCES ProductosProveedor(Id),
+                            FOREIGN KEY(IdProveedor) REFERENCES Proveedores(Codigo)
+                        );");
+---
+                        CREATE TABLE IF NOT EXISTS MoldeProductos (
+                            CodigoMolde  TEXT NOT NULL PRIMARY KEY,
+                            CodPrimera   TEXT,
+                            CodSegunda   TEXT,
+                            CodReciclado TEXT,
+                            FOREIGN KEY(CodigoMolde) REFERENCES TbMoldes(CodigoMold)
+                        );
+---
+                        CREATE TABLE IF NOT EXISTS TasaCambio (
+                            Id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                            Fecha        TEXT    NOT NULL UNIQUE,
+                            TasaBCV      REAL    NOT NULL DEFAULT 0,
+                            TasaParalelo REAL    NOT NULL DEFAULT 0,
+                            Usuario      TEXT
+                        );");
+---
+                    EjecutarSql(conn, tx, @"CREATE TABLE CategoriasGasto_rebuild (
+                            Id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                            Nombre         TEXT    NOT NULL UNIQUE,
+                            Color          TEXT    DEFAULT '#1A4A8A',
+                            Activa         INTEGER DEFAULT 1,
+                            Orden          INTEGER DEFAULT 0,
+                            EsMateriaPrima INTEGER DEFAULT 0
+                        )");
+---
+                    CREATE TABLE IF NOT EXISTS ProductosProveedor (
+                        Id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                        CodigoInterno    TEXT    NOT NULL UNIQUE,
+                        Descripcion      TEXT    NOT NULL,
+                        CodigoProveedor  TEXT,
+                        IdProveedorPrinc INTEGER,
+                        TipoInsumo       TEXT    NOT NULL DEFAULT 'Materia prima',
+                        Unidad           TEXT    NOT NULL DEFAULT 'kg',
+                        PrecioUltCompra  REAL    DEFAULT 0,
+                        PrecioPromedio   REAL    DEFAULT 0,
+                        StockActual      REAL    DEFAULT 0,
+                        StockMinimo      REAL    DEFAULT 0,
+                        Activo           INTEGER DEFAULT 1,
+                        Observaciones    TEXT
+                    );");
+---
+                        CREATE TABLE IF NOT EXISTS InasistenciasEmpleado (
+                            Id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                            IdEmpleado       INTEGER NOT NULL,
+                            NombreEmpleado   TEXT,
+                            TipoEmpleado     TEXT,
+                            Fecha            TEXT    NOT NULL,
+                            Justificada      INTEGER NOT NULL DEFAULT 0,
+                            MontoDescuentoBs REAL    DEFAULT 0,
+                            Observaciones    TEXT,
+                            FOREIGN KEY(IdEmpleado) REFERENCES Empleados(Id)
+                        );
+---
+            _ultimoSqlMigracion = "[v20-paso3] CREATE TABLE IF NOT EXISTS CategoriasGasto";
+            EjecutarSql(conn, tx, @"
+                CREATE TABLE IF NOT EXISTS CategoriasGasto (
+                    Id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    Nombre      TEXT    NOT NULL UNIQUE,
+                    Color       TEXT    DEFAULT '#1A4A8A',
+                    Activa      INTEGER NOT NULL DEFAULT 1,
+                    Orden       INTEGER NOT NULL DEFAULT 0,
+                    EsMateriaPrima INTEGER NOT NULL DEFAULT 0
+                );");
+---
+            _ultimoSqlMigracion = "[v20-paso4] CREATE TABLE IF NOT EXISTS Gastos (nueva)";
+            EjecutarSql(conn, tx, @"
+                CREATE TABLE IF NOT EXISTS Gastos (
+                    Id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    Fecha           TEXT    NOT NULL,
+                    IdCategoria     INTEGER NOT NULL,
+                    Concepto        TEXT    NOT NULL,
+                    Proveedor       TEXT,
+                    IdInsumo        INTEGER,
+                    Cantidad        REAL    DEFAULT 0,
+                    MonedaOriginal  TEXT    NOT NULL DEFAULT 'USD',
+                    TipoTasa        TEXT    NOT NULL DEFAULT 'USD_DIRECTO',
+                    TasaUsada       REAL    NOT NULL DEFAULT 0,
+                    IdTasaCambio    INTEGER,
+                    MontoOriginal   REAL    NOT NULL DEFAULT 0,
+                    MontoUSD        REAL    NOT NULL DEFAULT 0,
+                    MontoBs         REAL    NOT NULL DEFAULT 0,
+                    Estado          TEXT    NOT NULL DEFAULT 'Pagado',
+                    FechaVencimiento TEXT,
+                    FechaPago       TEXT,
+                    RutaComprobante TEXT,
+                    Usuario         TEXT    NOT NULL DEFAULT 'Sistema',
+                    FechaRegistro   TEXT    NOT NULL,
+                    Observaciones   TEXT,
+                    FOREIGN KEY (IdCategoria) REFERENCES CategoriasGasto(Id)
+                );");
+---
+            //    Si está vacía: se acaba de crear con CREATE TABLE y tiene TODAS las columnas.
+            {
+                var cntCmd = conn.CreateCommand();
+                cntCmd.Transaction = tx;
+                cntCmd.CommandText = "SELECT COUNT(*) FROM CategoriasGasto";
+                long rowCount = (long)cntCmd.ExecuteScalar();
+                if (rowCount == 0)
+                {
+                    EjecutarSql(conn, tx, @"
+                        INSERT OR IGNORE INTO CategoriasGasto (Nombre, Color, Orden, EsMateriaPrima) VALUES
+                            ('Materia Prima',            '#1A4A8A', 1, 1),
+                            ('Servicios públicos',       '#2D6CC0', 2, 0),
+                            ('Mantenimiento',            '#0F6E56', 3, 0),
+                            ('Oficina y papelería',      '#BA7517', 4, 0),
+                            ('Limpieza',                 '#534AB7', 5, 0),
+                            ('Ferretería y herramientas','#A32D2D', 6, 0),
+                            ('Honorarios',               '#A35A1A', 7, 0),
+                            ('Combustible y transporte',  '#A8B1BB', 8, 0),
+                            ('Otros',                    '#888780', 99, 0);");
+---
+                CREATE TABLE IF NOT EXISTS ConfigSistema (
+                    Clave   TEXT PRIMARY KEY,
+                    Valor   TEXT,
+                    Fecha   TEXT,
+                    Usuario TEXT
+                );");
+---
+=== DB_Abonos.cs ===
+                CREATE TABLE IF NOT EXISTS ComprobantesFactura (
+                    Id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+                    NumeroF            TEXT NOT NULL,
+                    MetodoPago         TEXT NOT NULL,
+                    Monto              REAL DEFAULT 0,
+                    Referencia         TEXT DEFAULT '',
+                    RutaImagen         TEXT DEFAULT '',
+                    IdCuentaReceptora  INTEGER DEFAULT 0,
+                    Fecha              TEXT NOT NULL,
+                    Observaciones      TEXT DEFAULT '',
+                    FOREIGN KEY(NumeroF) REFERENCES Facturas(NumeroF)
+                );
+---
+                CREATE TABLE IF NOT EXISTS CuentasReceptoras (
+                    Id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                    Nombre    TEXT NOT NULL,
+                    Banco     TEXT NOT NULL,
+                    Tipo      TEXT NOT NULL,
+                    Titular   TEXT NOT NULL,
+                    Documento TEXT NOT NULL,
+                    Activa    INTEGER DEFAULT 1
+                );
+---
+=== DB_Camaras.cs ===
+                    CREATE TABLE Camaras (
+                        Id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                        Nombre        TEXT    NOT NULL,
+                        Ubicacion     TEXT    NOT NULL DEFAULT '',
+                        IpLocal       TEXT    NOT NULL DEFAULT '',
+                        PuertoRtsp    INTEGER NOT NULL DEFAULT 554,
+                        UsuarioCamara TEXT    NOT NULL DEFAULT 'admin',
+                        ClaveCifrada  TEXT    NOT NULL DEFAULT '',
+                        RutaStream    TEXT    NOT NULL DEFAULT '/Streaming/Channels/101',
+                        Modelo        TEXT    NOT NULL DEFAULT '',
+                        Activa        INTEGER NOT NULL DEFAULT 1,
+                        Orden         INTEGER NOT NULL DEFAULT 0,
+                        FechaCreacion TEXT    NOT NULL DEFAULT ''
+                    )");
+---
+            _ultimoSqlMigracion = "[v23] CREATE TABLE IF NOT EXISTS Camaras + PermisosCamara";
+            var cmd = conn.CreateCommand();
+            cmd.Transaction = tx;
+            cmd.CommandText = @"
+                CREATE TABLE IF NOT EXISTS Camaras (
+                    Id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    Nombre        TEXT    NOT NULL,
+                    Ubicacion     TEXT    NOT NULL DEFAULT '',
+                    IpLocal       TEXT    NOT NULL DEFAULT '',
+                    PuertoRtsp    INTEGER NOT NULL DEFAULT 554,
+                    UsuarioCamara TEXT    NOT NULL DEFAULT 'admin',
+                    ClaveCifrada  TEXT    NOT NULL DEFAULT '',
+                    RutaStream    TEXT    NOT NULL DEFAULT '/Streaming/Channels/101',
+                    Modelo        TEXT    NOT NULL DEFAULT '',
+                    Activa        INTEGER NOT NULL DEFAULT 1,
+                    Orden         INTEGER NOT NULL DEFAULT 0,
+                    FechaCreacion TEXT    NOT NULL DEFAULT ''
+                );
+---
+                CREATE TABLE IF NOT EXISTS PermisosCamara (
+                    IdUsuario INTEGER NOT NULL,
+                    IdCamara  INTEGER NOT NULL,
+                    PRIMARY KEY (IdUsuario, IdCamara),
+                    FOREIGN KEY (IdUsuario) REFERENCES Usuarios(Id) ON DELETE CASCADE,
+                    FOREIGN KEY (IdCamara)  REFERENCES Camaras(Id)  ON DELETE CASCADE
+                );
+---
+=== DB_CuentasPagar.cs ===
+                CREATE TABLE IF NOT EXISTS CuentasPagar (
+                    Id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CodigoProveedor TEXT,
+                    Proveedor       TEXT,
+                    Concepto        TEXT NOT NULL,
+                    NumFactura      TEXT,
+                    Monto           REAL DEFAULT 0,
+                    Pagado          REAL DEFAULT 0,
+                    FechaEmision    TEXT NOT NULL,
+                    FechaVence      TEXT NOT NULL,
+                    Estado          TEXT DEFAULT 'Pendiente',
+                    Observaciones   TEXT
+                );
+---
+                CREATE TABLE IF NOT EXISTS PagosCxP (
+                    Id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    IdCuenta     INTEGER NOT NULL,
+                    Fecha        TEXT NOT NULL,
+                    Monto        REAL DEFAULT 0,
+                    FormaPago    TEXT,
+                    Referencia   TEXT,
+                    Observaciones TEXT,
+                    FOREIGN KEY(IdCuenta) REFERENCES CuentasPagar(Id)
+                );
+---
+=== DB_Deploy.cs ===
+                CREATE TABLE IF NOT EXISTS TasaCambio (
+                    Id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    Fecha        TEXT    NOT NULL UNIQUE,
+                    TasaBCV      REAL    NOT NULL DEFAULT 0,
+                    TasaParalelo REAL    NOT NULL DEFAULT 0,
+                    Usuario      TEXT    NOT NULL DEFAULT 'Sistema'
+                );
+---
+                CREATE TABLE IF NOT EXISTS ConfiguracionSistema (
+                    Clave TEXT PRIMARY KEY,
+                    Valor TEXT NOT NULL
+                );";
+---
+=== DB_ISLR.cs ===
+                CREATE TABLE IF NOT EXISTS ISLRConfig (
+                    Id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                    Anio                INTEGER NOT NULL UNIQUE,
+                    ValorUT             REAL    NOT NULL DEFAULT 0,
+                    PctRebaja           REAL    NOT NULL DEFAULT 10,
+                    ISLRAnioAnterior    REAL    NOT NULL DEFAULT 0,
+                    RetencionesAnio     REAL    NOT NULL DEFAULT 0,
+                    Observaciones       TEXT    DEFAULT '',
+                    FechaActualizacion  TEXT    NOT NULL
+                );
+---
+                CREATE TABLE IF NOT EXISTS RetencionesISLR (
+                    Id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    Anio         INTEGER NOT NULL,
+                    Fecha        TEXT    NOT NULL,
+                    Cliente      TEXT    NOT NULL DEFAULT '',
+                    NumFactura   TEXT    DEFAULT '',
+                    MontoBase    REAL    NOT NULL DEFAULT 0,
+                    PctRetencion REAL    NOT NULL DEFAULT 3,
+                    MontoRetenido REAL   NOT NULL DEFAULT 0,
+                    Comprobante  TEXT    DEFAULT '',
+                    Observaciones TEXT   DEFAULT ''
+                );
+---
+=== SistemaGestion.Api/Db.cs ===
+                    CREATE TABLE IF NOT EXISTS SesionesActivas (
+                        Jti          TEXT PRIMARY KEY,
+                        IdUsuario    INTEGER NOT NULL,
+                        NombreUsuario TEXT NOT NULL,
+                        IpEmision    TEXT,
+                        FechaEmision TEXT NOT NULL,
+                        FechaExpira  TEXT NOT NULL,
+                        FechaRevoca  TEXT
+                    );
+---
+                    CREATE TABLE IF NOT EXISTS DetallesGasto (
+                        Id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                        IdGasto         INTEGER NOT NULL,
+                        Descripcion     TEXT    NOT NULL,
+                        IdArticulo      INTEGER,
+                        CodigoInterno   TEXT,
+                        TipoInsumo      TEXT,
+                        EsInventariable INTEGER NOT NULL DEFAULT 0,
+                        Cantidad        REAL    NOT NULL DEFAULT 0,
+                        PrecioUnitario  REAL    NOT NULL DEFAULT 0,
+                        Subtotal        REAL    NOT NULL DEFAULT 0,
+                        FOREIGN KEY (IdGasto) REFERENCES Gastos(Id) ON DELETE CASCADE
+                    );
+---
+                    CREATE TABLE IF NOT EXISTS ConfiguracionPortal (
+                        Clave              TEXT PRIMARY KEY,
+                        Valor              TEXT NOT NULL,
+                        FechaActualizacion TEXT
+                    );
+---
+                    CREATE TABLE IF NOT EXISTS InasistenciasEmpleado (
+                        Id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                        IdEmpleado       INTEGER NOT NULL,
+                        NombreEmpleado   TEXT,
+                        TipoEmpleado     TEXT,
+                        Fecha            TEXT    NOT NULL,
+                        Justificada      INTEGER NOT NULL DEFAULT 0,
+                        MontoDescuentoBs REAL    DEFAULT 0,
+                        Observaciones    TEXT,
+                        FOREIGN KEY(IdEmpleado) REFERENCES Empleados(Id)
+                    );
+---
+=== SistemaGestion.Api/DbContenido.cs ===
+    //  arranque (Program.cs), CREATE TABLE IF NOT EXISTS, sin PRAGMA
+    //  user_version (ese lo maneja el WinForms). El acceso a datos se hace
+    //  con Db.Conn() y los helpers Db.S/D/I desde los endpoints (mismo estilo
+    //  que WhatsAppEndpoints).
+---
+                    CREATE TABLE IF NOT EXISTS Marcas (
+                        Id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                        Nombre        TEXT    NOT NULL,
+                        Handle        TEXT,
+                        Idiomas       TEXT    NOT NULL DEFAULT 'es',
+                        VozTono       TEXT,
+                        GuiaEstilo    TEXT,
+                        Paleta        TEXT,
+                        LogoRuta      TEXT,
+                        HashtagsBase  TEXT,
+                        Pilares       TEXT,
+                        Activa        INTEGER NOT NULL DEFAULT 1,
+                        FechaCreacion TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+                    );
+---
+                    CREATE TABLE IF NOT EXISTS CuentasRed (
+                        Id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                        MarcaId         INTEGER NOT NULL,
+                        Plataforma      TEXT    NOT NULL,
+                        NombreCuenta    TEXT,
+                        IgUserId        TEXT,
+                        PageId          TEXT,
+                        TokenRef        TEXT,
+                        ModoPublicacion TEXT    NOT NULL DEFAULT 'asistida',
+                        Estado          TEXT    NOT NULL DEFAULT 'desconectada',
+                        Activa          INTEGER NOT NULL DEFAULT 1,
+                        FOREIGN KEY (MarcaId) REFERENCES Marcas(Id)
+                    );
+---
+                    CREATE TABLE IF NOT EXISTS IdeasContenido (
+                        Id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                        MarcaId       INTEGER NOT NULL,
+                        Titulo        TEXT    NOT NULL,
+                        Descripcion   TEXT,
+                        Pilar         TEXT,
+                        Origen        TEXT    NOT NULL DEFAULT 'manual',
+                        Estado        TEXT    NOT NULL DEFAULT 'nueva',
+                        RefBaseUrl    TEXT,
+                        FechaCreacion TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+                        CreadoPor     INTEGER,
+                        FOREIGN KEY (MarcaId) REFERENCES Marcas(Id)
+                    );
+---
+                    CREATE TABLE IF NOT EXISTS PromptsPlantilla (
+                        Id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                        MarcaId       INTEGER,
+                        Nombre        TEXT    NOT NULL,
+                        Tipo          TEXT    NOT NULL,
+                        Categoria     TEXT,
+                        Texto         TEXT    NOT NULL,
+                        Veces         INTEGER NOT NULL DEFAULT 0,
+                        FechaCreacion TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+                    );
+---
+                    CREATE TABLE IF NOT EXISTS Posts (
+                        Id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+                        MarcaId                  INTEGER NOT NULL,
+                        IdeaId                   INTEGER,
+                        Formato                  TEXT    NOT NULL DEFAULT 'imagen',
+                        Titulo                   TEXT,
+                        CaptionEs                TEXT,
+                        CaptionEn                TEXT,
+                        Hashtags                 TEXT,
+                        PromptImagen             TEXT,
+                        ModeloUsado              TEXT,
+                        PlataformasDestino       TEXT    NOT NULL DEFAULT 'instagram',
+                        PrimerComentarioHashtags INTEGER NOT NULL DEFAULT 0,
+                        Estado                   TEXT    NOT NULL DEFAULT 'borrador',
+                        FechaProgramada          TEXT,
+                        JobId                    TEXT,
+                        MensajeError             TEXT,
+                        CreadoPor                INTEGER,
+                        AprobadoPor              INTEGER,
+                        FechaAprobacion          TEXT,
+                        FechaCreacion            TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+                        FechaActualizacion       TEXT,
+                        FOREIGN KEY (MarcaId) REFERENCES Marcas(Id)
+                    );
+---
+                    CREATE TABLE IF NOT EXISTS PostAssets (
+                        Id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                        PostId        INTEGER NOT NULL,
+                        Orden         INTEGER NOT NULL DEFAULT 1,
+                        Tipo          TEXT    NOT NULL DEFAULT 'imagen',
+                        RutaArchivo   TEXT    NOT NULL,
+                        UrlPublica    TEXT,
+                        Ancho         INTEGER,
+                        Alto          INTEGER,
+                        Origen        TEXT    NOT NULL DEFAULT 'ia',
+                        ModeloGen     TEXT,
+                        PromptGen     TEXT,
+                        EsFinal       INTEGER NOT NULL DEFAULT 0,
+                        FechaCreacion TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+                        FOREIGN KEY (PostId) REFERENCES Posts(Id) ON DELETE CASCADE
+                    );
+---
+                    CREATE TABLE IF NOT EXISTS Publicaciones (
+                        Id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                        PostId           INTEGER NOT NULL,
+                        CuentaRedId      INTEGER,
+                        Plataforma       TEXT    NOT NULL,
+                        Estado           TEXT    NOT NULL DEFAULT 'pendiente',
+                        IdExterno        TEXT,
+                        Permalink        TEXT,
+                        RespuestaApi     TEXT,
+                        FechaIntento     TEXT,
+                        FechaPublicacion TEXT,
+                        FOREIGN KEY (PostId) REFERENCES Posts(Id) ON DELETE CASCADE
+                    );
+---
+                    CREATE TABLE IF NOT EXISTS ContenidoConfig (
+                        Clave       TEXT PRIMARY KEY,
+                        Valor       TEXT NOT NULL,
+                        Descripcion TEXT
+                    );
+---
+                CREATE TABLE IF NOT EXISTS MensajesRed (
+                    Id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    MarcaId       INTEGER NOT NULL,
+                    Canal         TEXT    NOT NULL,          -- ig_comment | ig_dm | fb_comment | fb_msg
+                    ExternoId     TEXT,                      -- id del comentario/mensaje en Meta
+                    ThreadId      TEXT,                      -- hilo/conversacion (DMs)
+                    PostId        INTEGER,                   -- post interno relacionado (si aplica)
+                    PostExternoId TEXT,                      -- id del media/post de Meta
+                    AutorNombre   TEXT,
+                    AutorId       TEXT,
+                    Texto         TEXT,
+                    Estado        TEXT    NOT NULL DEFAULT 'nuevo', -- nuevo|auto_respondido|escalado|respondido|cerrado
+                    RequiereHumano   INTEGER NOT NULL DEFAULT 0,
+                    RespuestaIa      TEXT,                   -- respuesta enviada o sugerida por IA
+                    RespuestaEnviada INTEGER NOT NULL DEFAULT 0,
+                    NotaInterna   TEXT,
+                    Permalink     TEXT,
+                    AvisarEn      TEXT,                      -- cuando avisar a Redes (fuera de horario -> proximo inicio)
+                    Avisado       INTEGER NOT NULL DEFAULT 0,
+                    RecibidoEn    TEXT,
+                    ActualizadoEn TEXT
+                );
+---
+                CREATE TABLE IF NOT EXISTS BandejaConfig (
+                    MarcaId          INTEGER PRIMARY KEY,
+                    HorarioInicio    TEXT    NOT NULL DEFAULT '08:00',
+                    HorarioFin       TEXT    NOT NULL DEFAULT '17:00',
+                    DiasLaborales    TEXT    NOT NULL DEFAULT '1,2,3,4,5',  -- 1=Lun .. 7=Dom
+                    BaseConocimiento TEXT,
+                    PlantillaAcuse   TEXT    NOT NULL DEFAULT 'Gracias por escribirnos. Te responderemos personalmente en cuanto inicie nuestro horario de atencion.',
+                    AutoRespuesta    INTEGER NOT NULL DEFAULT 1,
+                    PalabrasHumano   TEXT    DEFAULT 'reclamo,queja,devolucion,demanda,abogado,mayorista,distribuidor,factura,garantia',
+                    Activa           INTEGER NOT NULL DEFAULT 1
+                );
+---
+                CREATE TABLE IF NOT EXISTS VideoJobs (
+                    Id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    PostId        INTEGER NOT NULL,
+                    Motor         TEXT,
+                    OperationName TEXT,
+                    Prompt        TEXT,
+                    Estado        TEXT    NOT NULL DEFAULT 'procesando',  -- procesando|listo|error
+                    RutaArchivo   TEXT,
+                    Error         TEXT,
+                    CreatedEn     TEXT,
+                    ActualizadoEn TEXT
+                );
+---
+=== VentanaPrefs.cs ===
+                CREATE TABLE IF NOT EXISTS PreferenciasVentana (
+                    NombreUsuario  TEXT NOT NULL,
+                    NombreVentana  TEXT NOT NULL,
+                    Datos          TEXT NOT NULL,
+                    PRIMARY KEY(NombreUsuario, NombreVentana)
+                )";
+---

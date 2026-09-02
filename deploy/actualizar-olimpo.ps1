@@ -55,6 +55,26 @@ Get-Process -Name "SistemaGestion" -ErrorAction SilentlyContinue |
 Start-Sleep -Seconds 2
 Ok "Procesos detenidos."
 
+# 2b. Refuerzo: matar cualquier proceso que AUN tenga tomado el DLL de la API y esperar a que se libere
+$apiDll = Join-Path $apiPub "SistemaGestion.Api.dll"
+function Stop-ApiHolders {
+    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.ExecutablePath -like (Join-Path $apiPub '*') -or $_.CommandLine -like '*SistemaGestion.Api*' } |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+}
+function Test-Locked($p) {
+    if (-not (Test-Path $p)) { return $false }
+    try { $fs = [System.IO.File]::Open($p,'Open','ReadWrite','None'); $fs.Close(); return $false }
+    catch { return $true }
+}
+Stop-ApiHolders
+$intentos = 0
+while ((Test-Locked $apiDll) -and $intentos -lt 15) { Start-Sleep -Seconds 1; Stop-ApiHolders; $intentos++ }
+if (Test-Locked $apiDll) {
+    Fail "La API sigue usando '$apiDll' y no se pudo detener. Cierra la API manualmente o ejecuta este script en una PowerShell COMO ADMINISTRADOR, y vuelve a intentar."
+}
+Ok "DLL de la API libre; listo para publicar."
+
 # 3. Republicar API (Sdk.Web)
 Info "3/5  Publicando API a $apiPub ..."
 New-Item -ItemType Directory -Force -Path $apiPub | Out-Null

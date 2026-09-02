@@ -1,0 +1,164 @@
+{
+  "name": "Registrar gasto",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "Registrar gasto",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Categoria",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  { "option": "Plataforma" },
+                  { "option": "IA/API" },
+                  { "option": "Infraestructura" },
+                  { "option": "Suscripción" },
+                  { "option": "Dominio" },
+                  { "option": "Otro" }
+                ]
+              },
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Descripcion",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Monto",
+              "fieldType": "number"
+            },
+            {
+              "fieldLabel": "Moneda",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  { "option": "USD" },
+                  { "option": "EUR" },
+                  { "option": "VES" },
+                  { "option": "INR" }
+                ]
+              }
+            },
+            {
+              "fieldLabel": "Tipo",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  { "option": "unico" },
+                  { "option": "recurrente" }
+                ]
+              },
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Periodicidad",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  { "option": "" },
+                  { "option": "mensual" },
+                  { "option": "anual" },
+                  { "option": "consumo" }
+                ]
+              }
+            },
+            {
+              "fieldLabel": "Proximo cobro",
+              "fieldType": "date"
+            },
+            {
+              "fieldLabel": "Ambito",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  { "option": "este" },
+                  { "option": "general" },
+                  { "option": "motoapp" },
+                  { "option": "ehp" },
+                  { "option": "personal" }
+                ]
+              },
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Notas"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.5,
+      "position": [-144, -144],
+      "id": "b1e77a01-1111-4a2b-9c31-aa0011223344",
+      "name": "On form submission",
+      "webhookId": "c8fd812c-2b44-4d77-9a12-77aa11bc2210"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO gastos (categoria, descripcion, monto, moneda, tipo, periodicidad, proximo_cobro, ambito, notas) VALUES ($1, $2, NULLIF($3,'__NULL__')::numeric, NULLIF($4,'__NULL__'), $5, NULLIF($6,'__NULL__'), NULLIF($7,'__NULL__')::date, $8, NULLIF($9,'__NULL__'));",
+        "options": {
+          "queryReplacement": "={{ [String($json[\"Categoria\"]), String($json[\"Descripcion\"]), String($json[\"Monto\"] ?? \"\") || \"__NULL__\", String($json[\"Moneda\"] ?? \"\") || \"__NULL__\", String($json[\"Tipo\"]), String($json[\"Periodicidad\"] ?? \"\") || \"__NULL__\", String($json[\"Proximo cobro\"] ?? \"\") || \"__NULL__\", String($json[\"Ambito\"]), String($json[\"Notas\"] ?? \"\") || \"__NULL__\"] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [64, -144],
+      "id": "b2e77a02-2222-4a2b-9c31-aa0011223345",
+      "name": "Execute a SQL query",
+      "credentials": {
+        "postgres": {
+          "id": "FnBxIu31XJTZlolc",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://automatizacion-evolution-api.ru6xga.easypanel.host/message/sendText/jacques-seguimiento",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [] },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "number", "value": "584122293727" },
+            { "name": "text", "value": "=Nuevo gasto registrado: {{ $('On form submission').item.json['Descripcion'] }} - {{ $('On form submission').item.json['Monto'] }} {{ $('On form submission').item.json['Moneda'] }} - {{ $('On form submission').item.json['Tipo'] }}/{{ $('On form submission').item.json['Ambito'] }}" }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [272, -144],
+      "id": "b3e77a03-3333-4a2b-9c31-aa0011223346",
+      "name": "HTTP Request",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "vHyzLOtzBUo9dHST",
+          "name": "Evolution API - apikey"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "On form submission": {
+      "main": [[ { "node": "Execute a SQL query", "type": "main", "index": 0 } ]]
+    },
+    "Execute a SQL query": {
+      "main": [[ { "node": "HTTP Request", "type": "main", "index": 0 } ]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "tags": []
+}
