@@ -77,8 +77,14 @@ Ok "DLL de la API libre; listo para publicar."
 Info "3/5  Publicando API a $apiPub ..."
 New-Item -ItemType Directory -Force -Path $apiPub | Out-Null
 & dotnet publish $apiProj -c Release -r win-x64 --self-contained false -o $apiPub --nologo -v minimal
-if ($LASTEXITCODE -ne 0) { Fail "Fallo la publicacion de la API." }
-Ok "API publicada: $apiPub"
+if ($LASTEXITCODE -ne 0) {
+    Warn "Fallo la publicacion (posible red/NuGet). Reintentando SIN restaurar, con la cache local de paquetes..."
+    & dotnet publish $apiProj -c Release -r win-x64 --self-contained false --no-restore -o $apiPub --nologo -v minimal
+    if ($LASTEXITCODE -ne 0) { Fail "Fallo la publicacion de la API (tambien sin conexion). Revisa la conexion a internet / NuGet." }
+    Ok "API publicada desde cache (sin conexion): $apiPub"
+} else {
+    Ok "API publicada: $apiPub"
+}
 
 # 4. Republicar la app de escritorio (WinForms) — best-effort
 Info "4/5  Publicando la app de escritorio (WinForms) a $appPub ..."
