@@ -1532,6 +1532,14 @@ namespace SistemaGestion
                             Cantidad     REAL    NOT NULL DEFAULT 0,
                             FOREIGN KEY(IdRegistro) REFERENCES RegistroProduccionDia(Id)
                         );
+                        CREATE TABLE IF NOT EXISTS ParticipantesProduccionDia (
+                            Id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                            IdRegistro  INTEGER NOT NULL,
+                            IdEmpleado  INTEGER NOT NULL,
+                            FOREIGN KEY(IdRegistro) REFERENCES RegistroProduccionDia(Id),
+                            FOREIGN KEY(IdEmpleado) REFERENCES Empleados(Id)
+                        );
+                        CREATE INDEX IF NOT EXISTS idx_partprod_reg ON ParticipantesProduccionDia(IdRegistro);
                         CREATE TABLE IF NOT EXISTS TarifasBonoVentas (
                             Id              INTEGER PRIMARY KEY AUTOINCREMENT,
                             IdEmpleado      INTEGER NOT NULL,

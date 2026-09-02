@@ -29,11 +29,14 @@ namespace SistemaGestion.Api.Endpoints
                     using var c = Db.Conn();
                     var cmd = c.CreateCommand();
                     cmd.CommandText =
-                        "SELECT CodigoMold, Descripcion FROM TbMoldes ORDER BY CodigoMold";
+                        @"SELECT m.CodigoMold, m.Descripcion, COALESCE(mp.CodPrimera,'') AS CodProd
+                          FROM TbMoldes m
+                          LEFT JOIN MoldeProductos mp ON mp.CodigoMolde = m.CodigoMold
+                          ORDER BY CASE WHEN COALESCE(mp.CodPrimera,'')='' THEN 1 ELSE 0 END, mp.CodPrimera, m.CodigoMold";
                     var lista = new List<object>();
                     using var r = cmd.ExecuteReader();
                     while (r.Read())
-                        lista.Add(new { codigo = Db.S(r, 0), descripcion = Db.S(r, 1) });
+                        lista.Add(new { codigo = Db.S(r, 0), descripcion = Db.S(r, 1), codigoProducto = Db.S(r, 2) });
                     return Results.Ok(lista);
                 }
                 catch { return Results.Ok(new List<object>()); }
@@ -146,80 +149,252 @@ namespace SistemaGestion.Api.Endpoints
                 }
             }).AddEndpointFilter(RequireRole.Of(TokenService.PuedeEscribirProduccion)).RequireAuthorization();
 
-            // ── Registro manual de producción (sin digitalizador) ─────────
-
+            // ── Registro manual de producción (canónico: escribe igual que el digitalizador/escritorio) ──
+            //   Un registro por día (Fecha UNICA); detalle en DetalleProduccionMolde con
+            //   CodigoProducto = producto base del molde (para que el bono de producción case);
+            //   materiales en MaterialProduccionDia; obreros en ParticipantesProduccionDia.
             app.MapPost("/api/produccion/registro", (HttpContext ctx, RegistroProduccionRequest req) =>
             {
                 if (req.Moldes == null || req.Moldes.Count == 0)
                     return Results.BadRequest(new { error = "Debe incluir al menos un molde." });
 
-                string fecha = string.IsNullOrWhiteSpace(req.Fecha)
-                    ? DateTime.Today.ToString("yyyy-MM-dd") : req.Fecha;
-                string usuario = ctx.User?.FindFirst("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name")?.Value ?? "portal";
+                string fecha    = string.IsNullOrWhiteSpace(req.Fecha) ? DateTime.Today.ToString("yyyy-MM-dd") : req.Fecha;
+                string material = string.IsNullOrWhiteSpace(req.Material) ? "Virgen" : req.Material;
 
                 using var c = Db.Conn();
                 using var tx = c.BeginTransaction();
                 try
                 {
-                    int insertados = 0;
+                    // 1. get-or-create RegistroProduccionDia (Fecha es UNICA)
+                    int regId;
+                    var q = c.CreateCommand(); q.Transaction = tx;
+                    q.CommandText = "SELECT Id FROM RegistroProduccionDia WHERE Fecha=$f";
+                    q.Parameters.AddWithValue("$f", fecha);
+                    var found = q.ExecuteScalar();
+                    if (found != null && found != DBNull.Value)
+                    {
+                        regId = (int)(long)found;
+                        var up = c.CreateCommand(); up.Transaction = tx;
+                        up.CommandText = "UPDATE RegistroProduccionDia SET TipoMaterial=$tm, Observacion=$ob WHERE Id=$id";
+                        up.Parameters.AddWithValue("$tm", material);
+                        up.Parameters.AddWithValue("$ob", req.Observaciones ?? "");
+                        up.Parameters.AddWithValue("$id", regId);
+                        up.ExecuteNonQuery();
+                        foreach (var tbl in new[] { "DetalleProduccionMolde", "MaterialProduccionDia", "ParticipantesProduccionDia" })
+                        {
+                            var d = c.CreateCommand(); d.Transaction = tx;
+                            d.CommandText = $"DELETE FROM {tbl} WHERE IdRegistro=$id";
+                            d.Parameters.AddWithValue("$id", regId);
+                            d.ExecuteNonQuery();
+                        }
+                    }
+                    else
+                    {
+                        var ins = c.CreateCommand(); ins.Transaction = tx;
+                        ins.CommandText = "INSERT INTO RegistroProduccionDia (Fecha,TipoMaterial,Observacion) VALUES ($f,$tm,$ob)";
+                        ins.Parameters.AddWithValue("$f", fecha);
+                        ins.Parameters.AddWithValue("$tm", material);
+                        ins.Parameters.AddWithValue("$ob", req.Observaciones ?? "");
+                        ins.ExecuteNonQuery();
+                        var rid = c.CreateCommand(); rid.Transaction = tx;
+                        rid.CommandText = "SELECT last_insert_rowid()";
+                        regId = (int)(long)rid.ExecuteScalar();
+                    }
+
+                    // 2. Detalle por molde (CodigoProducto = producto base del molde)
+                    int moldes = 0;
+                    var producidos = new Dictionary<string, double>();   // codProducto -> unidades (para el kardex de producto terminado)
                     foreach (var m in req.Moldes)
                     {
                         if (string.IsNullOrWhiteSpace(m.CodigoMolde)) continue;
-                        var cmd = c.CreateCommand(); cmd.Transaction = tx;
-                        cmd.CommandText = @"INSERT INTO RegistroProduccionDia
-                            (Fecha,CodigoMolde,Material,Operario,Turno,
-                             CantPrimeraCalidad,CantSegundaCalidad,CantDefectuosas,Observaciones)
-                            VALUES($f,$mol,$mat,$op,$turno,$p1,$p2,$def,$obs)";
-                        cmd.Parameters.AddWithValue("$f", fecha);
-                        cmd.Parameters.AddWithValue("$mol", m.CodigoMolde);
-                        cmd.Parameters.AddWithValue("$mat", req.Material ?? "Virgen");
-                        cmd.Parameters.AddWithValue("$op", req.Operario ?? usuario);
-                        cmd.Parameters.AddWithValue("$turno", req.Turno ?? "");
-                        cmd.Parameters.AddWithValue("$p1", m.Primera);
-                        cmd.Parameters.AddWithValue("$p2", m.Segunda);
-                        cmd.Parameters.AddWithValue("$def", m.Defectuosas);
-                        cmd.Parameters.AddWithValue("$obs", req.Observaciones ?? "");
-                        cmd.ExecuteNonQuery();
-                        insertados++;
+                        string codProd = "", cpMolde = "", csMolde = "", crMolde = "";
+                        var mp = c.CreateCommand(); mp.Transaction = tx;
+                        mp.CommandText = "SELECT COALESCE(CodPrimera,''), COALESCE(CodSegunda,''), COALESCE(CodReciclado,'') FROM MoldeProductos WHERE CodigoMolde=$cm";
+                        mp.Parameters.AddWithValue("$cm", m.CodigoMolde);
+                        using (var rr = mp.ExecuteReader())
+                            if (rr.Read())
+                            {
+                                cpMolde = rr.GetString(0); csMolde = rr.GetString(1); crMolde = rr.GetString(2);
+                                codProd = material == "Reciclado" ? (string.IsNullOrEmpty(crMolde) ? cpMolde : crMolde) : cpMolde;
+                            }
+                        double p1 = m.Primera, p2 = m.Segunda, def = m.Defectuosas;
+                        double rec         = material == "Reciclado" ? p1 : 0;
+                        double cantPrimera = material == "Reciclado" ? 0  : p1;
+                        double total       = p1 + p2;
+                        // acumular los productos terminados que entran al inventario (segunda = producto distinto)
+                        if (material == "Reciclado")
+                        {
+                            if (!string.IsNullOrEmpty(crMolde) && rec > 0)
+                                producidos[crMolde] = producidos.GetValueOrDefault(crMolde) + rec;
+                        }
+                        else
+                        {
+                            if (!string.IsNullOrEmpty(cpMolde) && cantPrimera > 0)
+                                producidos[cpMolde] = producidos.GetValueOrDefault(cpMolde) + cantPrimera;
+                            if (!string.IsNullOrEmpty(csMolde) && p2 > 0)
+                                producidos[csMolde] = producidos.GetValueOrDefault(csMolde) + p2;
+                        }
+                        var di = c.CreateCommand(); di.Transaction = tx;
+                        di.CommandText = @"INSERT INTO DetalleProduccionMolde
+                            (IdRegistro,CodigoMolde,CodigoProducto,Cantidad,CantPrimera,CantSegunda,CantReciclado,CantDefectuosas)
+                            VALUES ($ir,$cm,$cp,$ca,$c1,$c2,$cr,$cd)";
+                        di.Parameters.AddWithValue("$ir", regId);
+                        di.Parameters.AddWithValue("$cm", m.CodigoMolde);
+                        di.Parameters.AddWithValue("$cp", codProd);
+                        di.Parameters.AddWithValue("$ca", total);
+                        di.Parameters.AddWithValue("$c1", cantPrimera);
+                        di.Parameters.AddWithValue("$c2", (double)p2);
+                        di.Parameters.AddWithValue("$cr", rec);
+                        di.Parameters.AddWithValue("$cd", (double)def);
+                        di.ExecuteNonQuery();
+                        moldes++;
                     }
 
-                    // Descontar insumos del kardex si se proporcionan materiales
+                    // 3. Materiales consumidos
                     if (req.Materiales != null)
-                    {
                         foreach (var mat in req.Materiales)
                         {
                             if (string.IsNullOrWhiteSpace(mat.CodigoInsumo) || mat.Kg <= 0) continue;
-                            // Update stock
-                            var upd = c.CreateCommand(); upd.Transaction = tx;
-                            upd.CommandText = @"UPDATE ProductosProveedor SET StockActual=MAX(0,StockActual-$kg)
-                                WHERE CodigoInterno=$cod";
-                            upd.Parameters.AddWithValue("$kg", (double)mat.Kg);
-                            upd.Parameters.AddWithValue("$cod", mat.CodigoInsumo);
-                            upd.ExecuteNonQuery();
-
-                            // Kardex movement
-                            var mv = c.CreateCommand(); mv.Transaction = tx;
-                            mv.CommandText = @"INSERT INTO MovimientosMateriaPrima
-                                (IdInsumo,FechaHora,TipoMovimiento,Concepto,Cantidad,Usuario)
-                                SELECT Id,datetime('now','localtime'),'SALIDA',$conc,$kg,$usr
-                                FROM ProductosProveedor WHERE CodigoInterno=$cod";
-                            mv.Parameters.AddWithValue("$cod", mat.CodigoInsumo);
-                            mv.Parameters.AddWithValue("$conc", "Producción " + fecha);
-                            mv.Parameters.AddWithValue("$kg", (double)mat.Kg);
-                            mv.Parameters.AddWithValue("$usr", usuario);
-                            mv.ExecuteNonQuery();
+                            var mi = c.CreateCommand(); mi.Transaction = tx;
+                            mi.CommandText = "INSERT INTO MaterialProduccionDia (IdRegistro,CodigoInsumo,Cantidad) VALUES ($ir,$ci,$kg)";
+                            mi.Parameters.AddWithValue("$ir", regId);
+                            mi.Parameters.AddWithValue("$ci", mat.CodigoInsumo);
+                            mi.Parameters.AddWithValue("$kg", (double)mat.Kg);
+                            mi.ExecuteNonQuery();
                         }
+
+                    // 4. Participantes (obreros marcados)
+                    if (req.Participantes != null)
+                        foreach (var idEmp in req.Participantes.Distinct())
+                        {
+                            if (idEmp <= 0) continue;
+                            var pi = c.CreateCommand(); pi.Transaction = tx;
+                            pi.CommandText = "INSERT INTO ParticipantesProduccionDia (IdRegistro,IdEmpleado) VALUES ($ir,$ie)";
+                            pi.Parameters.AddWithValue("$ir", regId);
+                            pi.Parameters.AddWithValue("$ie", idEmp);
+                            pi.ExecuteNonQuery();
+                        }
+
+                    // 5. Kardex valorizado e idempotente (mismo criterio que digitalizador y escritorio)
+                    string refDia = "PROD-" + fecha;
+                    ReversarMovimientosDia(c, tx, refDia);
+
+                    // 5a. Consumir insumos a costo promedio ponderado (salida de materia prima)
+                    decimal costoMateriales = 0m;
+                    if (req.Materiales != null)
+                        foreach (var mat in req.Materiales)
+                        {
+                            if (string.IsNullOrWhiteSpace(mat.CodigoInsumo) || mat.Kg <= 0) continue;
+                            var pp = c.CreateCommand(); pp.Transaction = tx;
+                            pp.CommandText = "SELECT COALESCE(StockActual,0), COALESCE(CostoPromedio,0) FROM ProductosProveedor WHERE CodigoInterno=$ci";
+                            pp.Parameters.AddWithValue("$ci", mat.CodigoInsumo);
+                            decimal sa = 0m, cprom = 0m; bool existe = false;
+                            using (var rr = pp.ExecuteReader())
+                                if (rr.Read()) { sa = Db.D(rr, 0); cprom = Db.D(rr, 1); existe = true; }
+                            if (!existe) continue;   // insumo no esta en ProductosProveedor: se registro el consumo, pero no hay kardex de MP
+                            decimal kg = mat.Kg;
+                            decimal ns = sa - kg;
+                            costoMateriales += kg * cprom;
+                            RegistrarMovProd(c, tx, mat.CodigoInsumo, "SALIDA", kg, sa, ns, cprom,
+                                "MATERIA_PRIMA", refDia, fecha, $"Produccion {fecha} ({material})");
+                            var uu = c.CreateCommand(); uu.Transaction = tx;
+                            uu.CommandText = "UPDATE ProductosProveedor SET StockActual=$ns WHERE CodigoInterno=$ci";
+                            uu.Parameters.AddWithValue("$ns", (double)ns);
+                            uu.Parameters.AddWithValue("$ci", mat.CodigoInsumo);
+                            uu.ExecuteNonQuery();
+                        }
+
+                    // 5b. Mano de obra del dia = suma de los bonos de los obreros que cobran (participantes, o tarifados si no hay)
+                    var lc = c.CreateCommand(); lc.Transaction = tx;
+                    lc.CommandText = @"
+                        SELECT COALESCE(SUM(d.Cantidad * t.TarifaBs),0)
+                        FROM DetalleProduccionMolde d
+                        JOIN RegistroProduccionDia r ON r.Id = d.IdRegistro
+                        JOIN TarifasBonoProduccion t
+                          ON t.CodigoProducto = d.CodigoProducto
+                         AND r.Fecha >= t.FechaDesde
+                         AND (t.FechaHasta IS NULL OR r.Fecha <= t.FechaHasta)
+                        WHERE r.Id = $id
+                          AND ( NOT EXISTS (SELECT 1 FROM ParticipantesProduccionDia pp WHERE pp.IdRegistro=r.Id)
+                                OR EXISTS (SELECT 1 FROM ParticipantesProduccionDia p2 WHERE p2.IdRegistro=r.Id AND p2.IdEmpleado=t.IdEmpleado) )";
+                    lc.Parameters.AddWithValue("$id", regId);
+                    var oMano = lc.ExecuteScalar();
+                    decimal manoObra = (oMano == null || oMano == DBNull.Value) ? 0m : Convert.ToDecimal(oMano);
+
+                    // 5c. Costo de fabricacion por unidad y entrada de productos terminados a Inventario
+                    decimal unidades = 0m;
+                    foreach (var kv in producidos) unidades += (decimal)kv.Value;
+                    decimal costoFabUnit = unidades > 0 ? Math.Round((costoMateriales + manoObra) / unidades, 4) : 0m;
+                    foreach (var kv in producidos)
+                    {
+                        string cod = kv.Key; decimal cant = (decimal)kv.Value;
+                        if (string.IsNullOrEmpty(cod) || cant <= 0) continue;
+                        var ce = c.CreateCommand(); ce.Transaction = tx;
+                        ce.CommandText = "SELECT COALESCE(Existencia,0) FROM Inventario WHERE Codigo=$cod";
+                        ce.Parameters.AddWithValue("$cod", cod);
+                        var oex = ce.ExecuteScalar();
+                        if (oex == null || oex == DBNull.Value) continue;   // producto no esta en Inventario
+                        decimal sa2 = Convert.ToDecimal(oex);
+                        decimal ns2 = sa2 + cant;
+                        RegistrarMovProd(c, tx, cod, "ENTRADA", cant, sa2, ns2, costoFabUnit,
+                            "PRODUCTO", refDia, fecha, $"Produccion {fecha} ({material})");
+                        var uu = c.CreateCommand(); uu.Transaction = tx;
+                        uu.CommandText = "UPDATE Inventario SET Existencia=$ns, CostoActual=$cu, UltimaActualz=$f WHERE Codigo=$cod";
+                        uu.Parameters.AddWithValue("$ns", (double)ns2);
+                        uu.Parameters.AddWithValue("$cu", (double)costoFabUnit);
+                        uu.Parameters.AddWithValue("$f", fecha);
+                        uu.Parameters.AddWithValue("$cod", cod);
+                        uu.ExecuteNonQuery();
                     }
 
                     tx.Commit();
-                    return Results.Ok(new { ok = true, insertados, fecha });
+                    return Results.Ok(new { ok = true, insertados = moldes, fecha, costoUnitario = costoFabUnit, manoObra });
                 }
                 catch (Exception ex)
                 {
                     tx.Rollback();
-                    return Results.Problem(ex.Message);
+                    return Results.Json(new { ok = false, error = ex.Message }, statusCode: 500);
                 }
             }).AddEndpointFilter(RequireRole.Of(TokenService.PuedeEscribirProduccion)).RequireAuthorization();
+
+            // ── Obreros de producción activos (para marcar participantes) ──
+            app.MapGet("/api/produccion/obreros", () =>
+            {
+                using var c = Db.Conn();
+                var cmd = c.CreateCommand();
+                cmd.CommandText = @"SELECT Id, Nombre, Apellido FROM Empleados
+                    WHERE Activo=1 AND TipoEmpleado='Produccion' ORDER BY Apellido, Nombre";
+                var lista = new List<object>();
+                using var r = cmd.ExecuteReader();
+                while (r.Read())
+                    lista.Add(new { id = Db.I2(r, 0), nombre = (Db.S(r, 1) + " " + Db.S(r, 2)).Trim() });
+                return Results.Ok(lista);
+            }).RequireAuthorization();
+
+            // ── Último registro (para preseleccionar material, obreros y moldes) ──
+            app.MapGet("/api/produccion/ultimo", () =>
+            {
+                using var c = Db.Conn();
+                var q = c.CreateCommand();
+                q.CommandText = "SELECT Id, COALESCE(TipoMaterial,'Virgen') FROM RegistroProduccionDia ORDER BY Fecha DESC, Id DESC LIMIT 1";
+                int regId = 0; string material = "Virgen";
+                using (var r = q.ExecuteReader())
+                    if (r.Read()) { regId = Db.I2(r, 0); material = Db.S(r, 1); }
+                var participantes = new List<int>();
+                var moldes = new List<string>();
+                if (regId > 0)
+                {
+                    var pc = c.CreateCommand();
+                    pc.CommandText = "SELECT IdEmpleado FROM ParticipantesProduccionDia WHERE IdRegistro=$id";
+                    pc.Parameters.AddWithValue("$id", regId);
+                    using (var r = pc.ExecuteReader()) while (r.Read()) participantes.Add(Db.I2(r, 0));
+                    var mc = c.CreateCommand();
+                    mc.CommandText = "SELECT DISTINCT CodigoMolde FROM DetalleProduccionMolde WHERE IdRegistro=$id";
+                    mc.Parameters.AddWithValue("$id", regId);
+                    using (var r = mc.ExecuteReader()) while (r.Read()) moldes.Add(Db.S(r, 0));
+                }
+                return Results.Ok(new { material, participantes, moldes });
+            }).RequireAuthorization();
 
             // ── Listado de registros recientes ────────────────────────────
 
@@ -354,6 +529,67 @@ namespace SistemaGestion.Api.Endpoints
                 await ctx.Response.WriteAsync(html);
             }).RequireAuthorization();
         }
+
+        // ── Kardex: revertir los movimientos de un dia de produccion (idempotencia) ──
+        private static void ReversarMovimientosDia(SqliteConnection c, SqliteTransaction tx, string refDia)
+        {
+            var sel = c.CreateCommand(); sel.Transaction = tx;
+            sel.CommandText = "SELECT CodigoProducto, TipoMovimiento, Cantidad, TipoKardex FROM MovimientosInventario WHERE Referencia=$r";
+            sel.Parameters.AddWithValue("$r", refDia);
+            var movs = new List<(string cod, string tipoMov, double cant, string tipoK)>();
+            using (var rr = sel.ExecuteReader())
+                while (rr.Read())
+                    movs.Add((rr.IsDBNull(0) ? "" : rr.GetString(0), rr.IsDBNull(1) ? "" : rr.GetString(1),
+                             rr.IsDBNull(2) ? 0 : rr.GetDouble(2), rr.IsDBNull(3) ? "" : rr.GetString(3)));
+            foreach (var mv in movs)
+            {
+                if (mv.tipoK == "MATERIA_PRIMA")
+                {
+                    double signo = mv.tipoMov == "SALIDA" ? +1 : -1;   // deshacer el efecto sobre el stock
+                    var u = c.CreateCommand(); u.Transaction = tx;
+                    u.CommandText = "UPDATE ProductosProveedor SET StockActual = COALESCE(StockActual,0) + $d WHERE CodigoInterno=$cod";
+                    u.Parameters.AddWithValue("$d", signo * mv.cant);
+                    u.Parameters.AddWithValue("$cod", mv.cod);
+                    u.ExecuteNonQuery();
+                }
+                else
+                {
+                    double signo = mv.tipoMov == "ENTRADA" ? -1 : +1;   // deshacer el efecto sobre el stock
+                    var u = c.CreateCommand(); u.Transaction = tx;
+                    u.CommandText = "UPDATE Inventario SET Existencia = COALESCE(Existencia,0) + $d WHERE Codigo=$cod";
+                    u.Parameters.AddWithValue("$d", signo * mv.cant);
+                    u.Parameters.AddWithValue("$cod", mv.cod);
+                    u.ExecuteNonQuery();
+                }
+            }
+            var del = c.CreateCommand(); del.Transaction = tx;
+            del.CommandText = "DELETE FROM MovimientosInventario WHERE Referencia=$r";
+            del.Parameters.AddWithValue("$r", refDia);
+            del.ExecuteNonQuery();
+        }
+
+        // ── Kardex: insertar un movimiento valorizado ──
+        private static void RegistrarMovProd(SqliteConnection c, SqliteTransaction tx,
+            string cod, string tipoMov, decimal cant, decimal saldoAnt, decimal saldoNue, decimal costoUnit,
+            string tipoKardex, string referencia, string fecha, string concepto)
+        {
+            var ci = c.CreateCommand(); ci.Transaction = tx;
+            ci.CommandText = @"INSERT INTO MovimientosInventario
+                (FechaHora,CodigoProducto,TipoMovimiento,Concepto,Cantidad,SaldoAnterior,NuevoSaldo,Referencia,Usuario,TipoKardex,CostoUnitario)
+                VALUES ($fh,$cp,$tm,$co,$ca,$sa,$ns,$re,$us,$tk,$cu)";
+            ci.Parameters.AddWithValue("$fh", fecha + " " + DateTime.Now.ToString("HH:mm:ss"));
+            ci.Parameters.AddWithValue("$cp", cod);
+            ci.Parameters.AddWithValue("$tm", tipoMov);
+            ci.Parameters.AddWithValue("$co", concepto);
+            ci.Parameters.AddWithValue("$ca", (double)cant);
+            ci.Parameters.AddWithValue("$sa", (double)saldoAnt);
+            ci.Parameters.AddWithValue("$ns", (double)saldoNue);
+            ci.Parameters.AddWithValue("$re", referencia);
+            ci.Parameters.AddWithValue("$us", "Portal");
+            ci.Parameters.AddWithValue("$tk", tipoKardex);
+            ci.Parameters.AddWithValue("$cu", (double)costoUnit);
+            ci.ExecuteNonQuery();
+        }
     }
 
     public record MoldeRegistro(string CodigoMolde, int Primera, int Segunda, int Defectuosas);
@@ -365,5 +601,6 @@ namespace SistemaGestion.Api.Endpoints
         string? Turno,
         string? Observaciones,
         List<MoldeRegistro>? Moldes,
-        List<MaterialRegistro>? Materiales);
+        List<MaterialRegistro>? Materiales,
+        List<int>? Participantes);
 }

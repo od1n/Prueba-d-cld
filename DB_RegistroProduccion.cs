@@ -268,6 +268,14 @@ namespace SistemaGestion
                 // 3. Insertar moldes
                 foreach (var m in reg.Moldes)
                 {
+                    // CodigoProducto = producto base del molde (para que el bono de producción y la nómina casen)
+                    var mpDet = ObtenerMoldeProductos(m.CodigoMolde);
+                    string codProdDet = "";
+                    if (mpDet != null)
+                        codProdDet = reg.TipoMaterial == "Reciclado"
+                            ? (string.IsNullOrEmpty(mpDet.CodReciclado) ? mpDet.CodPrimera : mpDet.CodReciclado)
+                            : mpDet.CodPrimera;
+                    if (string.IsNullOrEmpty(codProdDet)) codProdDet = m.CodigoProducto ?? "";
                     var ins = c.CreateCommand(); ins.Transaction = tx;
                     ins.CommandText = @"
                         INSERT INTO DetalleProduccionMolde
@@ -276,7 +284,7 @@ namespace SistemaGestion
                         VALUES ($ir,$cm,$cp,$ca,$cp1,$cs,$cr,$cd)";
                     ins.Parameters.AddWithValue("$ir",  reg.Id);
                     ins.Parameters.AddWithValue("$cm",  m.CodigoMolde);
-                    ins.Parameters.AddWithValue("$cp",  m.CodigoProducto ?? "");
+                    ins.Parameters.AddWithValue("$cp",  codProdDet);
                     ins.Parameters.AddWithValue("$ca",  (double)m.CantTotal);
                     ins.Parameters.AddWithValue("$cp1", (double)m.CantPrimera);
                     ins.Parameters.AddWithValue("$cs",  (double)m.CantSegunda);
@@ -298,27 +306,58 @@ namespace SistemaGestion
                     ins.ExecuteNonQuery();
                 }
 
-                // 5. Mover inventario
-                // 5a. Descontar insumos
+                // 5. Mover inventario — kardex valorizado e idempotente.
+                //    Referencia PROD-fecha (misma clave que el portal): al re-guardar un día se
+                //    revierten primero los movimientos previos, así nunca se duplica el stock.
+                string refDia = "PROD-" + reg.Fecha.ToString("yyyy-MM-dd");
+                RevertirMovimientosDiaTx(c, tx, refDia);
+
+                // 5a. Consumir insumos a costo promedio (salida de materia prima desde ProductosProveedor)
+                decimal costoMateriales = 0m;
                 foreach (var mat in reg.Materiales)
                 {
-                    var inv = c.CreateCommand(); inv.Transaction = tx;
-                    inv.CommandText = @"
-                        UPDATE Inventario SET Existencia = Existencia - $cant
-                        WHERE Codigo = $cod";
-                    inv.Parameters.AddWithValue("$cant", (double)mat.Cantidad);
-                    inv.Parameters.AddWithValue("$cod",  mat.CodigoInsumo);
-                    inv.ExecuteNonQuery();
-
-                    // Kardex salida insumo (Kardex A = MATERIA_PRIMA)
-                    RegistrarMovimientoTx(c, tx, mat.CodigoInsumo, "SALIDA", mat.Cantidad,
-                        $"Produccion {reg.Fecha:dd/MM/yyyy} ({reg.TipoMaterial})",
-                        reg.Fecha.ToString("yyyy-MM-dd"), Sesion.NombreUsuario ?? "Sistema",
-                        "MATERIA_PRIMA");
+                    var pp = c.CreateCommand(); pp.Transaction = tx;
+                    pp.CommandText = "SELECT COALESCE(StockActual,0), COALESCE(CostoPromedio,0) FROM ProductosProveedor WHERE CodigoInterno=$ci";
+                    pp.Parameters.AddWithValue("$ci", mat.CodigoInsumo);
+                    decimal saMp = 0m, cprom = 0m; bool existeMp = false;
+                    using (var rp = pp.ExecuteReader())
+                        if (rp.Read()) { saMp = D(rp,0); cprom = D(rp,1); existeMp = true; }
+                    if (!existeMp) continue;   // insumo no está en ProductosProveedor: se registró el consumo, sin kardex de MP
+                    decimal nsMp = saMp - mat.Cantidad;
+                    costoMateriales += mat.Cantidad * cprom;
+                    RegistrarMovValorizadoTx(c, tx, mat.CodigoInsumo, "SALIDA", mat.Cantidad, saMp, nsMp, cprom,
+                        "MATERIA_PRIMA", refDia, reg.Fecha, $"Produccion {reg.Fecha:dd/MM/yyyy} ({reg.TipoMaterial})");
+                    var uMp = c.CreateCommand(); uMp.Transaction = tx;
+                    uMp.CommandText = "UPDATE ProductosProveedor SET StockActual=$ns WHERE CodigoInterno=$ci";
+                    uMp.Parameters.AddWithValue("$ns", (double)nsMp);
+                    uMp.Parameters.AddWithValue("$ci", mat.CodigoInsumo);
+                    uMp.ExecuteNonQuery();
                 }
 
-                // 5b. Sumar productos producidos
-                // Obtener pesos para el resumen de merma
+                // 5b. Mano de obra del día = suma de los bonos de los obreros que cobran ese día
+                //     (participantes si se registraron; si no, todos los tarifados — igual que el portal)
+                var lc = c.CreateCommand(); lc.Transaction = tx;
+                lc.CommandText = @"
+                    SELECT COALESCE(SUM(d.Cantidad * t.TarifaBs),0)
+                    FROM DetalleProduccionMolde d
+                    JOIN RegistroProduccionDia r ON r.Id = d.IdRegistro
+                    JOIN TarifasBonoProduccion t
+                      ON t.CodigoProducto = d.CodigoProducto
+                     AND r.Fecha >= t.FechaDesde
+                     AND (t.FechaHasta IS NULL OR r.Fecha <= t.FechaHasta)
+                    WHERE r.Id = $id
+                      AND ( NOT EXISTS (SELECT 1 FROM ParticipantesProduccionDia pp WHERE pp.IdRegistro=r.Id)
+                            OR EXISTS (SELECT 1 FROM ParticipantesProduccionDia p2 WHERE p2.IdRegistro=r.Id AND p2.IdEmpleado=t.IdEmpleado) )";
+                lc.Parameters.AddWithValue("$id", reg.Id);
+                decimal manoObra = D(lc.ExecuteScalar());
+
+                // 5c. Unidades producidas (piezas buenas) y costo de fabricación por unidad
+                decimal unidades = 0m;
+                foreach (var m in reg.Moldes)
+                    unidades += (reg.TipoMaterial == "Virgen") ? (m.CantPrimera + m.CantSegunda) : m.CantReciclado;
+                decimal costoFabUnit = unidades > 0 ? Math.Round((costoMateriales + manoObra) / unidades, 4) : 0m;
+
+                // 5d. Sumar productos producidos a Inventario, valorizados a costoFabUnit
                 var invDict = new Dictionary<string, (decimal Peso, decimal Existencia)>();
                 foreach (var m in reg.Moldes)
                 {
@@ -328,17 +367,25 @@ namespace SistemaGestion
                     void SumarProd(string cod, decimal cant)
                     {
                         if (string.IsNullOrWhiteSpace(cod) || cant <= 0) return;
+                        var cs = c.CreateCommand(); cs.Transaction = tx;
+                        cs.CommandText = "SELECT COALESCE(Existencia,0) FROM Inventario WHERE Codigo=$cod";
+                        cs.Parameters.AddWithValue("$cod", cod);
+                        var oex = cs.ExecuteScalar();
+                        if (oex == null || oex == DBNull.Value) return;   // producto no está en Inventario
+                        decimal saPt = D(oex);
+                        decimal nsPt = saPt + cant;
+                        RegistrarMovValorizadoTx(c, tx, cod, "ENTRADA", cant, saPt, nsPt, costoFabUnit,
+                            "PRODUCTO", refDia, reg.Fecha, $"Produccion {reg.Fecha:dd/MM/yyyy} ({reg.TipoMaterial})");
                         var cmdU = c.CreateCommand(); cmdU.Transaction = tx;
                         cmdU.CommandText =
-                            "UPDATE Inventario SET Existencia=Existencia+$c WHERE Codigo=$cod";
-                        cmdU.Parameters.AddWithValue("$c",   (double)cant);
+                            "UPDATE Inventario SET Existencia=$ns, CostoActual=$cu, UltimaActualz=$f WHERE Codigo=$cod";
+                        cmdU.Parameters.AddWithValue("$ns",  (double)nsPt);
+                        cmdU.Parameters.AddWithValue("$cu",  (double)costoFabUnit);
+                        cmdU.Parameters.AddWithValue("$f",   reg.Fecha.ToString("yyyy-MM-dd"));
                         cmdU.Parameters.AddWithValue("$cod", cod);
                         cmdU.ExecuteNonQuery();
-                        RegistrarMovimientoTx(c, tx, cod, "ENTRADA", cant,
-                            $"Produccion {reg.Fecha:dd/MM/yyyy} ({reg.TipoMaterial})",
-                            reg.Fecha.ToString("yyyy-MM-dd"), Sesion.NombreUsuario ?? "Sistema");
 
-                        // Guardar peso para merma
+                        // Guardar peso para el resumen de merma
                         if (!invDict.ContainsKey(cod))
                         {
                             var cmdP = c.CreateCommand(); cmdP.Transaction = tx;
@@ -544,6 +591,70 @@ namespace SistemaGestion
             catch { /* No interrumpir si kardex falla */ }
         }
 
+        // ── Kardex valorizado: inserta un movimiento con costo unitario y referencia de día ──
+        private static void RegistrarMovValorizadoTx(
+            SqliteConnection c, SqliteTransaction tx,
+            string codigo, string tipo, decimal cantidad, decimal saldoAnt, decimal saldoNue,
+            decimal costoUnitario, string tipoKardex, string referencia, DateTime fecha, string concepto)
+        {
+            var cmdM = c.CreateCommand(); cmdM.Transaction = tx;
+            cmdM.CommandText = @"
+                INSERT INTO MovimientosInventario
+                    (CodigoProducto,TipoMovimiento,Cantidad,Concepto,
+                     Referencia,SaldoAnterior,NuevoSaldo,FechaHora,Usuario,
+                     TipoKardex,CostoUnitario)
+                VALUES ($cod,$tipo,$cant,$conc,$ref,$sa,$ns,$fh,$usr,$tk,$cu)";
+            cmdM.Parameters.AddWithValue("$cod",  codigo);
+            cmdM.Parameters.AddWithValue("$tipo", tipo);
+            cmdM.Parameters.AddWithValue("$cant", (double)cantidad);
+            cmdM.Parameters.AddWithValue("$conc", concepto);
+            cmdM.Parameters.AddWithValue("$ref",  referencia);
+            cmdM.Parameters.AddWithValue("$sa",   (double)saldoAnt);
+            cmdM.Parameters.AddWithValue("$ns",   (double)saldoNue);
+            cmdM.Parameters.AddWithValue("$fh",   fecha.ToString("yyyy-MM-dd") + " " + DateTime.Now.ToString("HH:mm:ss"));
+            cmdM.Parameters.AddWithValue("$usr",  Sesion.NombreUsuario ?? "Sistema");
+            cmdM.Parameters.AddWithValue("$tk",   tipoKardex);
+            cmdM.Parameters.AddWithValue("$cu",   (double)costoUnitario);
+            cmdM.ExecuteNonQuery();
+        }
+
+        // ── Kardex: revierte los movimientos de un día de producción (idempotencia por Referencia) ──
+        private static void RevertirMovimientosDiaTx(SqliteConnection c, SqliteTransaction tx, string refDia)
+        {
+            var sel = c.CreateCommand(); sel.Transaction = tx;
+            sel.CommandText = "SELECT CodigoProducto, TipoMovimiento, Cantidad, TipoKardex FROM MovimientosInventario WHERE Referencia=$r";
+            sel.Parameters.AddWithValue("$r", refDia);
+            var movs = new List<(string cod, string tipoMov, decimal cant, string tipoK)>();
+            using (var rr = sel.ExecuteReader())
+                while (rr.Read())
+                    movs.Add((S(rr,0), S(rr,1), D(rr,2), S(rr,3)));
+            foreach (var mv in movs)
+            {
+                if (mv.tipoK == "MATERIA_PRIMA")
+                {
+                    decimal signo = mv.tipoMov == "SALIDA" ? 1m : -1m;   // deshacer el efecto sobre el stock
+                    var u = c.CreateCommand(); u.Transaction = tx;
+                    u.CommandText = "UPDATE ProductosProveedor SET StockActual = COALESCE(StockActual,0) + $d WHERE CodigoInterno=$cod";
+                    u.Parameters.AddWithValue("$d", (double)(signo * mv.cant));
+                    u.Parameters.AddWithValue("$cod", mv.cod);
+                    u.ExecuteNonQuery();
+                }
+                else
+                {
+                    decimal signo = mv.tipoMov == "ENTRADA" ? -1m : 1m;   // deshacer el efecto sobre el stock
+                    var u = c.CreateCommand(); u.Transaction = tx;
+                    u.CommandText = "UPDATE Inventario SET Existencia = COALESCE(Existencia,0) + $d WHERE Codigo=$cod";
+                    u.Parameters.AddWithValue("$d", (double)(signo * mv.cant));
+                    u.Parameters.AddWithValue("$cod", mv.cod);
+                    u.ExecuteNonQuery();
+                }
+            }
+            var del = c.CreateCommand(); del.Transaction = tx;
+            del.CommandText = "DELETE FROM MovimientosInventario WHERE Referencia=$r";
+            del.Parameters.AddWithValue("$r", refDia);
+            del.ExecuteNonQuery();
+        }
+
         // ── Resumen para reportes ─────────────────────────────────────────
         public static List<(string Codigo, string Desc, decimal Total)>
             ResumenProduccionRango(DateTime desde, DateTime hasta)
@@ -581,7 +692,11 @@ namespace SistemaGestion
                  AND t.IdEmpleado     = $id
                  AND r.Fecha >= t.FechaDesde
                  AND (t.FechaHasta IS NULL OR r.Fecha <= t.FechaHasta)
-                WHERE r.Fecha >= $d AND r.Fecha <= $h";
+                WHERE r.Fecha >= $d AND r.Fecha <= $h
+                  AND ( NOT EXISTS (SELECT 1 FROM ParticipantesProduccionDia pp
+                                    WHERE pp.IdRegistro = r.Id)
+                        OR EXISTS (SELECT 1 FROM ParticipantesProduccionDia p2
+                                   WHERE p2.IdRegistro = r.Id AND p2.IdEmpleado = $id) )";
             cmd.Parameters.AddWithValue("$id", idEmpleado);
             cmd.Parameters.AddWithValue("$d",  desde.ToString("yyyy-MM-dd"));
             cmd.Parameters.AddWithValue("$h",  hasta.ToString("yyyy-MM-dd"));

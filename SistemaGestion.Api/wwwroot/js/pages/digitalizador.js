@@ -15,6 +15,21 @@ let tabActiva   = 'digitalizar';
 // Filas dinámicas para carga manual
 let manualMoldes = [{ codigoMolde:'', primera:0, segunda:0, defectuosas:0 }];
 let manualMateriales = [];
+let manualObreros = [];              // [{id, nombre}] empleados de producción
+let manualParticipantes = new Set(); // ids de obreros marcados
+let manualMaterial = 'Virgen';
+
+// Chips de obreros reutilizables (tab manual y revisión del digitalizador)
+function obrerosChipsHTML() {
+    if (!manualObreros.length)
+        return '<div class="input-label" style="color:var(--texto-dim)">No hay empleados de producción activos. Agrégalos en Nómina.</div>';
+    return `<div style="display:flex;flex-wrap:wrap;gap:8px">` + manualObreros.map(o => {
+        const on = manualParticipantes.has(Number(o.id));
+        return `<label class="chk-obrero" data-id="${o.id}" style="display:flex;align-items:center;gap:6px;padding:6px 10px;border:1px solid var(--borde);border-radius:20px;cursor:pointer;background:${on?'var(--cyan-dim)':'var(--fondo-inp)'}">
+            <input type="checkbox" class="ob-chk" value="${o.id}" ${on?'checked':''} style="width:16px;height:16px">
+            <span>${esh(o.nombre)}</span></label>`;
+    }).join('') + `</div>`;
+}
 
 // ── Render principal ──────────────────────────────────────────
 function render() {
@@ -274,6 +289,11 @@ function htmlPaso2() {
     contenido += `</div>`;
 
     if (esPlanilla) {
+        contenido += `
+        <div class="card">
+            <div class="card-title">Obreros que participaron</div>
+            <div id="p2-obreros">${obrerosChipsHTML()}</div>
+        </div>`;
         const opsMolde = moldesDB.map(m =>
             `<option value="${esh(m.codigo)}">${esh(m.codigo)} — ${esh(m.descripcion)}</option>`
         ).join('');
@@ -352,15 +372,25 @@ function htmlPaso2() {
 
 async function initPaso2() {
     try {
-        const [ms, ins] = await Promise.all([
+        const [ms, ins, obr, ult] = await Promise.all([
             apiGet('/api/produccion/moldes').catch(() => []),
             apiGet('/api/produccion/insumos').catch(() => []),
+            apiGet('/api/produccion/obreros').catch(() => []),
+            apiGet('/api/produccion/ultimo').catch(() => null),
         ]);
         moldesDB = ms || [];
         insumosDB = ins || [];
+        manualObreros = obr || [];
+        manualParticipantes = new Set(((ult && ult.participantes) || []).map(Number));
         document.getElementById('zona-paso').innerHTML = htmlPaso2();
     } catch { /* sin catálogos, igual funciona */ }
 
+    document.getElementById('p2-obreros')?.addEventListener('change', e => {
+        if (!e.target.classList.contains('ob-chk')) return;
+        const id = Number(e.target.value);
+        if (e.target.checked) { manualParticipantes.add(id); e.target.closest('.chk-obrero').style.background = 'var(--cyan-dim)'; }
+        else { manualParticipantes.delete(id); e.target.closest('.chk-obrero').style.background = 'var(--fondo-inp)'; }
+    });
     document.getElementById('btn-volver')?.addEventListener('click', () => mostrarPaso(1));
     document.getElementById('btn-confirmar')?.addEventListener('click', confirmar);
 }
@@ -372,44 +402,52 @@ async function confirmar() {
     try {
         const fecha = document.getElementById('f-fecha')?.value?.trim() || datosExtra.fecha;
 
-        let payload;
         if (tipoDoc === 'planilla') {
+            // La planilla revisada se guarda por el MISMO endpoint canónico que la carga manual:
+            // así el kardex valorizado y el bono por participantes son idénticos por cualquier vía.
+            const material = document.getElementById('f-material')?.value || 'Virgen';
             const moldes = [];
             document.querySelectorAll('.molde-sel').forEach((sel, i) => {
-                moldes.push({
-                    codigo_molde: sel.value,
-                    primera:      +document.querySelector(`.m-p1[data-idx="${i}"]`)?.value || 0,
-                    segunda:      +document.querySelector(`.m-p2[data-idx="${i}"]`)?.value || 0,
-                    reciclado:    +document.querySelector(`.m-rec[data-idx="${i}"]`)?.value || 0,
-                    defectuosas:  +document.querySelector(`.m-def[data-idx="${i}"]`)?.value || 0,
-                });
+                if (!sel.value) return;
+                const p1  = +document.querySelector(`.m-p1[data-idx="${i}"]`)?.value || 0;
+                const p2  = +document.querySelector(`.m-p2[data-idx="${i}"]`)?.value || 0;
+                const rec = +document.querySelector(`.m-rec[data-idx="${i}"]`)?.value || 0;
+                const def = +document.querySelector(`.m-def[data-idx="${i}"]`)?.value || 0;
+                // Modelo canónico: un material por día. En día Reciclado la "primera" lleva el conteo de reciclado.
+                const primera = material === 'Reciclado' ? (rec > 0 ? rec : p1) : p1;
+                moldes.push({ codigoMolde: sel.value, primera, segunda: p2, defectuosas: def });
             });
+            if (moldes.length === 0) throw new Error('Selecciona al menos un molde.');
 
             const materiales = [];
             document.querySelectorAll('.ins-sel').forEach((sel, i) => {
                 const kg = +document.querySelector(`.mat-kg[data-idx="${i}"]`)?.value || 0;
-                if (sel.value && kg > 0)
-                    materiales.push({ codigo_insumo: sel.value, kg });
+                if (sel.value && kg > 0) materiales.push({ codigoInsumo: sel.value, kg });
             });
 
-            payload = {
-                fecha,
-                material:      document.getElementById('f-material')?.value || 'Virgen',
+            const participantes = Array.from(manualParticipantes);
+            if (participantes.length === 0) throw new Error('Marca al menos un obrero que participó.');
+
+            const payload = {
+                fecha, material,
                 operario:      document.getElementById('f-operario')?.value || null,
                 turno:         document.getElementById('f-turno')?.value    || null,
                 observaciones: document.getElementById('f-obs')?.value      || null,
-                moldes,
-                materiales,
+                moldes, materiales, participantes,
             };
-        } else {
-            payload = {
-                ...datosExtra,
-                fecha,
-                numero_factura: document.getElementById('f-nfactura')?.value || null,
-                proveedor:      document.getElementById('f-proveedor')?.value || null,
-            };
+            const data = await apiPost('/api/produccion/registro', payload);
+            if (data.error) throw new Error(data.error);
+            mostrarPaso(3);
+            return;
         }
 
+        // Factura de compra: sigue por el digitalizador (OCR de factura, no producción).
+        const payload = {
+            ...datosExtra,
+            fecha,
+            numero_factura: document.getElementById('f-nfactura')?.value || null,
+            proveedor:      document.getElementById('f-proveedor')?.value || null,
+        };
         const resp = await fetch('/api/produccion/confirmar', {
             method: 'POST',
             credentials: 'include',
@@ -459,64 +497,88 @@ function initPaso3() {
 // TAB: CARGA MANUAL
 // ════════════════════════════════════════════════════════════════
 async function renderTabManual(zona) {
-    zona.innerHTML = '<div class="loading-msg"><div class="spinner"></div> Cargando catálogos...</div>';
-
+    zona.innerHTML = '<div class="loading-msg"><div class="spinner"></div> Cargando…</div>';
+    let ultimo = { material:'Virgen', participantes:[], moldes:[] };
     try {
-        const [ms, ins] = await Promise.all([
-            apiGet('/api/produccion/moldes').catch(() => []),
-            apiGet('/api/produccion/insumos').catch(() => []),
+        const [ms, ins, obr, ult] = await Promise.all([
+            apiGet('/api/produccion/moldes').catch(()=>[]),
+            apiGet('/api/produccion/insumos').catch(()=>[]),
+            apiGet('/api/produccion/obreros').catch(()=>[]),
+            apiGet('/api/produccion/ultimo').catch(()=>null),
         ]);
         moldesDB = ms || [];
         insumosDB = ins || [];
-    } catch { /* continuar sin catálogos */ }
+        manualObreros = obr || [];
+        if (ult) ultimo = ult;
+    } catch {}
+
+    // Preselección desde el último registro
+    manualMaterial = ultimo.material || 'Virgen';
+    manualParticipantes = new Set((ultimo.participantes||[]).map(Number));
+    if (ultimo.moldes && ultimo.moldes.length)
+        manualMoldes = ultimo.moldes.map(cod => ({ codigoMolde: cod, primera:0, segunda:0, defectuosas:0 }));
+    else if (!manualMoldes.length)
+        manualMoldes = [{ codigoMolde:'', primera:0, segunda:0, defectuosas:0 }];
 
     const hoy = new Date().toISOString().slice(0,10);
+    const opsMolde = moldesDB.map(m => {
+        const prod = m.codigoProducto ? ` [${esh(m.codigoProducto)}]` : '';
+        return `<option value="${esh(m.codigo)}">${esh(m.codigo)} — ${esh(m.descripcion)}${prod}</option>`;
+    }).join('');
+    const opsIns = insumosDB.map(x => `<option value="${esh(x.codigo)}">${esh(x.descripcion)}</option>`).join('');
 
-    const opsMolde = moldesDB.map(m =>
-        `<option value="${esh(m.codigo)}">${esh(m.codigo)} — ${esh(m.descripcion)}</option>`
-    ).join('');
-
-    const opsIns = insumosDB.map(x =>
-        `<option value="${esh(x.codigo)}">${esh(x.descripcion)}</option>`
-    ).join('');
-
+    function selMolde(cod, idx) {
+        return `<select class="mm-molde" data-idx="${idx}" style="min-width:130px">
+            <option value="">— selecciona —</option>${opsMolde.replace(
+                cod ? `value="${esh(cod)}"` : '###NONE###',
+                cod ? `value="${esh(cod)}" selected` : '###NONE###')}
+        </select>`;
+    }
     function filasMoldeHTML() {
-        return manualMoldes.map((mm, i) => `<tr>
-            <td><select class="mm-molde" data-idx="${i}" style="min-width:90px">
-                <option value="">— selecciona —</option>${opsMolde.replace(
-                    mm.codigoMolde ? `value="${esh(mm.codigoMolde)}"` : '###NONE###',
-                    mm.codigoMolde ? `value="${esh(mm.codigoMolde)}" selected` : '###NONE###')}
-            </select></td>
-            <td><input type="number" class="mm-p1" data-idx="${i}" min="0" value="${mm.primera}" style="width:60px"></td>
-            <td><input type="number" class="mm-p2" data-idx="${i}" min="0" value="${mm.segunda}" style="width:60px"></td>
-            <td><input type="number" class="mm-def" data-idx="${i}" min="0" value="${mm.defectuosas}" style="width:60px;color:var(--rojo)"></td>
+        return manualMoldes.map((mm,i)=>`<tr>
+            <td>${selMolde(mm.codigoMolde,i)}</td>
+            <td><input type="number" class="mm-p1" data-idx="${i}" min="0" value="${mm.primera||0}" style="width:60px"></td>
+            <td><input type="number" class="mm-p2" data-idx="${i}" min="0" value="${mm.segunda||0}" style="width:60px"></td>
+            <td><input type="number" class="mm-def" data-idx="${i}" min="0" value="${mm.defectuosas||0}" style="width:60px;color:var(--rojo)"></td>
             <td><button type="button" class="mm-del btn btn-ghost btn-sm" data-idx="${i}" ${manualMoldes.length<=1?'disabled':''} style="padding:2px 6px">✕</button></td>
         </tr>`).join('');
     }
-
     function filasMatHTML() {
-        return manualMateriales.map((mm, i) => `<tr>
+        return manualMateriales.map((mm,i)=>`<tr>
             <td><select class="mmat-ins" data-idx="${i}" style="min-width:110px">
                 <option value="">— selecciona —</option>${opsIns.replace(
                     mm.codigoInsumo ? `value="${esh(mm.codigoInsumo)}"` : '###NONE###',
                     mm.codigoInsumo ? `value="${esh(mm.codigoInsumo)}" selected` : '###NONE###')}
             </select></td>
-            <td><input type="number" class="mmat-kg" data-idx="${i}" min="0" step="0.1" value="${mm.kg}" style="width:80px"></td>
+            <td><input type="number" class="mmat-kg" data-idx="${i}" min="0" step="0.1" value="${mm.kg||0}" style="width:80px"></td>
             <td><button type="button" class="mmat-del btn btn-ghost btn-sm" data-idx="${i}" style="padding:2px 6px">✕</button></td>
         </tr>`).join('');
+    }
+    function obrerosHTML() {
+        if (!manualObreros.length)
+            return '<div class="input-label" style="color:var(--texto-dim)">No hay empleados de producción activos. Agrégalos en Nómina.</div>';
+        return `<div style="display:flex;flex-wrap:wrap;gap:8px">` + manualObreros.map(o => {
+            const on = manualParticipantes.has(Number(o.id));
+            return `<label class="chk-obrero" data-id="${o.id}" style="display:flex;align-items:center;gap:6px;padding:6px 10px;border:1px solid var(--borde);border-radius:20px;cursor:pointer;background:${on?'var(--cyan-dim)':'var(--fondo-inp)'}">
+                <input type="checkbox" class="ob-chk" value="${o.id}" ${on?'checked':''} style="width:16px;height:16px">
+                <span>${esh(o.nombre)}</span></label>`;
+        }).join('') + `</div>`;
     }
 
     zona.innerHTML = `
     <div class="card">
-        <div class="card-title">Datos generales</div>
+        <div class="card-title">Datos del día</div>
         <div class="form-grid-2">
             <div class="input-group">
                 <label class="input-label">Fecha</label>
                 <input class="input-field" type="date" id="man-fecha" value="${hoy}">
             </div>
             <div class="input-group">
-                <label class="input-label">Operario</label>
-                <input class="input-field" id="man-operario" placeholder="Nombre del operario">
+                <label class="input-label">Material usado</label>
+                <select class="input-field" id="man-material">
+                    <option value="Virgen" ${manualMaterial==='Virgen'?'selected':''}>Virgen</option>
+                    <option value="Reciclado" ${manualMaterial==='Reciclado'?'selected':''}>Reciclado</option>
+                </select>
             </div>
             <div class="input-group">
                 <label class="input-label">Turno</label>
@@ -527,26 +589,22 @@ async function renderTabManual(zona) {
                     <option value="Noche">Noche</option>
                 </select>
             </div>
-            <div class="input-group">
-                <label class="input-label">Material</label>
-                <select class="input-field" id="man-material">
-                    <option value="Virgen">Virgen</option>
-                    <option value="Reciclado">Reciclado</option>
-                </select>
-            </div>
         </div>
     </div>
 
     <div class="card">
+        <div class="card-title">Obreros que participaron</div>
+        <div id="man-obreros">${obrerosHTML()}</div>
+    </div>
+
+    <div class="card">
         <div class="flex-between" style="margin-bottom:8px">
-            <div class="card-title" style="margin:0">Moldes</div>
+            <div class="card-title" style="margin:0">Moldes producidos</div>
             <button type="button" class="btn btn-ghost btn-sm" id="man-add-molde">+ Agregar molde</button>
         </div>
         <div style="overflow-x:auto">
         <table class="tbl">
-            <thead><tr>
-                <th>Molde</th><th>1ª Cal.</th><th>2ª Cal.</th><th style="color:var(--rojo)">Def.</th><th></th>
-            </tr></thead>
+            <thead><tr><th>Molde [producto]</th><th>1ª Cal.</th><th>2ª Cal.</th><th style="color:var(--rojo)">Def.</th><th></th></tr></thead>
             <tbody id="man-moldes-body">${filasMoldeHTML()}</tbody>
         </table>
         </div>
@@ -573,128 +631,82 @@ async function renderTabManual(zona) {
     </div>
 
     <div id="alerta-manual" style="margin-bottom:8px"></div>
-    <button class="btn btn-cyan btn-full" id="man-guardar">Guardar registro</button>`;
+    <button class="btn btn-cyan btn-full" id="man-guardar">Guardar producción del día</button>`;
 
-    // ── Eventos ──
     function syncMoldesFromDOM() {
         manualMoldes = [];
-        document.querySelectorAll('.mm-molde').forEach((sel, i) => {
+        document.querySelectorAll('.mm-molde').forEach((sel,i)=>{
             manualMoldes.push({
                 codigoMolde: sel.value,
-                primera: +(document.querySelector(`.mm-p1[data-idx="${i}"]`)?.value) || 0,
-                segunda: +(document.querySelector(`.mm-p2[data-idx="${i}"]`)?.value) || 0,
-                defectuosas: +(document.querySelector(`.mm-def[data-idx="${i}"]`)?.value) || 0,
+                primera: +(document.querySelector(`.mm-p1[data-idx="${i}"]`)?.value)||0,
+                segunda: +(document.querySelector(`.mm-p2[data-idx="${i}"]`)?.value)||0,
+                defectuosas: +(document.querySelector(`.mm-def[data-idx="${i}"]`)?.value)||0,
             });
         });
     }
     function syncMatFromDOM() {
         manualMateriales = [];
-        document.querySelectorAll('.mmat-ins').forEach((sel, i) => {
-            manualMateriales.push({
-                codigoInsumo: sel.value,
-                kg: +(document.querySelector(`.mmat-kg[data-idx="${i}"]`)?.value) || 0,
-            });
+        document.querySelectorAll('.mmat-ins').forEach((sel,i)=>{
+            manualMateriales.push({ codigoInsumo: sel.value, kg:+(document.querySelector(`.mmat-kg[data-idx="${i}"]`)?.value)||0 });
         });
     }
-    function refreshMoldesTable() {
-        document.getElementById('man-moldes-body').innerHTML = filasMoldeHTML();
-        bindMoldeEvents();
+    function refreshMoldes(){ document.getElementById('man-moldes-body').innerHTML=filasMoldeHTML(); bindMolde(); }
+    function refreshMat(){ document.getElementById('man-mat-body').innerHTML=filasMatHTML(); bindMat(); }
+    function bindMolde(){
+        document.querySelectorAll('.mm-del').forEach(b=>b.addEventListener('click',()=>{ syncMoldesFromDOM(); const idx=+b.dataset.idx; if(manualMoldes.length>1) manualMoldes.splice(idx,1); refreshMoldes(); }));
     }
-    function refreshMatTable() {
-        document.getElementById('man-mat-body').innerHTML = filasMatHTML();
-        bindMatEvents();
+    function bindMat(){
+        document.querySelectorAll('.mmat-del').forEach(b=>b.addEventListener('click',()=>{ syncMatFromDOM(); manualMateriales.splice(+b.dataset.idx,1); refreshMat(); }));
     }
-    function bindMoldeEvents() {
-        document.querySelectorAll('.mm-del').forEach(btn => {
-            btn.addEventListener('click', () => {
-                syncMoldesFromDOM();
-                const idx = +btn.dataset.idx;
-                if (manualMoldes.length > 1) manualMoldes.splice(idx, 1);
-                refreshMoldesTable();
-            });
-        });
-    }
-    function bindMatEvents() {
-        document.querySelectorAll('.mmat-del').forEach(btn => {
-            btn.addEventListener('click', () => {
-                syncMatFromDOM();
-                const idx = +btn.dataset.idx;
-                manualMateriales.splice(idx, 1);
-                refreshMatTable();
-            });
-        });
-    }
-
-    document.getElementById('man-add-molde').addEventListener('click', () => {
-        syncMoldesFromDOM();
-        manualMoldes.push({ codigoMolde:'', primera:0, segunda:0, defectuosas:0 });
-        refreshMoldesTable();
+    document.getElementById('man-obreros').addEventListener('change', e=>{
+        if(!e.target.classList.contains('ob-chk')) return;
+        const id=Number(e.target.value);
+        if(e.target.checked){ manualParticipantes.add(id); e.target.closest('.chk-obrero').style.background='var(--cyan-dim)'; }
+        else { manualParticipantes.delete(id); e.target.closest('.chk-obrero').style.background='var(--fondo-inp)'; }
     });
-    document.getElementById('man-add-mat').addEventListener('click', () => {
-        syncMatFromDOM();
-        manualMateriales.push({ codigoInsumo:'', kg:0 });
-        refreshMatTable();
-    });
-
-    bindMoldeEvents();
-    bindMatEvents();
-
+    document.getElementById('man-material').addEventListener('change', e=>{ manualMaterial=e.target.value; });
+    document.getElementById('man-add-molde').addEventListener('click',()=>{ syncMoldesFromDOM(); manualMoldes.push({codigoMolde:'',primera:0,segunda:0,defectuosas:0}); refreshMoldes(); });
+    document.getElementById('man-add-mat').addEventListener('click',()=>{ syncMatFromDOM(); manualMateriales.push({codigoInsumo:'',kg:0}); refreshMat(); });
+    bindMolde(); bindMat();
     document.getElementById('man-guardar').addEventListener('click', guardarManual);
 }
 
 async function guardarManual() {
     const btn = document.getElementById('man-guardar');
     const alerta = document.getElementById('alerta-manual');
-    alerta.innerHTML = '';
-
-    // Sync from DOM
-    const moldes = [];
-    document.querySelectorAll('.mm-molde').forEach((sel, i) => {
-        moldes.push({
-            codigoMolde: sel.value,
-            primera: +(document.querySelector(`.mm-p1[data-idx="${i}"]`)?.value) || 0,
-            segunda: +(document.querySelector(`.mm-p2[data-idx="${i}"]`)?.value) || 0,
-            defectuosas: +(document.querySelector(`.mm-def[data-idx="${i}"]`)?.value) || 0,
-        });
+    alerta.innerHTML='';
+    const moldes=[];
+    document.querySelectorAll('.mm-molde').forEach((sel,i)=>{
+        moldes.push({ codigoMolde: sel.value,
+            primera:+(document.querySelector(`.mm-p1[data-idx="${i}"]`)?.value)||0,
+            segunda:+(document.querySelector(`.mm-p2[data-idx="${i}"]`)?.value)||0,
+            defectuosas:+(document.querySelector(`.mm-def[data-idx="${i}"]`)?.value)||0 });
     });
-    const materiales = [];
-    document.querySelectorAll('.mmat-ins').forEach((sel, i) => {
-        const kg = +(document.querySelector(`.mmat-kg[data-idx="${i}"]`)?.value) || 0;
-        if (sel.value && kg > 0)
-            materiales.push({ codigoInsumo: sel.value, kg });
+    const materiales=[];
+    document.querySelectorAll('.mmat-ins').forEach((sel,i)=>{
+        const kg=+(document.querySelector(`.mmat-kg[data-idx="${i}"]`)?.value)||0;
+        if(sel.value && kg>0) materiales.push({ codigoInsumo:sel.value, kg });
     });
-
-    const validMoldes = moldes.filter(m => m.codigoMolde);
-    if (validMoldes.length === 0) {
-        alerta.innerHTML = '<div class="alerta-err">Debe seleccionar al menos un molde.</div>';
-        return;
-    }
-
+    const validMoldes = moldes.filter(m=>m.codigoMolde);
+    if(validMoldes.length===0){ alerta.innerHTML='<div class="alerta-err">Debe seleccionar al menos un molde.</div>'; return; }
+    const participantes = Array.from(manualParticipantes);
+    if(participantes.length===0){ alerta.innerHTML='<div class="alerta-err">Marca al menos un obrero que participó.</div>'; return; }
     const payload = {
         fecha: document.getElementById('man-fecha')?.value || null,
-        operario: document.getElementById('man-operario')?.value || null,
-        turno: document.getElementById('man-turno')?.value || null,
         material: document.getElementById('man-material')?.value || 'Virgen',
+        turno: document.getElementById('man-turno')?.value || null,
         observaciones: document.getElementById('man-obs')?.value || null,
-        moldes: validMoldes,
-        materiales,
+        moldes: validMoldes, materiales, participantes,
     };
-
-    btn.disabled = true; btn.textContent = 'Guardando…';
-
+    btn.disabled=true; btn.textContent='Guardando…';
     try {
         const data = await apiPost('/api/produccion/registro', payload);
-        if (data.error) throw new Error(data.error);
-        alerta.innerHTML = `<div class="alerta-ok">✓ Guardado: ${esh(String(data.insertados||0))} molde(s) registrados para ${esh(data.fecha||'')}</div>`;
-        // Reset form
-        manualMoldes = [{ codigoMolde:'', primera:0, segunda:0, defectuosas:0 }];
-        manualMateriales = [];
-        btn.textContent = 'Guardar registro';
-        btn.disabled = false;
-    } catch (err) {
+        if(data.error) throw new Error(data.error);
+        alerta.innerHTML = `<div class="alerta-ok">✓ Guardado: ${esh(String(data.insertados||0))} molde(s) y ${esh(String(participantes.length))} obrero(s) para ${esh(data.fecha||'')}</div>`;
+        btn.textContent='Guardar producción del día'; btn.disabled=false;
+    } catch(err){
         alerta.innerHTML = `<div class="alerta-err">⚠ ${esh(err.message)}</div>`;
-        btn.textContent = 'Guardar registro';
-        btn.disabled = false;
+        btn.textContent='Guardar producción del día'; btn.disabled=false;
     }
 }
 

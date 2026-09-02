@@ -42,7 +42,12 @@ namespace SistemaGestion.Api
                     "ALTER TABLE Usuarios ADD COLUMN PinBotHash TEXT DEFAULT ''",
                     "ALTER TABLE Usuarios ADD COLUMN PinBotIntentos INTEGER NOT NULL DEFAULT 0",
                     "ALTER TABLE Usuarios ADD COLUMN PinBotBloqueadoHasta TEXT",
-                    "ALTER TABLE Usuarios ADD COLUMN Roles TEXT DEFAULT ''"
+                    "ALTER TABLE Usuarios ADD COLUMN Roles TEXT DEFAULT ''",
+                    "ALTER TABLE RegistroProduccionDia ADD COLUMN TipoMaterial TEXT",
+                    "ALTER TABLE DetalleProduccionMolde ADD COLUMN CantPrimera REAL DEFAULT 0",
+                    "ALTER TABLE DetalleProduccionMolde ADD COLUMN CantSegunda REAL DEFAULT 0",
+                    "ALTER TABLE DetalleProduccionMolde ADD COLUMN CantReciclado REAL DEFAULT 0",
+                    "ALTER TABLE DetalleProduccionMolde ADD COLUMN CantDefectuosas REAL DEFAULT 0"
                 };
                 foreach (var sql in fixes)
                 {
@@ -89,6 +94,18 @@ namespace SistemaGestion.Api
                 {
                     Console.WriteLine($"[API] WARN backfill Roles: {ex.Message}");
                 }
+
+                // Tabla de participantes de producción (multi-obrero por día)
+                try
+                {
+                    using var cmdPp = c.CreateCommand();
+                    cmdPp.CommandText =
+                        "CREATE TABLE IF NOT EXISTS ParticipantesProduccionDia (" +
+                        "Id INTEGER PRIMARY KEY AUTOINCREMENT, IdRegistro INTEGER NOT NULL, IdEmpleado INTEGER NOT NULL);" +
+                        "CREATE INDEX IF NOT EXISTS idx_partprod_reg ON ParticipantesProduccionDia(IdRegistro);";
+                    cmdPp.ExecuteNonQuery();
+                }
+                catch (Exception ex) { Console.WriteLine($"[API] WARN ParticipantesProduccionDia: {ex.Message}"); }
             }
             catch (Exception ex)
             {
@@ -463,7 +480,11 @@ namespace SistemaGestion.Api
                  AND t.IdEmpleado     = $id
                  AND r.Fecha >= t.FechaDesde
                  AND (t.FechaHasta IS NULL OR r.Fecha <= t.FechaHasta)
-                WHERE r.Fecha = $f";
+                WHERE r.Fecha = $f
+                  AND ( NOT EXISTS (SELECT 1 FROM ParticipantesProduccionDia pp
+                                    WHERE pp.IdRegistro = r.Id)
+                        OR EXISTS (SELECT 1 FROM ParticipantesProduccionDia p2
+                                   WHERE p2.IdRegistro = r.Id AND p2.IdEmpleado = $id) )";
             cmd.Parameters.AddWithValue("$id", idEmpleado);
             cmd.Parameters.AddWithValue("$f",  fecha.ToString("yyyy-MM-dd"));
             try { return (decimal)(double)(cmd.ExecuteScalar() ?? 0.0); }

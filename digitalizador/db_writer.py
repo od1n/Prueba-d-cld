@@ -183,14 +183,19 @@ def guardar_produccion(datos: dict) -> dict:
                     rec   = float(m.get("reciclado",   0) or 0)
                     defe  = float(m.get("defectuosas", 0) or 0)
                     total = p1 + p2 + rec
+                    # CodigoProducto = producto base del molde (para que el bono de produccion case).
+                    mp = obtener_molde_productos(cod)
+                    cod_prod = ""
+                    if mp:
+                        cod_prod = (mp["cod_reciclado"] if tipo_mat == "Reciclado" else mp["cod_primera"]) \
+                                   or mp["cod_primera"] or ""
                     cur.execute(
                         "INSERT INTO DetalleProduccionMolde"
                         "    (IdRegistro, CodigoMolde, CodigoProducto, Cantidad,"
                         "     CantPrimera, CantSegunda, CantReciclado, CantDefectuosas)"
                         " VALUES (?,?,?,?,?,?,?,?)",
-                        (reg_id, cod, "", total, p1, p2, rec, defe)
+                        (reg_id, cod, cod_prod, total, p1, p2, rec, defe)
                     )
-                    mp = obtener_molde_productos(cod)
                     if mp:
                         if tipo_mat == "Virgen":
                             if mp["cod_primera"] and p1 > 0:
