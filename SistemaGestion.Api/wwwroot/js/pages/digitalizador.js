@@ -270,10 +270,6 @@ function htmlPaso2() {
         <div class="input-group">
             <label class="input-label">Operario</label>
             <input class="input-field" id="f-operario" value="${esh(d.operario||'')}">
-        </div>
-        <div class="input-group">
-            <label class="input-label">Turno</label>
-            <input class="input-field" id="f-turno" value="${esh(d.turno||'')}">
         </div>`;
     } else {
         contenido += `
@@ -431,7 +427,7 @@ async function confirmar() {
             const payload = {
                 fecha, material,
                 operario:      document.getElementById('f-operario')?.value || null,
-                turno:         document.getElementById('f-turno')?.value    || null,
+                turno:         null,
                 observaciones: document.getElementById('f-obs')?.value      || null,
                 moldes, materiales, participantes,
             };
@@ -580,15 +576,6 @@ async function renderTabManual(zona) {
                     <option value="Reciclado" ${manualMaterial==='Reciclado'?'selected':''}>Reciclado</option>
                 </select>
             </div>
-            <div class="input-group">
-                <label class="input-label">Turno</label>
-                <select class="input-field" id="man-turno">
-                    <option value="">— Seleccionar —</option>
-                    <option value="Mañana">Mañana</option>
-                    <option value="Tarde">Tarde</option>
-                    <option value="Noche">Noche</option>
-                </select>
-            </div>
         </div>
     </div>
 
@@ -694,7 +681,7 @@ async function guardarManual() {
     const payload = {
         fecha: document.getElementById('man-fecha')?.value || null,
         material: document.getElementById('man-material')?.value || 'Virgen',
-        turno: document.getElementById('man-turno')?.value || null,
+        turno: null,
         observaciones: document.getElementById('man-obs')?.value || null,
         moldes: validMoldes, materiales, participantes,
     };
