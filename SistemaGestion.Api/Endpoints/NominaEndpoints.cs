@@ -16,7 +16,9 @@ namespace SistemaGestion.Api.Endpoints
                 bool filtrar = soloActivos ?? true;
                 cmd.CommandText = @"SELECT Id,Cedula,Nombre,Apellido,Cargo,TipoEmpleado,
                     FechaIngreso,Activo,Telefono,Email,
-                    SueldoDiarioUSD,TarifaPiezaUSD,TarifaVentaUSD,SalarioNormalUSD
+                    SueldoDiarioUSD,TarifaPiezaUSD,TarifaVentaUSD,SalarioNormalUSD,
+                    COALESCE(FrecuenciaPago,'Semanal'),COALESCE(SueldoBaseUSD,0),
+                    COALESCE(EligibleBonoProd,0),COALESCE(EligibleBonoVenta,0)
                     FROM Empleados" + (filtrar?" WHERE Activo=1":"") + " ORDER BY Apellido,Nombre";
                 var lista = new List<object>();
                 using var r = cmd.ExecuteReader();
@@ -33,8 +35,9 @@ namespace SistemaGestion.Api.Endpoints
                 var ins = c.CreateCommand();
                 ins.CommandText = @"INSERT INTO Empleados
                     (Cedula,Nombre,Apellido,Cargo,TipoEmpleado,FechaIngreso,Activo,
-                     Telefono,Email,SueldoDiarioUSD,TarifaPiezaUSD,TarifaVentaUSD,SalarioNormalUSD)
-                    VALUES($ci,$no,$ap,$ca,$te,$fi,1,$tf,$em,$sd,$tp,$tv,$sn)";
+                     Telefono,Email,SueldoDiarioUSD,TarifaPiezaUSD,TarifaVentaUSD,SalarioNormalUSD,
+                     FrecuenciaPago,SueldoBaseUSD,EligibleBonoProd,EligibleBonoVenta)
+                    VALUES($ci,$no,$ap,$ca,$te,$fi,1,$tf,$em,$sd,$tp,$tv,$sn,$fp,$sb,$ep,$ev)";
                 ins.Parameters.AddWithValue("$ci", req.Cedula.Trim());
                 ins.Parameters.AddWithValue("$no", req.Nombre.Trim());
                 ins.Parameters.AddWithValue("$ap", req.Apellido?.Trim() ?? "");
@@ -47,6 +50,10 @@ namespace SistemaGestion.Api.Endpoints
                 ins.Parameters.AddWithValue("$tp", (double)req.TarifaPiezaUSD);
                 ins.Parameters.AddWithValue("$tv", (double)req.TarifaVentaUSD);
                 ins.Parameters.AddWithValue("$sn", (double)req.SalarioNormalUSD);
+                ins.Parameters.AddWithValue("$fp", req.FrecuenciaPago ?? "Semanal");
+                ins.Parameters.AddWithValue("$sb", (double)req.SueldoBaseUSD);
+                ins.Parameters.AddWithValue("$ep", req.EligibleBonoProd ? 1 : 0);
+                ins.Parameters.AddWithValue("$ev", req.EligibleBonoVenta ? 1 : 0);
                 try { ins.ExecuteNonQuery(); }
                 catch (Microsoft.Data.Sqlite.SqliteException ex) when (ex.SqliteErrorCode == 19)
                     { return Results.Conflict(new { error = "Ya existe un empleado con esa cédula." }); }
@@ -63,7 +70,8 @@ namespace SistemaGestion.Api.Endpoints
                 upd.CommandText = @"UPDATE Empleados SET
                     Cedula=$ci,Nombre=$no,Apellido=$ap,Cargo=$ca,TipoEmpleado=$te,
                     FechaIngreso=$fi,Telefono=$tf,Email=$em,
-                    SueldoDiarioUSD=$sd,TarifaPiezaUSD=$tp,TarifaVentaUSD=$tv,SalarioNormalUSD=$sn
+                    SueldoDiarioUSD=$sd,TarifaPiezaUSD=$tp,TarifaVentaUSD=$tv,SalarioNormalUSD=$sn,
+                    FrecuenciaPago=$fp,SueldoBaseUSD=$sb,EligibleBonoProd=$ep,EligibleBonoVenta=$ev
                     WHERE Id=$id";
                 upd.Parameters.AddWithValue("$id", id);
                 upd.Parameters.AddWithValue("$ci", req.Cedula?.Trim() ?? "");
@@ -78,6 +86,10 @@ namespace SistemaGestion.Api.Endpoints
                 upd.Parameters.AddWithValue("$tp", (double)req.TarifaPiezaUSD);
                 upd.Parameters.AddWithValue("$tv", (double)req.TarifaVentaUSD);
                 upd.Parameters.AddWithValue("$sn", (double)req.SalarioNormalUSD);
+                upd.Parameters.AddWithValue("$fp", req.FrecuenciaPago ?? "Semanal");
+                upd.Parameters.AddWithValue("$sb", (double)req.SueldoBaseUSD);
+                upd.Parameters.AddWithValue("$ep", req.EligibleBonoProd ? 1 : 0);
+                upd.Parameters.AddWithValue("$ev", req.EligibleBonoVenta ? 1 : 0);
                 int rows = upd.ExecuteNonQuery();
                 return rows == 0 ? Results.NotFound() : Results.Ok(new { ok = true });
             }).AddEndpointFilter(RequireRole.Of(TokenService.PuedeEscribirNomina)).RequireAuthorization();
@@ -877,7 +889,9 @@ tr td{padding:1.5mm 2mm}
             cargo=Db.S(r,4), tipoEmpleado=Db.S(r,5), fechaIngreso=Db.S(r,6),
             activo=Db.I(r,7)==1, telefono=Db.S(r,8), email=Db.S(r,9),
             sueldoDiarioUSD=Db.D(r,10), tarifaPiezaUSD=Db.D(r,11),
-            tarifaVentaUSD=Db.D(r,12), salarioNormalUSD=Db.D(r,13)
+            tarifaVentaUSD=Db.D(r,12), salarioNormalUSD=Db.D(r,13),
+            frecuenciaPago=Db.S(r,14), sueldoBaseUSD=Db.D(r,15),
+            eligibleBonoProd=Db.I(r,16)==1, eligibleBonoVenta=Db.I(r,17)==1
         };
 
         private static object MapDetalle(Microsoft.Data.Sqlite.SqliteDataReader r)
@@ -908,7 +922,9 @@ tr td{padding:1.5mm 2mm}
     public record EmpleadoRequest(
         string  Cedula, string Nombre, string? Apellido, string? Cargo,
         string  TipoEmpleado, string? FechaIngreso, string? Telefono, string? Email,
-        decimal SueldoDiarioUSD, decimal TarifaPiezaUSD, decimal TarifaVentaUSD, decimal SalarioNormalUSD);
+        decimal SueldoDiarioUSD, decimal TarifaPiezaUSD, decimal TarifaVentaUSD, decimal SalarioNormalUSD,
+        string? FrecuenciaPago = null, decimal SueldoBaseUSD = 0,
+        bool EligibleBonoProd = false, bool EligibleBonoVenta = false);
 
     public record PeriodoRequest(string Desde, string Hasta, decimal TasaBCV, string? Observaciones);
 

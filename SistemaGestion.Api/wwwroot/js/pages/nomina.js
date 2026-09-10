@@ -610,9 +610,68 @@ function filtrarEmpleados() {
 }
 
 // ── Formulario empleado ────────────────────────────────────────────────────
+const TIPOS_EMP = ['Obrero','Oficina','Taller','Administrativo','Temporal'];
+const FREQ_POR_TIPO = { Obrero:'Ninguna', Oficina:'Mensual', Taller:'Semanal', Administrativo:'Quincenal', Temporal:'Semanal' };
+
+// Compatibilidad con datos viejos (Fijo/Produccion/Oficina/Ventas)
+function mapTipoEmpleado(t) {
+    if (t === 'Produccion') return 'Obrero';
+    if (t === 'Ventas' || t === 'Oficina') return 'Oficina';
+    if (t === 'Fijo') return 'Taller';
+    return TIPOS_EMP.includes(t) ? t : 'Obrero';
+}
+function labelSueldoBase(tipo) {
+    return tipo === 'Oficina'        ? 'Sueldo fijo mensual (USD)'
+         : tipo === 'Administrativo' ? 'Sueldo quincenal (USD)'
+         : tipo === 'Taller'         ? 'Sueldo semanal (USD)'
+         : tipo === 'Temporal'       ? 'Sueldo semanal acordado (USD)'
+         : 'Sueldo base (USD)';
+}
+// Devuelve el HTML de la sección de pago según el tipo. emp solo se usa si su tipo coincide.
+function pagoEmpleadoHTML(tipo, emp) {
+    const base = emp?.sueldoBaseUSD ?? 0;
+    const sn   = emp?.salarioNormalUSD ?? 0;
+    const bp   = emp ? !!emp.eligibleBonoProd  : (tipo === 'Obrero');
+    const bv   = emp ? !!emp.eligibleBonoVenta : (tipo === 'Oficina');
+    if (tipo === 'Obrero') {
+        return `<div style="padding:10px 12px;background:var(--fondo-inp);border-radius:8px;color:var(--texto-dim);font-size:9pt">
+            Cobra por <strong>bono de producción</strong> (tarifa por producto, igual para todos los obreros).
+            No lleva sueldo base ni tarifa por persona.</div>`;
+    }
+    let h = `<div class="form-group mb-8">
+        <label class="form-label">${labelSueldoBase(tipo)}</label>
+        <input id="eSueldoBase" type="number" class="input-field" value="${base}" min="0" step="0.01">
+    </div>`;
+    if (tipo === 'Oficina') {
+        h += `<label style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
+            <input type="checkbox" id="eBonoVenta" ${bv?'checked':''}> Cobra bono de ventas (tarifa por producto)</label>`;
+    }
+    if (tipo === 'Administrativo') {
+        h += `<label style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
+            <input type="checkbox" id="eBonoProd" ${bp?'checked':''}> Bono de producción (por producto)</label>
+        <label style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
+            <input type="checkbox" id="eBonoVenta" ${bv?'checked':''}> Bono de ventas (por producto)</label>`;
+    }
+    if (tipo !== 'Temporal') {
+        h += `<div class="form-group mb-8">
+            <label class="form-label">Salario normal USD (para IVSS / prestaciones)</label>
+            <input id="eSNormal" type="number" class="input-field" value="${sn}" min="0" step="0.01">
+        </div>`;
+    }
+    return h;
+}
+function onTipoEmpleadoChange() {
+    const tipo = document.getElementById('eTipo')?.value || 'Obrero';
+    const cont = document.getElementById('ePago');
+    if (!cont) return;
+    const emp = (empleadoEditar && mapTipoEmpleado(empleadoEditar.tipoEmpleado) === tipo) ? empleadoEditar : null;
+    cont.innerHTML = pagoEmpleadoHTML(tipo, emp);
+}
+
 function abrirFormEmpleado(emp) {
     empleadoEditar = emp;
     const nuevo = !emp;
+    const tipoInicial = mapTipoEmpleado(emp?.tipoEmpleado || 'Obrero');
     const drawer = document.getElementById('drawerNom');
     drawer.innerHTML = `
     <div class="modal-handle"></div>
@@ -641,9 +700,8 @@ function abrirFormEmpleado(emp) {
     <div class="form-grid-2 mb-8">
       <div class="form-group">
         <label class="form-label">Tipo empleado</label>
-        <select id="eTipo" class="input-field">
-          ${['Fijo','Produccion','Oficina','Ventas'].map(t=>
-              `<option ${(emp?.tipoEmpleado||'Fijo')===t?'selected':''}>${t}</option>`).join('')}
+        <select id="eTipo" class="input-field" onchange="onTipoEmpleadoChange()">
+          ${TIPOS_EMP.map(t=>`<option ${tipoInicial===t?'selected':''}>${t}</option>`).join('')}
         </select>
       </div>
       <div class="form-group">
@@ -652,26 +710,7 @@ function abrirFormEmpleado(emp) {
           value="${emp?.fechaIngreso||new Date().toISOString().slice(0,10)}">
       </div>
     </div>
-    <div class="form-grid-2 mb-8">
-      <div class="form-group">
-        <label class="form-label">Sueldo diario USD</label>
-        <input id="eSDiario" type="number" class="input-field" value="${emp?.sueldoDiarioUSD||0}" min="0" step="0.01">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Tarifa pieza USD</label>
-        <input id="eTarPieza" type="number" class="input-field" value="${emp?.tarifaPiezaUSD||0}" min="0" step="0.001">
-      </div>
-    </div>
-    <div class="form-grid-2 mb-8">
-      <div class="form-group">
-        <label class="form-label">Tarifa venta USD</label>
-        <input id="eTarVenta" type="number" class="input-field" value="${emp?.tarifaVentaUSD||0}" min="0" step="0.01">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Salario normal USD</label>
-        <input id="eSNormal" type="number" class="input-field" value="${emp?.salarioNormalUSD||0}" min="0" step="0.01">
-      </div>
-    </div>
+    <div id="ePago" class="mb-8">${pagoEmpleadoHTML(tipoInicial, emp)}</div>
     <div class="form-grid-2 mb-16">
       <div class="form-group">
         <label class="form-label">Teléfono</label>
@@ -693,19 +732,23 @@ function abrirFormEmpleado(emp) {
 }
 
 async function guardarEmpleado() {
+    const tipo = document.getElementById('eTipo')?.value || 'Obrero';
     const body = {
         cedula:         document.getElementById('eCedula')?.value?.trim(),
         nombre:         document.getElementById('eNombre')?.value?.trim(),
         apellido:       document.getElementById('eApellido')?.value?.trim() || '',
         cargo:          document.getElementById('eCargo')?.value?.trim() || '',
-        tipoEmpleado:   document.getElementById('eTipo')?.value || 'Fijo',
+        tipoEmpleado:   tipo,
         fechaIngreso:   document.getElementById('eFecha')?.value || '',
         telefono:       document.getElementById('eTel')?.value?.trim() || '',
         email:          document.getElementById('eEmail')?.value?.trim() || '',
-        sueldoDiarioUSD: parseFloat(document.getElementById('eSDiario')?.value) || 0,
-        tarifaPiezaUSD:  parseFloat(document.getElementById('eTarPieza')?.value) || 0,
-        tarifaVentaUSD:  parseFloat(document.getElementById('eTarVenta')?.value) || 0,
-        salarioNormalUSD:parseFloat(document.getElementById('eSNormal')?.value) || 0
+        frecuenciaPago:   FREQ_POR_TIPO[tipo] || 'Semanal',
+        sueldoBaseUSD:    parseFloat(document.getElementById('eSueldoBase')?.value) || 0,
+        eligibleBonoProd: tipo === 'Obrero' ? true : !!document.getElementById('eBonoProd')?.checked,
+        eligibleBonoVenta: !!document.getElementById('eBonoVenta')?.checked,
+        salarioNormalUSD: parseFloat(document.getElementById('eSNormal')?.value) || 0,
+        // Compatibilidad: ya no se usan tarifas por persona (el bono es por producto)
+        sueldoDiarioUSD: 0, tarifaPiezaUSD: 0, tarifaVentaUSD: 0
     };
     if (!body.cedula) { alert('La cédula es requerida.'); return; }
     if (!body.nombre) { alert('El nombre es requerido.'); return; }

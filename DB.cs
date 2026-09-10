@@ -1472,6 +1472,13 @@ namespace SistemaGestion
                     SetSchemaVersion(conn, tx, 7);
                 }
 
+                // Modelo de pago por tipo de empleado (Obrero/Oficina/Taller/Administrativo/Temporal).
+                // Defensivo/idempotente: AlterTableSafe ignora el error si la columna ya existe.
+                AlterTableSafe(conn, tx, "ALTER TABLE Empleados ADD COLUMN FrecuenciaPago TEXT DEFAULT 'Semanal'");
+                AlterTableSafe(conn, tx, "ALTER TABLE Empleados ADD COLUMN SueldoBaseUSD REAL NOT NULL DEFAULT 0");
+                AlterTableSafe(conn, tx, "ALTER TABLE Empleados ADD COLUMN EligibleBonoProd INTEGER NOT NULL DEFAULT 0");
+                AlterTableSafe(conn, tx, "ALTER TABLE Empleados ADD COLUMN EligibleBonoVenta INTEGER NOT NULL DEFAULT 0");
+
                 if (versionActual < 8)
                     EjecutarMigracion(conn, tx, 8, @"
                         CREATE TABLE IF NOT EXISTS ProduccionDiaria (

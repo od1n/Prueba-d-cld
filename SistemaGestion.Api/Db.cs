@@ -47,7 +47,12 @@ namespace SistemaGestion.Api
                     "ALTER TABLE DetalleProduccionMolde ADD COLUMN CantPrimera REAL DEFAULT 0",
                     "ALTER TABLE DetalleProduccionMolde ADD COLUMN CantSegunda REAL DEFAULT 0",
                     "ALTER TABLE DetalleProduccionMolde ADD COLUMN CantReciclado REAL DEFAULT 0",
-                    "ALTER TABLE DetalleProduccionMolde ADD COLUMN CantDefectuosas REAL DEFAULT 0"
+                    "ALTER TABLE DetalleProduccionMolde ADD COLUMN CantDefectuosas REAL DEFAULT 0",
+                    // Modelo de pago por tipo de empleado (Obrero/Oficina/Taller/Administrativo/Temporal)
+                    "ALTER TABLE Empleados ADD COLUMN FrecuenciaPago TEXT DEFAULT 'Semanal'",
+                    "ALTER TABLE Empleados ADD COLUMN SueldoBaseUSD REAL NOT NULL DEFAULT 0",
+                    "ALTER TABLE Empleados ADD COLUMN EligibleBonoProd INTEGER NOT NULL DEFAULT 0",
+                    "ALTER TABLE Empleados ADD COLUMN EligibleBonoVenta INTEGER NOT NULL DEFAULT 0"
                 };
                 foreach (var sql in fixes)
                 {
