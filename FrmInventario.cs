@@ -585,6 +585,7 @@ namespace SistemaGestion
         private NumericUpDown numPeso;
         private NumericUpDown numCostoAct, numCostoAnt, numCostoPro, numPrecio;
         private NumericUpDown numExist, numMin, numMax;
+        private NumericUpDown numBonoProd, numBonoVenta;
 
         private readonly Inventario       _original;
         private readonly List<Inventario> _todos;
@@ -601,7 +602,8 @@ namespace SistemaGestion
             _todos    = todos ?? new List<Inventario>();
 
             Text = i == null ? "Nuevo Producto" : "Editar Producto";
-            Size = new Size(500, 590);
+            Size = new Size(500, 690);
+            AutoScroll = true;
             StartPosition   = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.Sizable;
             MaximizeBox = true; MinimizeBox = false;
@@ -622,7 +624,16 @@ namespace SistemaGestion
             L("Min:",            340, y); numMin       = N(385, y, 80);   y += 35;
             L("Exist. Max:",      lx, y); numMax       = N(fx, y, w);     y += 35;
             L("Peso (kg/und):",   lx, y); numPeso      = N(fx, y, w); numPeso.DecimalPlaces = 4; numPeso.Maximum = 9999; y += 35;
-            L("Cod.Proveedor:",   lx, y); txtProv      = T(fx, y, w);     y += 40;
+            L("Cod.Proveedor:",   lx, y); txtProv      = T(fx, y, w);     y += 38;
+
+            Controls.Add(new Label {
+                Text = "Bono por producto (Bs) — pago por unidad producida / vendida",
+                Location = new Point(lx, y), AutoSize = true,
+                Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(26, 74, 138) });
+            y += 24;
+            L("Bono produccion Bs:", lx, y); numBonoProd  = N(fx, y, w); numBonoProd.Maximum  = 1000000000; y += 35;
+            L("Bono venta Bs:",      lx, y); numBonoVenta = N(fx, y, w); numBonoVenta.Maximum = 1000000000; y += 40;
 
             // Nota campos obligatorios
             Controls.Add(new Label {
@@ -641,6 +652,7 @@ namespace SistemaGestion
                 numCostoPro.Value = i.CostoPro;    numPrecio.Value    = i.Precio;
                 numExist.Value    = i.Existencia;  numMin.Value       = i.ExistenMin;
                 numMax.Value      = i.ExistenMax;  txtProv.Text       = i.CodProveedor;
+                numBonoProd.Value = i.BonoProduccionBs; numBonoVenta.Value = i.BonoVentaBs;
             }
 
             var bOk  = BBtn("Guardar",  Color.FromArgb(30, 130, 70),  new Point(100, y));
@@ -732,6 +744,8 @@ namespace SistemaGestion
             Resultado.ExistenMax    = numMax.Value;
             Resultado.PesoKg        = numPeso.Value;
             Resultado.CodProveedor  = txtProv.Text.Trim();
+            Resultado.BonoProduccionBs = numBonoProd.Value;
+            Resultado.BonoVentaBs      = numBonoVenta.Value;
             Resultado.UltimaActualz = DateTime.Today;
             DialogResult = DialogResult.OK;
         }

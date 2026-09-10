@@ -181,17 +181,19 @@ namespace SistemaGestion
                 e.Id, e.Cedula, e.NombreCompleto, e.Cargo, e.TipoEmpleado,
                 Ingreso    = e.FechaIngreso.ToShortDateString(),
                 Antiguedad = e.AniosServicio + " anos",
-                SueldoDia  = e.SueldoDiarioUSD.ToString("C2"),
-                TarifaPieza= e.TarifaPiezaUSD > 0 ? e.TarifaPiezaUSD.ToString("C2") : "—",
-                TarifaVenta= e.TarifaVentaUSD > 0 ? e.TarifaVentaUSD.ToString("C2") : "—",
+                Sueldo     = e.TipoEmpleado == "Obrero" ? "por produccion" : e.SueldoBaseUSD.ToString("C2"),
+                Frecuencia = e.FrecuenciaPago,
+                Bonos      = (e.EligibleBonoProd ? "Prod " : "") + (e.EligibleBonoVenta ? "Venta" : ""),
                 Estado     = e.Activo ? "Activo" : "Inactivo"
             }).ToList();
 
             var all = DatabaseService.ObtenerEmpleados();
             lblRes.Text = "  Empleados: " + all.Count(e => e.Activo) + " activos  |  " +
-                all.Count(e => e.TipoEmpleado == "Produccion") + " produccion  |  " +
-                all.Count(e => e.TipoEmpleado == "Oficina")    + " oficina  |  " +
-                all.Count(e => e.TipoEmpleado == "Fijo")       + " fijo";
+                all.Count(e => e.TipoEmpleado == "Obrero")        + " obrero  |  " +
+                all.Count(e => e.TipoEmpleado == "Oficina")       + " oficina  |  " +
+                all.Count(e => e.TipoEmpleado == "Taller")        + " taller  |  " +
+                all.Count(e => e.TipoEmpleado == "Administrativo")+ " admin  |  " +
+                all.Count(e => e.TipoEmpleado == "Temporal")      + " temporal";
         }
 
         private void Editar()
@@ -279,9 +281,24 @@ namespace SistemaGestion
         private TextBox       txtCedula, txtNombre, txtApellido, txtCargo, txtTel, txtEmail;
         private ComboBox      cmbTipo;
         private DateTimePicker dtpIngreso;
-        private NumericUpDown  numSueldo, numTarPieza, numTarVenta, numSalNormal;
-        private CheckBox       chkActivo;
-        private Panel          pnlTarPieza, pnlTarVenta;
+        private NumericUpDown  numSueldo, numSalNormal;
+        private CheckBox       chkActivo, chkBonoProd, chkBonoVenta;
+        private Label          lblSueldo, lblSalNormal;
+
+        private static readonly string[] TIPOS_EMP = { "Obrero", "Oficina", "Taller", "Administrativo", "Temporal" };
+        private static string MapTipoEmpleado(string t) {
+            if (t == "Produccion") return "Obrero";
+            if (t == "Ventas" || t == "Oficina") return "Oficina";
+            if (t == "Fijo") return "Taller";
+            return System.Array.IndexOf(TIPOS_EMP, t) >= 0 ? t : "Obrero";
+        }
+        private static string FrecPorTipo(string t) =>
+            t == "Obrero" ? "Ninguna" : t == "Oficina" ? "Mensual" :
+            t == "Administrativo" ? "Quincenal" : "Semanal";
+        private static string LabelSueldoBase(string t) =>
+            t == "Oficina" ? "Sueldo fijo mensual USD:" :
+            t == "Administrativo" ? "Sueldo quincenal USD:" :
+            t == "Temporal" ? "Sueldo semanal acordado USD:" : "Sueldo semanal USD:";
 
         public DlgEmpleado(Empleado e)
         {
@@ -314,9 +331,9 @@ namespace SistemaGestion
             L("Tipo empleado:");
             cmbTipo = new ComboBox { Location = new Point(175, y), Size = new Size(200, 24),
                 DropDownStyle = ComboBoxStyle.DropDownList };
-            cmbTipo.Items.AddRange(new object[] { "Produccion", "Oficina", "Fijo" });
-            cmbTipo.SelectedItem = e?.TipoEmpleado ?? "Fijo";
-            if (cmbTipo.SelectedIndex < 0) cmbTipo.SelectedIndex = 2;
+            cmbTipo.Items.AddRange(new object[] { "Obrero", "Oficina", "Taller", "Administrativo", "Temporal" });
+            cmbTipo.SelectedItem = MapTipoEmpleado(e?.TipoEmpleado);
+            if (cmbTipo.SelectedIndex < 0) cmbTipo.SelectedIndex = 0;
             Controls.Add(cmbTipo); y += 32;
 
             L("Fecha ingreso:");
@@ -325,26 +342,23 @@ namespace SistemaGestion
                 Value = e?.FechaIngreso ?? DateTime.Today };
             Controls.Add(dtpIngreso); y += 32;
 
-            L("Sueldo diario USD:");      numSueldo   = N(e?.SueldoDiarioUSD  ?? 0); y += 32;
-            L("Sal. normal mensual USD:"); numSalNormal= N(e?.SalarioNormalUSD ?? 0); y += 32;
-
-            // Tarifa pieza (solo Produccion)
-            pnlTarPieza = new Panel { Location = new Point(0, y), Size = new Size(500, 32), BackColor = Color.Transparent };
-            var lPieza = new Label { Text = "Tarifa por pieza USD:", Location = new Point(16, 3),
+            lblSueldo = new Label { Text = "Sueldo base USD:", Location = new Point(16, y + 3),
                 AutoSize = true, Font = new Font("Segoe UI", 9f, FontStyle.Bold) };
-            numTarPieza = new NumericUpDown { Location = new Point(175, 0), Size = new Size(200, 24),
-                Maximum = 9999, DecimalPlaces = 4, Value = e?.TarifaPiezaUSD ?? 0 };
-            pnlTarPieza.Controls.AddRange(new Control[] { lPieza, numTarPieza });
-            Controls.Add(pnlTarPieza); y += 32;
+            Controls.Add(lblSueldo);
+            numSueldo = N(e?.SueldoBaseUSD ?? 0); y += 32;
 
-            // Tarifa venta (solo Oficina)
-            pnlTarVenta = new Panel { Location = new Point(0, y), Size = new Size(500, 32), BackColor = Color.Transparent };
-            var lVenta = new Label { Text = "Tarifa por venta USD:", Location = new Point(16, 3),
+            lblSalNormal = new Label { Text = "Sal. normal mensual USD:", Location = new Point(16, y + 3),
                 AutoSize = true, Font = new Font("Segoe UI", 9f, FontStyle.Bold) };
-            numTarVenta = new NumericUpDown { Location = new Point(175, 0), Size = new Size(200, 24),
-                Maximum = 9999, DecimalPlaces = 2, Value = e?.TarifaVentaUSD ?? 0 };
-            pnlTarVenta.Controls.AddRange(new Control[] { lVenta, numTarVenta });
-            Controls.Add(pnlTarVenta); y += 32;
+            Controls.Add(lblSalNormal);
+            numSalNormal = N(e?.SalarioNormalUSD ?? 0); y += 32;
+
+            // Bonos: la TARIFA es por producto (se define en el producto); aqui solo si el empleado cobra.
+            chkBonoProd = new CheckBox { Text = "Cobra bono de produccion (por producto)",
+                Location = new Point(175, y), AutoSize = true, Checked = e?.EligibleBonoProd ?? false };
+            Controls.Add(chkBonoProd); y += 26;
+            chkBonoVenta = new CheckBox { Text = "Cobra bono de ventas (por producto)",
+                Location = new Point(175, y), AutoSize = true, Checked = e?.EligibleBonoVenta ?? false };
+            Controls.Add(chkBonoVenta); y += 32;
 
             L("Telefono:");  txtTel   = T(e?.Telefono ?? ""); y += 32;
             L("Email:");     txtEmail = T(e?.Email    ?? ""); y += 28;
@@ -369,14 +383,18 @@ namespace SistemaGestion
             if (txtNombre != null) AyudaService.Tip(_dlgTip, txtNombre, "Primer nombre del empleado");
             if (txtApellido != null) AyudaService.Tip(_dlgTip, txtApellido, "Primer apellido del empleado");
             if (txtCargo != null) AyudaService.Tip(_dlgTip, txtCargo, "Cargo o puesto de trabajo");
-            if (numSueldo != null) AyudaService.Tip(_dlgTip, numSueldo, "Salario diario en USD (base para cálculo de nómina)");
-            if (numTarPieza != null) AyudaService.Tip(_dlgTip, numTarPieza, "Pago por pieza de primera calidad producida (solo Producción)");
+            if (numSueldo != null) AyudaService.Tip(_dlgTip, numSueldo, "Sueldo base en USD según la frecuencia del tipo de empleado");
             // Recordar posición y tamaño
             VentanaPrefs.Restaurar(this);
             Controls.AddRange(new Control[] { bOk, bCan });
 
-            // Mostrar/ocultar tarifas segun tipo
-            cmbTipo.SelectedIndexChanged += (s, ev) => ActualizarVisibilidad();
+            // Mostrar/ocultar campos segun tipo. Al cambiar el tipo se aplican defaults de bono.
+            cmbTipo.SelectedIndexChanged += (s, ev) => {
+                string t = cmbTipo.SelectedItem?.ToString() ?? "Obrero";
+                chkBonoProd.Checked  = (t == "Obrero");
+                chkBonoVenta.Checked = (t == "Oficina");
+                ActualizarVisibilidad();
+            };
             ActualizarVisibilidad();
 
             bOk.Click += (s, ev) => Guardar(e);
@@ -386,9 +404,25 @@ namespace SistemaGestion
 
         private void ActualizarVisibilidad()
         {
-            string tipo = cmbTipo.SelectedItem?.ToString() ?? "Fijo";
-            pnlTarPieza.Visible = tipo == "Produccion";
-            pnlTarVenta.Visible = tipo == "Oficina";
+            string tipo = cmbTipo.SelectedItem?.ToString() ?? "Obrero";
+            if (tipo == "Obrero")
+            {
+                // Sin sueldo base ni salario normal fijo; cobra solo bono de produccion (por producto).
+                lblSueldo.Visible = numSueldo.Visible = false;
+                lblSalNormal.Visible = numSalNormal.Visible = false;
+                chkBonoProd.Checked = true;  chkBonoProd.Visible  = false;
+                chkBonoVenta.Checked = false; chkBonoVenta.Visible = false;
+                return;
+            }
+            lblSueldo.Visible = numSueldo.Visible = true;
+            lblSueldo.Text = LabelSueldoBase(tipo);
+            bool salVisible = tipo != "Temporal";
+            lblSalNormal.Visible = numSalNormal.Visible = salVisible;
+            // Elegibilidad de bonos por tipo
+            chkBonoVenta.Visible = (tipo == "Oficina" || tipo == "Administrativo");
+            chkBonoProd.Visible  = (tipo == "Administrativo");
+            if (!chkBonoVenta.Visible) chkBonoVenta.Checked = false;
+            if (!chkBonoProd.Visible)  chkBonoProd.Checked  = false;
         }
 
         private void Guardar(Empleado original)
@@ -403,15 +437,21 @@ namespace SistemaGestion
             Resultado.Nombre          = txtNombre.Text.Trim();
             Resultado.Apellido        = txtApellido.Text.Trim();
             Resultado.Cargo           = txtCargo.Text.Trim();
-            Resultado.TipoEmpleado    = cmbTipo.SelectedItem?.ToString() ?? "Fijo";
+            string tipo = cmbTipo.SelectedItem?.ToString() ?? "Obrero";
+            Resultado.TipoEmpleado    = tipo;
             Resultado.FechaIngreso    = dtpIngreso.Value;
             Resultado.Activo          = chkActivo.Checked;
             Resultado.Telefono        = txtTel.Text.Trim();
             Resultado.Email           = txtEmail.Text.Trim();
-            Resultado.SueldoDiarioUSD = numSueldo.Value;
-            Resultado.SalarioNormalUSD= numSalNormal.Value;
-            Resultado.TarifaPiezaUSD  = numTarPieza.Value;
-            Resultado.TarifaVentaUSD  = numTarVenta.Value;
+            Resultado.FrecuenciaPago    = FrecPorTipo(tipo);
+            Resultado.SueldoBaseUSD     = tipo == "Obrero" ? 0 : numSueldo.Value;
+            Resultado.EligibleBonoProd  = tipo == "Obrero" ? true : chkBonoProd.Checked;
+            Resultado.EligibleBonoVenta = chkBonoVenta.Checked;
+            Resultado.SalarioNormalUSD  = (tipo == "Obrero" || tipo == "Temporal") ? 0 : numSalNormal.Value;
+            // Campos del modelo viejo (ya no se usan: el bono es por producto)
+            Resultado.SueldoDiarioUSD = 0;
+            Resultado.TarifaPiezaUSD  = 0;
+            Resultado.TarifaVentaUSD  = 0;
             DialogResult = DialogResult.OK;
         }
     }

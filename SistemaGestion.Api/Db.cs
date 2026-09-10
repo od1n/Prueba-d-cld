@@ -52,7 +52,10 @@ namespace SistemaGestion.Api
                     "ALTER TABLE Empleados ADD COLUMN FrecuenciaPago TEXT DEFAULT 'Semanal'",
                     "ALTER TABLE Empleados ADD COLUMN SueldoBaseUSD REAL NOT NULL DEFAULT 0",
                     "ALTER TABLE Empleados ADD COLUMN EligibleBonoProd INTEGER NOT NULL DEFAULT 0",
-                    "ALTER TABLE Empleados ADD COLUMN EligibleBonoVenta INTEGER NOT NULL DEFAULT 0"
+                    "ALTER TABLE Empleados ADD COLUMN EligibleBonoVenta INTEGER NOT NULL DEFAULT 0",
+                    // Bono por producto (Bs): pago por unidad producida / vendida, igual para todos
+                    "ALTER TABLE Inventario ADD COLUMN BonoProduccionBs REAL NOT NULL DEFAULT 0",
+                    "ALTER TABLE Inventario ADD COLUMN BonoVentaBs REAL NOT NULL DEFAULT 0"
                 };
                 foreach (var sql in fixes)
                 {

@@ -26,6 +26,9 @@ namespace SistemaGestion
         public DateTime UltimaActualz { get; set; }
         public string   CodProveedor  { get; set; }
         public decimal  PesoKg        { get; set; }  // peso en kg de una unidad
+        // Bono por producto (Bs) — pago por unidad producida / vendida (igual para todos)
+        public decimal  BonoProduccionBs { get; set; }
+        public decimal  BonoVentaBs      { get; set; }
     }
 
     public class DetalleFactura
@@ -424,17 +427,22 @@ namespace SistemaGestion
         public string   Apellido         { get; set; }
         public string   NombreCompleto   => Nombre + " " + Apellido;
         public string   Cargo            { get; set; }
-        public string   TipoEmpleado     { get; set; }  // Produccion / Oficina / Fijo
+        public string   TipoEmpleado     { get; set; }  // Obrero / Oficina / Taller / Administrativo / Temporal
         public DateTime FechaIngreso     { get; set; }
         public bool     Activo           { get; set; } = true;
         public string   Telefono         { get; set; }
         public string   Email            { get; set; }
         // Parametros salariales
-        public decimal  SueldoDiarioUSD  { get; set; }  // base diario en USD
-        public decimal  TarifaPiezaUSD   { get; set; }  // solo Produccion
-        public decimal  TarifaVentaUSD   { get; set; }  // solo Oficina ($ fijo/venta)
+        public decimal  SueldoDiarioUSD  { get; set; }  // (obsoleto) base diaria en USD del modelo viejo
+        public decimal  TarifaPiezaUSD   { get; set; }  // (obsoleto) el bono de produccion ahora es por producto
+        public decimal  TarifaVentaUSD   { get; set; }  // (obsoleto) el bono de ventas ahora es por producto
         // Datos para beneficios legales
         public decimal  SalarioNormalUSD { get; set; }  // salario normal mensual para LOTTT
+        // Modelo de pago por tipo
+        public string   FrecuenciaPago    { get; set; } = "Semanal"; // Ninguna/Diario/Semanal/Quincenal/Mensual
+        public decimal  SueldoBaseUSD     { get; set; }  // monto base segun la frecuencia (USD)
+        public bool     EligibleBonoProd  { get; set; }  // cobra bono de produccion (por producto)
+        public bool     EligibleBonoVenta { get; set; }  // cobra bono de ventas (por producto)
         public int      AniosServicio    => Math.Max(0, (int)((DateTime.Today - FechaIngreso).TotalDays / 365.25));
         public bool     TipEmpleadoEs(string tipo) => TipoEmpleado?.Equals(tipo, StringComparison.OrdinalIgnoreCase) ?? false;
     }
@@ -1478,6 +1486,9 @@ namespace SistemaGestion
                 AlterTableSafe(conn, tx, "ALTER TABLE Empleados ADD COLUMN SueldoBaseUSD REAL NOT NULL DEFAULT 0");
                 AlterTableSafe(conn, tx, "ALTER TABLE Empleados ADD COLUMN EligibleBonoProd INTEGER NOT NULL DEFAULT 0");
                 AlterTableSafe(conn, tx, "ALTER TABLE Empleados ADD COLUMN EligibleBonoVenta INTEGER NOT NULL DEFAULT 0");
+                // Bono por producto (Bs): pago por unidad producida / vendida, igual para todos
+                AlterTableSafe(conn, tx, "ALTER TABLE Inventario ADD COLUMN BonoProduccionBs REAL NOT NULL DEFAULT 0");
+                AlterTableSafe(conn, tx, "ALTER TABLE Inventario ADD COLUMN BonoVentaBs REAL NOT NULL DEFAULT 0");
 
                 if (versionActual < 8)
                     EjecutarMigracion(conn, tx, 8, @"
@@ -2329,7 +2340,9 @@ namespace SistemaGestion
                     CostoPro = D(r,7), Precio = D(r,8), Existencia = D(r,9),
                     ExistenMin = D(r,10), ExistenMax = D(r,11), Proveedores = S(r,12),
                     UltimaActualz = r.IsDBNull(13) ? DateTime.Today : DateTime.Parse(r.GetString(13)),
-                    CodProveedor = S(r,14), PesoKg = r.FieldCount > 15 ? D(r,15) : 0 });
+                    CodProveedor = S(r,14), PesoKg = r.FieldCount > 15 ? D(r,15) : 0,
+                    BonoProduccionBs = r.FieldCount > 16 ? D(r,16) : 0,
+                    BonoVentaBs      = r.FieldCount > 17 ? D(r,17) : 0 });
             return list;
         }
 
@@ -2337,8 +2350,11 @@ namespace SistemaGestion
         {
             using var c = Conn();
             var cmd = c.CreateCommand();
-            cmd.CommandText = @"INSERT OR REPLACE INTO Inventario VALUES
-                ($co,$de,$dp,$un,$en,$ca,$cant,$cp,$pr,$ex,$emi,$ema,$pv,$ua,$cpv,$pk)";
+            cmd.CommandText = @"INSERT OR REPLACE INTO Inventario
+                (Codigo,Descripcion,Departamento,Unidad,Enser,CostoActual,CostoAnt,CostoPro,
+                 Precio,Existencia,ExistenMin,ExistenMax,Proveedores,UltimaActualz,CodProveedor,PesoKg,
+                 BonoProduccionBs,BonoVentaBs)
+                VALUES($co,$de,$dp,$un,$en,$ca,$cant,$cp,$pr,$ex,$emi,$ema,$pv,$ua,$cpv,$pk,$bp,$bv)";
             BindInventario(cmd, i); cmd.ExecuteNonQuery();
         }
 
@@ -2348,7 +2364,8 @@ namespace SistemaGestion
             var cmd = c.CreateCommand();
             cmd.CommandText = @"UPDATE Inventario SET Descripcion=$de,Departamento=$dp,Unidad=$un,
                 Enser=$en,CostoActual=$ca,CostoAnt=$cant,CostoPro=$cp,Precio=$pr,Existencia=$ex,
-                ExistenMin=$emi,ExistenMax=$ema,Proveedores=$pv,UltimaActualz=$ua,CodProveedor=$cpv,PesoKg=$pk
+                ExistenMin=$emi,ExistenMax=$ema,Proveedores=$pv,UltimaActualz=$ua,CodProveedor=$cpv,PesoKg=$pk,
+                BonoProduccionBs=$bp,BonoVentaBs=$bv
                 WHERE Codigo=$co";
             BindInventario(cmd, i); cmd.ExecuteNonQuery();
         }
@@ -2377,6 +2394,8 @@ namespace SistemaGestion
             cmd.Parameters.AddWithValue("$ua",  i.UltimaActualz.ToString("yyyy-MM-dd"));
             cmd.Parameters.AddWithValue("$cpv", i.CodProveedor ?? "");
             cmd.Parameters.AddWithValue("$pk",  (double)i.PesoKg);
+            cmd.Parameters.AddWithValue("$bp",  (double)i.BonoProduccionBs);
+            cmd.Parameters.AddWithValue("$bv",  (double)i.BonoVentaBs);
         }
 
         // ════════ CLIENTES ═══════════════════════════════════════════════════
@@ -4869,8 +4888,9 @@ namespace SistemaGestion
             var cmd = c.CreateCommand();
             cmd.CommandText = @"INSERT INTO Empleados
                 (Cedula,Nombre,Apellido,Cargo,TipoEmpleado,FechaIngreso,Activo,
-                 Telefono,Email,SueldoDiarioUSD,TarifaPiezaUSD,TarifaVentaUSD,SalarioNormalUSD)
-                VALUES($ci,$no,$ap,$ca,$te,$fi,$ac,$tf,$em,$sd,$tp,$tv,$sn)";
+                 Telefono,Email,SueldoDiarioUSD,TarifaPiezaUSD,TarifaVentaUSD,SalarioNormalUSD,
+                 FrecuenciaPago,SueldoBaseUSD,EligibleBonoProd,EligibleBonoVenta)
+                VALUES($ci,$no,$ap,$ca,$te,$fi,$ac,$tf,$em,$sd,$tp,$tv,$sn,$fp,$sb,$ep,$ev)";
             BindEmpParams(cmd, e);
             cmd.ExecuteNonQuery();
             cmd.CommandText = "SELECT last_insert_rowid()";
@@ -4886,7 +4906,8 @@ namespace SistemaGestion
                 Cedula=$ci,Nombre=$no,Apellido=$ap,Cargo=$ca,TipoEmpleado=$te,
                 FechaIngreso=$fi,Activo=$ac,Telefono=$tf,Email=$em,
                 SueldoDiarioUSD=$sd,TarifaPiezaUSD=$tp,TarifaVentaUSD=$tv,
-                SalarioNormalUSD=$sn WHERE Id=$id";
+                SalarioNormalUSD=$sn,FrecuenciaPago=$fp,SueldoBaseUSD=$sb,
+                EligibleBonoProd=$ep,EligibleBonoVenta=$ev WHERE Id=$id";
             BindEmpParams(cmd, e);
             cmd.Parameters.AddWithValue("$id", e.Id);
             cmd.ExecuteNonQuery();
@@ -4899,7 +4920,11 @@ namespace SistemaGestion
             FechaIngreso = DateTime.Parse(r.GetString(6)),
             Activo = r.GetInt32(7) == 1, Telefono = S(r,8), Email = S(r,9),
             SueldoDiarioUSD  = D(r,10), TarifaPiezaUSD = D(r,11),
-            TarifaVentaUSD   = D(r,12), SalarioNormalUSD = D(r,13)
+            TarifaVentaUSD   = D(r,12), SalarioNormalUSD = D(r,13),
+            FrecuenciaPago    = r.FieldCount > 14 && !r.IsDBNull(14) ? r.GetString(14) : "Semanal",
+            SueldoBaseUSD     = r.FieldCount > 15 ? D(r,15) : 0,
+            EligibleBonoProd  = r.FieldCount > 16 && D(r,16) == 1,
+            EligibleBonoVenta = r.FieldCount > 17 && D(r,17) == 1
         };
 
         private static void BindEmpParams(SqliteCommand cmd, Empleado e)
@@ -4917,6 +4942,10 @@ namespace SistemaGestion
             cmd.Parameters.AddWithValue("$tp", (double)e.TarifaPiezaUSD);
             cmd.Parameters.AddWithValue("$tv", (double)e.TarifaVentaUSD);
             cmd.Parameters.AddWithValue("$sn", (double)e.SalarioNormalUSD);
+            cmd.Parameters.AddWithValue("$fp", e.FrecuenciaPago ?? "Semanal");
+            cmd.Parameters.AddWithValue("$sb", (double)e.SueldoBaseUSD);
+            cmd.Parameters.AddWithValue("$ep", e.EligibleBonoProd ? 1 : 0);
+            cmd.Parameters.AddWithValue("$ev", e.EligibleBonoVenta ? 1 : 0);
         }
 
         // ── Periodos de nomina ─────────────────────────────────────────────
