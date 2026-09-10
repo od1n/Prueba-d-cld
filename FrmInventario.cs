@@ -627,13 +627,24 @@ namespace SistemaGestion
             L("Cod.Proveedor:",   lx, y); txtProv      = T(fx, y, w);     y += 38;
 
             Controls.Add(new Label {
-                Text = "Bono por producto (Bs) — pago por unidad producida / vendida",
+                Text = "Bono por producto (Bs) — pago por unidad producida / vendida (solo Admin)",
                 Location = new Point(lx, y), AutoSize = true,
                 Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
                 ForeColor = Color.FromArgb(26, 74, 138) });
             y += 24;
             L("Bono produccion Bs:", lx, y); numBonoProd  = N(fx, y, w); numBonoProd.Maximum  = 1000000000; y += 35;
             L("Bono venta Bs:",      lx, y); numBonoVenta = N(fx, y, w); numBonoVenta.Maximum = 1000000000; y += 40;
+            // El VALOR de los bonos solo lo puede cambiar un administrador.
+            if (!Sesion.EsAdmin)
+            {
+                numBonoProd.Enabled = numBonoVenta.Enabled = false;
+                Controls.Add(new Label {
+                    Text = "(Solo un administrador puede cambiar el valor de los bonos)",
+                    Location = new Point(lx, y - 6), AutoSize = true,
+                    Font = new Font("Segoe UI", 8f, FontStyle.Italic),
+                    ForeColor = Color.FromArgb(150, 60, 0) });
+                y += 20;
+            }
 
             // Nota campos obligatorios
             Controls.Add(new Label {
