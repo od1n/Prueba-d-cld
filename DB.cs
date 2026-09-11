@@ -2355,6 +2355,22 @@ namespace SistemaGestion
             var cmd = c.CreateCommand();
             cmd.CommandText = "SELECT * FROM Inventario ORDER BY Descripcion";
             using var r = cmd.ExecuteReader();
+
+            // Las columnas agregadas por migracion (PesoKg, BonoProduccionBs, BonoVentaBs)
+            // NO estan siempre en la misma posicion entre bases distintas (dependen del
+            // orden en que se ejecutaron los ALTER TABLE). Se resuelven por NOMBRE para
+            // evitar que se lean corridas.
+            int iPeso = -1, iBonoP = -1, iBonoV = -1;
+            for (int k = 0; k < r.FieldCount; k++)
+            {
+                switch (r.GetName(k))
+                {
+                    case "PesoKg":           iPeso  = k; break;
+                    case "BonoProduccionBs": iBonoP = k; break;
+                    case "BonoVentaBs":      iBonoV = k; break;
+                }
+            }
+
             while (r.Read())
                 list.Add(new Inventario {
                     Codigo = r.GetString(0), Descripcion = S(r,1), Departamento = S(r,2),
@@ -2362,9 +2378,10 @@ namespace SistemaGestion
                     CostoPro = D(r,7), Precio = D(r,8), Existencia = D(r,9),
                     ExistenMin = D(r,10), ExistenMax = D(r,11), Proveedores = S(r,12),
                     UltimaActualz = r.IsDBNull(13) ? DateTime.Today : DateTime.Parse(r.GetString(13)),
-                    CodProveedor = S(r,14), PesoKg = r.FieldCount > 15 ? D(r,15) : 0,
-                    BonoProduccionBs = r.FieldCount > 16 ? D(r,16) : 0,
-                    BonoVentaBs      = r.FieldCount > 17 ? D(r,17) : 0 });
+                    CodProveedor = S(r,14),
+                    PesoKg           = iPeso  >= 0 ? D(r, iPeso)  : 0,
+                    BonoProduccionBs = iBonoP >= 0 ? D(r, iBonoP) : 0,
+                    BonoVentaBs      = iBonoV >= 0 ? D(r, iBonoV) : 0 });
             return list;
         }
 

@@ -335,6 +335,8 @@ namespace SistemaGestion
                     ("Min",          "Min",           false, 60),
                     ("Max",          "Max",           false, 60),
                     ("PesoKg",       "Peso (kg)",     false, 70),
+                    ("BonoProdBs",   "Bono Prod (Bs)",true,  90),
+                    ("BonoVentaBs",  "Bono Venta (Bs)",true, 90),
                     ("Proveedor",    "Proveedor",     false, 80),
                     ("Actualizado",  "Actualizado",   true,  90),
                 };
@@ -360,7 +362,8 @@ namespace SistemaGestion
                     dgv.Rows.Add(
                         i.Codigo, i.Descripcion, i.Departamento, i.Unidad,
                         i.CostoActual, i.Precio, i.Existencia,
-                        i.ExistenMin, i.ExistenMax, i.PesoKg, i.CodProveedor,
+                        i.ExistenMin, i.ExistenMax, i.PesoKg,
+                        i.BonoProduccionBs, i.BonoVentaBs, i.CodProveedor,
                         i.UltimaActualz.ToShortDateString());
             }
             else
@@ -377,9 +380,15 @@ namespace SistemaGestion
                     Min         = i.ExistenMin.ToString("N2"),
                     Max         = i.ExistenMax.ToString("N2"),
                     PesoKg      = i.PesoKg.ToString("N4"),
+                    BonoProdBs  = i.BonoProduccionBs.ToString("N2"),
+                    BonoVentaBs = i.BonoVentaBs.ToString("N2"),
                     Proveedor   = i.CodProveedor,
                     Actualizado = i.UltimaActualz.ToShortDateString()
                 }).ToList();
+                if (dgv.Columns.Contains("BonoProdBs"))
+                    dgv.Columns["BonoProdBs"].HeaderText = "Bono Prod (Bs)";
+                if (dgv.Columns.Contains("BonoVentaBs"))
+                    dgv.Columns["BonoVentaBs"].HeaderText = "Bono Venta (Bs)";
                 VentanaPrefs.AplicarAnchos(this, dgv);
             }
 
