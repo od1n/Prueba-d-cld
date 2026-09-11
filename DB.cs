@@ -5191,6 +5191,54 @@ namespace SistemaGestion
         /// dado el periodo y sus datos de produccion/ventas.
         /// Aplica: IVSS 4%, RPVH 1% sobre el equivalente en bolivares.
         /// </summary>
+        // ── Bonos por producto (fechados) para nómina ──────────────────────────
+        /// <summary>Bono de producción (Bs) de un obrero en un rango: unidades de los días que participó × tarifa del producto vigente esa fecha.</summary>
+        public static decimal CalcularBonoProduccionProducto(int empId, DateTime desde, DateTime hasta)
+        {
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = @"SELECT COALESCE(SUM(d.Cantidad * COALESCE(t.TarifaBs, i.BonoProduccionBs, 0)),0)
+                FROM DetalleProduccionMolde d
+                JOIN RegistroProduccionDia r ON r.Id=d.IdRegistro
+                JOIN ParticipantesProduccionDia pp ON pp.IdRegistro=r.Id AND pp.IdEmpleado=$id
+                LEFT JOIN Inventario i ON i.Codigo=d.CodigoProducto
+                LEFT JOIN TarifaProductoProduccion t ON t.CodigoProducto=d.CodigoProducto
+                   AND r.Fecha>=t.FechaDesde AND (t.FechaHasta IS NULL OR r.Fecha<=t.FechaHasta)
+                WHERE r.Fecha BETWEEN $d AND $h";
+            cmd.Parameters.AddWithValue("$id", empId);
+            cmd.Parameters.AddWithValue("$d", desde.ToString("yyyy-MM-dd"));
+            cmd.Parameters.AddWithValue("$h", hasta.ToString("yyyy-MM-dd"));
+            return D(cmd.ExecuteScalar());
+        }
+
+        /// <summary>Bono de ventas (Bs) del período a nivel empresa: cantidad vendida × tarifa de venta del producto vigente esa fecha.</summary>
+        public static decimal CalcularBonoVentasProducto(DateTime desde, DateTime hasta)
+        {
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = @"SELECT COALESCE(SUM(df.Cantidad * COALESCE(t.TarifaBs, i.BonoVentaBs, 0)),0)
+                FROM DetallesFactura df
+                JOIN Facturas f ON f.rowid=df.IdFactura
+                LEFT JOIN Inventario i ON i.Codigo=df.Codigo
+                LEFT JOIN TarifaProductoVenta t ON t.CodigoProducto=df.Codigo
+                   AND f.Fecha>=t.FechaDesde AND (t.FechaHasta IS NULL OR f.Fecha<=t.FechaHasta)
+                WHERE f.Anulada=0 AND f.Fecha BETWEEN $d AND $h";
+            cmd.Parameters.AddWithValue("$d", desde.ToString("yyyy-MM-dd"));
+            cmd.Parameters.AddWithValue("$h", hasta.ToString("yyyy-MM-dd"));
+            return D(cmd.ExecuteScalar());
+        }
+
+        /// <summary>Tasa paralela (Bs por USD) vigente en una fecha; 0 si no hay.</summary>
+        public static decimal ObtenerTasaParalela(DateTime fecha)
+        {
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = "SELECT TasaParalelo FROM TasaCambio WHERE Fecha<=$f ORDER BY Fecha DESC LIMIT 1";
+            cmd.Parameters.AddWithValue("$f", fecha.ToString("yyyy-MM-dd"));
+            var o = cmd.ExecuteScalar();
+            return (o != null && o != DBNull.Value) ? Convert.ToDecimal(o) : 0;
+        }
+
         public static DetalleNomina CalcularDetalle(
             Empleado emp,
             PeriodoNomina periodo,
@@ -5204,16 +5252,19 @@ namespace SistemaGestion
         {
             decimal tasa = periodo.TasaBCV > 0 ? periodo.TasaBCV : 1;
 
-            // Devengado
-            decimal devSueldo  = emp.SueldoDiarioUSD * diasTrabajados;
-            decimal devPiezasBs = emp.TipEmpleadoEs("Produccion")
-                ? CalcularBonoProduccion(emp.Id, periodo.FechaDesde, periodo.FechaHasta)
-                : 0;
-            decimal devPiezas = tasa > 0 ? Math.Round(devPiezasBs / tasa, 4) : 0;
-            decimal devVentasBs = emp.TipEmpleadoEs("Oficina") || emp.TipEmpleadoEs("Ventas")
-                ? CalcularBonoVentas(emp.Id, periodo.FechaDesde, periodo.FechaHasta)
-                : 0;
-            decimal devVentas = tasa > 0 ? Math.Round(devVentasBs / tasa, 4) : 0;
+            // Sueldo base según la frecuencia del tipo, prorrateado por días trabajados
+            int divisor = emp.FrecuenciaPago == "Quincenal" ? 15 : emp.FrecuenciaPago == "Mensual" ? 30
+                        : emp.FrecuenciaPago == "Diario" ? 1 : emp.FrecuenciaPago == "Ninguna" ? 0 : 7;
+            decimal sueldoDiaUSD = divisor > 0 ? emp.SueldoBaseUSD / divisor : 0;
+            decimal devSueldo = Math.Round(sueldoDiaUSD * diasTrabajados, 2);
+
+            // Bonos por producto (Bs) → USD con la tasa BCV del período
+            decimal devPiezasBs = emp.EligibleBonoProd
+                ? CalcularBonoProduccionProducto(emp.Id, periodo.FechaDesde, periodo.FechaHasta) : 0;
+            decimal devPiezas = tasa > 0 ? Math.Round(devPiezasBs / tasa, 2) : 0;
+            decimal devVentasBs = emp.EligibleBonoVenta
+                ? CalcularBonoVentasProducto(periodo.FechaDesde, periodo.FechaHasta) : 0;
+            decimal devVentas = tasa > 0 ? Math.Round(devVentasBs / tasa, 2) : 0;
             decimal totalDev   = devSueldo + devPiezas + devVentas + otrosIngresos;
 
             // Deducciones legales (IVSS y RPVH sobre devengado, en USD — porcentajes configurables)
@@ -5223,14 +5274,8 @@ namespace SistemaGestion
             decimal ivss   = Math.Round(totalDev * pctIVSS / 100m, 2);
             decimal rpvh   = Math.Round(totalDev * pctRPVH / 100m, 2);
 
-            // Descuento por inasistencias:
-            // - Producción: suma del bono real de cada día de falta injustificada
-            // - Otros tipos: sueldo diario × días de falta
-            decimal descFaltas;
-            if (emp.TipEmpleadoEs("Produccion"))
-                descFaltas = CalcularDescuentoFaltas(emp.Id, periodo.FechaDesde, periodo.FechaHasta, tasa);
-            else
-                descFaltas = emp.SueldoDiarioUSD * diasInasistencia;
+            // Descuento por inasistencias: sueldo por día × días de falta (el obrero no lleva base → 0)
+            decimal descFaltas = Math.Round(sueldoDiaUSD * diasInasistencia, 2);
 
             return new DetalleNomina
             {
@@ -5242,7 +5287,7 @@ namespace SistemaGestion
                 DiasInasistencia = diasInasistencia,
                 PiezasProducidas = piezasProducidas,
                 VentasCerradas   = ventasCerradas,
-                SueldoDiarioUSD  = emp.SueldoDiarioUSD,
+                SueldoDiarioUSD  = sueldoDiaUSD,
                 DevengadoSueldo  = devSueldo,
                 DevengadoPiezas  = devPiezas,
                 DevengadoVentas  = devVentas,

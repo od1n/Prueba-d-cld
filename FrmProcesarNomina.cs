@@ -278,8 +278,9 @@ namespace SistemaGestion
         {
             var empleados = DatabaseService.ObtenerEmpleados(soloActivos: true);
             int diasSemana = (_periodoActual.FechaHasta - _periodoActual.FechaDesde).Days + 1;
-            // Dias habiles por defecto = 5 (lunes a viernes)
-            decimal diasHab = Math.Min(5, diasSemana);
+            // Días calendario del período: el sueldo base se prorratea por la frecuencia del tipo
+            // (semanal ÷7, quincenal ÷15, mensual ÷30). Se puede ajustar por empleado al editar.
+            decimal diasHab = diasSemana;
 
             foreach (var emp in empleados)
             {
@@ -726,9 +727,9 @@ namespace SistemaGestion
                 Font = new Font("Segoe UI", 11f, FontStyle.Bold), AutoSize = true, Location = new Point(12, 8) });
             banner.Controls.Add(new Label
             {
-                Text = emp.TipoEmpleado + "  |  Sueldo/dia: $" + emp.SueldoDiarioUSD.ToString("N2") +
-                    (emp.TipoEmpleado == "Produccion" ? "  |  Tarifa pieza: $" + emp.TarifaPiezaUSD.ToString("N4") : "") +
-                    (emp.TipoEmpleado == "Oficina"    ? "  |  Tarifa venta: $" + emp.TarifaVentaUSD.ToString("N2")  : ""),
+                Text = emp.TipoEmpleado + "  |  " + emp.FrecuenciaPago + "  |  Base: $" + emp.SueldoBaseUSD.ToString("N2") +
+                    (emp.EligibleBonoProd  ? "  |  bono producción" : "") +
+                    (emp.EligibleBonoVenta ? "  |  bono ventas" : ""),
                 ForeColor = Color.FromArgb(200, 230, 210), AutoSize = true, Location = new Point(12, 30),
                 Font = new Font("Segoe UI", 8f)
             });

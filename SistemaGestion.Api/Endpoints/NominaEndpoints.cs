@@ -242,16 +242,8 @@ namespace SistemaGestion.Api.Endpoints
                 // Días calendario del período
                 DateTime dtDesde = DateTime.Parse(desde), dtHasta = DateTime.Parse(hasta);
                 decimal diasPeriodo = (decimal)(dtHasta - dtDesde).TotalDays + 1;
-
-                // Tasa paralela del período (para convertir los bonos en Bs a USD)
-                decimal tasaPar = tasa;
-                try {
-                    var tpc = c.CreateCommand();
-                    tpc.CommandText = "SELECT TasaParalelo FROM TasaCambio WHERE Fecha<=$h ORDER BY Fecha DESC LIMIT 1";
-                    tpc.Parameters.AddWithValue("$h", hasta);
-                    var tp = tpc.ExecuteScalar();
-                    if (tp != null && tp != DBNull.Value) { var v = Convert.ToDecimal(tp); if (v > 0) tasaPar = v; }
-                } catch {}
+                // Los bonos (en Bs) se convierten a USD con la tasa BCV del período (misma que IVSS/salario normal),
+                // así el monto en Bs del recibo cuadra exacto con la tarifa en Bs cargada.
 
                 var cemp = c.CreateCommand();
                 cemp.CommandText = @"SELECT Id,Nombre,Apellido,TipoEmpleado,
@@ -329,9 +321,9 @@ namespace SistemaGestion.Api.Endpoints
                     int divisor = frec == "Quincenal" ? 15 : frec == "Mensual" ? 30 : frec == "Diario" ? 1 : frec == "Ninguna" ? 0 : 7;
                     decimal sueldoDiaUSD = divisor > 0 ? baseUSD / divisor : 0;
                     decimal devSueldo = Math.Round(sueldoDiaUSD * diasEfectivos, 2);
-                    // Bonos: de Bs a USD con la tasa paralela del período
-                    decimal devPiezas = tasaPar > 0 ? Math.Round(bonoProdBs / tasaPar, 2) : 0;
-                    decimal devVentas = tasaPar > 0 ? Math.Round(bonoVentaBs / tasaPar, 2) : 0;
+                    // Bonos: de Bs a USD con la tasa BCV del período
+                    decimal devPiezas = tasa > 0 ? Math.Round(bonoProdBs / tasa, 2) : 0;
+                    decimal devVentas = tasa > 0 ? Math.Round(bonoVentaBs / tasa, 2) : 0;
                     decimal totalDev   = devSueldo + devPiezas + devVentas;
                     decimal ivss  = Math.Round(totalDev * 0.04m, 2);
                     decimal rpvh  = Math.Round(totalDev * 0.01m, 2);
