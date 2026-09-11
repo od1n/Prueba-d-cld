@@ -3975,8 +3975,11 @@ namespace SistemaGestion
                        df.Codigo,
                        COALESCE(i.Descripcion, df.Codigo) AS Descripcion,
                        df.Cantidad,
-                       COALESCE(i.Precio, 0) AS PrecioUnit,
-                       (df.Cantidad * COALESCE(i.Precio, 0)) AS Subtotal,
+                       -- Precio REAL de la línea de factura (df.PrecioUnit); solo si la
+                       -- línea no tiene precio guardado (datos anteriores a v27) cae al
+                       -- precio actual del inventario. NUNCA usar i.Precio por defecto.
+                       COALESCE(NULLIF(df.PrecioUnit, 0), i.Precio, 0) AS PrecioUnit,
+                       (df.Cantidad * COALESCE(NULLIF(df.PrecioUnit, 0), i.Precio, 0)) AS Subtotal,
                        COALESCE(t.TasaBCV, 0)      AS TasaBCV,
                        COALESCE(t.TasaParalelo, 0) AS TasaParalelo
                 FROM Facturas f
