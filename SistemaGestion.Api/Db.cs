@@ -55,7 +55,10 @@ namespace SistemaGestion.Api
                     "ALTER TABLE Empleados ADD COLUMN EligibleBonoVenta INTEGER NOT NULL DEFAULT 0",
                     // Bono por producto (Bs): pago por unidad producida / vendida, igual para todos
                     "ALTER TABLE Inventario ADD COLUMN BonoProduccionBs REAL NOT NULL DEFAULT 0",
-                    "ALTER TABLE Inventario ADD COLUMN BonoVentaBs REAL NOT NULL DEFAULT 0"
+                    "ALTER TABLE Inventario ADD COLUMN BonoVentaBs REAL NOT NULL DEFAULT 0",
+                    // Historial fechado de tarifas de bono por producto (para calcular semanas pasadas)
+                    "CREATE TABLE IF NOT EXISTS TarifaProductoProduccion (Id INTEGER PRIMARY KEY AUTOINCREMENT, CodigoProducto TEXT NOT NULL, TarifaBs REAL NOT NULL DEFAULT 0, FechaDesde TEXT NOT NULL, FechaHasta TEXT, Usuario TEXT)",
+                    "CREATE TABLE IF NOT EXISTS TarifaProductoVenta (Id INTEGER PRIMARY KEY AUTOINCREMENT, CodigoProducto TEXT NOT NULL, TarifaBs REAL NOT NULL DEFAULT 0, FechaDesde TEXT NOT NULL, FechaHasta TEXT, Usuario TEXT)"
                 };
                 foreach (var sql in fixes)
                 {

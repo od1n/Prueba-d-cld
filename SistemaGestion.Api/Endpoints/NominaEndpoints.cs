@@ -243,46 +243,75 @@ namespace SistemaGestion.Api.Endpoints
                 DateTime dtDesde = DateTime.Parse(desde), dtHasta = DateTime.Parse(hasta);
                 decimal diasPeriodo = (decimal)(dtHasta - dtDesde).TotalDays + 1;
 
+                // Tasa paralela del período (para convertir los bonos en Bs a USD)
+                decimal tasaPar = tasa;
+                try {
+                    var tpc = c.CreateCommand();
+                    tpc.CommandText = "SELECT TasaParalelo FROM TasaCambio WHERE Fecha<=$h ORDER BY Fecha DESC LIMIT 1";
+                    tpc.Parameters.AddWithValue("$h", hasta);
+                    var tp = tpc.ExecuteScalar();
+                    if (tp != null && tp != DBNull.Value) { var v = Convert.ToDecimal(tp); if (v > 0) tasaPar = v; }
+                } catch {}
+
                 var cemp = c.CreateCommand();
-                // cols: 0=Id 1=Nombre 2=Apellido 3=TipoEmpleado 4=SueldoDiarioUSD 5=TarifaPiezaUSD 6=TarifaVentaUSD
                 cemp.CommandText = @"SELECT Id,Nombre,Apellido,TipoEmpleado,
-                    SueldoDiarioUSD,TarifaPiezaUSD,TarifaVentaUSD
+                    COALESCE(SueldoBaseUSD,0),COALESCE(FrecuenciaPago,'Semanal'),
+                    COALESCE(EligibleBonoProd,0),COALESCE(EligibleBonoVenta,0),FechaIngreso
                     FROM Empleados WHERE Activo=1 ORDER BY Apellido,Nombre";
-                var empleados = new List<(int id, string nombre, string tipo, decimal diarioUSD, decimal tarifaPieza, decimal tarifaVenta)>();
+                var empleados = new List<(int id, string nombre, string tipo, decimal baseUSD, string frec, bool bProd, bool bVenta, string ingreso)>();
                 using var re = cemp.ExecuteReader();
                 while (re.Read())
                     empleados.Add((Db.I(re,0),
                         $"{Db.S(re,1)} {Db.S(re,2)}",
-                        Db.S(re,3), Db.D(re,4), Db.D(re,5), Db.D(re,6)));
+                        Db.S(re,3), Db.D(re,4), Db.S(re,5), Db.D(re,6)==1, Db.D(re,7)==1, Db.S(re,8)));
                 re.Close();
 
-                // Calcular producción del período por empleado
+                // Calcular devengados del período por empleado
                 int procesados = 0;
-                var advertencias = new List<string>(); // #8 advertencias
-                foreach (var (empId, nombre, tipo, diarioUSD, tarifaPieza, tarifaVenta) in empleados)
+                var advertencias = new List<string>();
+                foreach (var (empId, nombre, tipo, baseUSD, frec, bProd, bVenta, ingreso) in empleados)
                 {
-                    // Producción en el período
-                    decimal piezas = 0;
-                    if (tipo == "Produccion") {
+                    // Días efectivos: desde la fecha de ingreso (o el inicio del período) hasta el fin.
+                    DateTime dtIng; if (!DateTime.TryParse(ingreso, out dtIng)) dtIng = dtDesde;
+                    DateTime iniEfec = dtIng > dtDesde ? dtIng : dtDesde;
+                    decimal diasEfectivos = iniEfec > dtHasta ? 0 : (decimal)(dtHasta - iniEfec).TotalDays + 1;
+
+                    // Bono de producción (Bs): de los días que el obrero PARTICIPÓ, con la tarifa
+                    // por producto vigente ESA fecha (historial) o la actual del inventario.
+                    decimal piezas = 0, bonoProdBs = 0;
+                    if (bProd) {
                         var qp = c.CreateCommand();
-                        qp.CommandText = @"SELECT COALESCE(SUM(CantPrimeraCalidad+CantSegundaCalidad),0)
-                            FROM RegistroProduccionDia WHERE Fecha BETWEEN $d AND $h AND Operario LIKE $o";
+                        qp.CommandText = @"SELECT COALESCE(SUM(d.Cantidad),0),
+                              COALESCE(SUM(d.Cantidad * COALESCE(t.TarifaBs, i.BonoProduccionBs, 0)),0)
+                            FROM DetalleProduccionMolde d
+                            JOIN RegistroProduccionDia r ON r.Id=d.IdRegistro
+                            JOIN ParticipantesProduccionDia pp ON pp.IdRegistro=r.Id AND pp.IdEmpleado=$id
+                            LEFT JOIN Inventario i ON i.Codigo=d.CodigoProducto
+                            LEFT JOIN TarifaProductoProduccion t ON t.CodigoProducto=d.CodigoProducto
+                               AND r.Fecha>=t.FechaDesde AND (t.FechaHasta IS NULL OR r.Fecha<=t.FechaHasta)
+                            WHERE r.Fecha BETWEEN $d AND $h";
+                        qp.Parameters.AddWithValue("$id", empId);
                         qp.Parameters.AddWithValue("$d", desde);
                         qp.Parameters.AddWithValue("$h", hasta);
-                        qp.Parameters.AddWithValue("$o", "%" + nombre.Split(' ')[0] + "%");
-                        try { piezas = (decimal)(double)(qp.ExecuteScalar() ?? 0.0); } catch {}
-                        // #8 advertencia si no hay datos
-                        if (piezas == 0) advertencias.Add($"{nombre}: sin registros de producción en el período");
+                        try { using var rq = qp.ExecuteReader(); if (rq.Read()) { piezas = Db.D(rq,0); bonoProdBs = Db.D(rq,1); } } catch {}
+                        if (bonoProdBs == 0) advertencias.Add($"{nombre}: sin bono de producción en el período");
                     }
 
-                    // Ventas cerradas (facturas del período)
-                    decimal ventas = 0;
-                    if (tipo == "Oficina" || tipo == "Ventas") {
+                    // Bono de ventas (Bs): por producto vendido en el período (a nivel empresa).
+                    decimal ventas = 0, bonoVentaBs = 0;
+                    if (bVenta) {
                         var qv = c.CreateCommand();
-                        qv.CommandText = "SELECT COUNT(*) FROM Facturas WHERE Fecha BETWEEN $d AND $h";
-                        qv.Parameters.AddWithValue("$d", desde); qv.Parameters.AddWithValue("$h", hasta);
-                        try { ventas = (decimal)(long)(qv.ExecuteScalar() ?? 0L); } catch {}
-                        if (ventas == 0) advertencias.Add($"{nombre}: sin ventas registradas en el período");
+                        qv.CommandText = @"SELECT COALESCE(SUM(df.Cantidad * COALESCE(t.TarifaBs, i.BonoVentaBs, 0)),0),
+                              COUNT(DISTINCT f.rowid)
+                            FROM DetallesFactura df
+                            JOIN Facturas f ON f.rowid=df.IdFactura
+                            LEFT JOIN Inventario i ON i.Codigo=df.Codigo
+                            LEFT JOIN TarifaProductoVenta t ON t.CodigoProducto=df.Codigo
+                               AND f.Fecha>=t.FechaDesde AND (t.FechaHasta IS NULL OR f.Fecha<=t.FechaHasta)
+                            WHERE f.Anulada=0 AND f.Fecha BETWEEN $d AND $h";
+                        qv.Parameters.AddWithValue("$d", desde);
+                        qv.Parameters.AddWithValue("$h", hasta);
+                        try { using var rv = qv.ExecuteReader(); if (rv.Read()) { bonoVentaBs = Db.D(rv,0); ventas = Db.D(rv,1); } } catch {}
                     }
 
                     // Cuota préstamo activo — #10 limitada al saldo pendiente
@@ -296,21 +325,21 @@ namespace SistemaGestion.Api.Endpoints
                         if (rpr2.Read()) { cuota = Db.D(rpr2, 0); decimal saldo = Db.D(rpr2, 1); cuota = Math.Min(cuota, saldo); }
                     } catch {}
 
-                    // Calcular devengados
-                    decimal devSueldo = diarioUSD * diasPeriodo;
-                    decimal devPiezas = piezas * tarifaPieza;   // tarifaPieza en USD/pieza
-                    decimal devVentas = ventas * tarifaVenta;   // tarifaVenta en USD/venta
+                    // Sueldo base según la frecuencia del tipo, prorrateado por días efectivos
+                    int divisor = frec == "Quincenal" ? 15 : frec == "Mensual" ? 30 : frec == "Diario" ? 1 : frec == "Ninguna" ? 0 : 7;
+                    decimal sueldoDiaUSD = divisor > 0 ? baseUSD / divisor : 0;
+                    decimal devSueldo = Math.Round(sueldoDiaUSD * diasEfectivos, 2);
+                    // Bonos: de Bs a USD con la tasa paralela del período
+                    decimal devPiezas = tasaPar > 0 ? Math.Round(bonoProdBs / tasaPar, 2) : 0;
+                    decimal devVentas = tasaPar > 0 ? Math.Round(bonoVentaBs / tasaPar, 2) : 0;
                     decimal totalDev   = devSueldo + devPiezas + devVentas;
                     decimal ivss  = Math.Round(totalDev * 0.04m, 2);
                     decimal rpvh  = Math.Round(totalDev * 0.01m, 2);
 
                     // Descuento por inasistencias registradas en el período
                     int diasInas = Db.ContarFaltasInjustificadas(empId, dtDesde, dtHasta);
-                    decimal descFaltas;
-                    if (tipo == "Produccion")
-                        descFaltas = Db.CalcularDescuentoFaltas(empId, dtDesde, dtHasta, tasa);
-                    else
-                        descFaltas = diarioUSD * diasInas;
+                    // El obrero no tiene sueldo base: las faltas no descuentan sueldo (afectan su participación).
+                    decimal descFaltas = Math.Round(sueldoDiaUSD * diasInas, 2);
 
                     // Upsert detalle
                     var ups = c.CreateCommand();
@@ -339,11 +368,11 @@ namespace SistemaGestion.Api.Endpoints
                     ups.Parameters.AddWithValue("$ie", empId);
                     ups.Parameters.AddWithValue("$ne", nombre);
                     ups.Parameters.AddWithValue("$te", tipo);
-                    ups.Parameters.AddWithValue("$dt", (double)diasPeriodo);
+                    ups.Parameters.AddWithValue("$dt", (double)diasEfectivos);
                     ups.Parameters.AddWithValue("$di", (double)diasInas);
                     ups.Parameters.AddWithValue("$pp", (double)piezas);
                     ups.Parameters.AddWithValue("$vc", (double)ventas);
-                    ups.Parameters.AddWithValue("$sd", (double)diarioUSD);
+                    ups.Parameters.AddWithValue("$sd", (double)sueldoDiaUSD);
                     ups.Parameters.AddWithValue("$ds", (double)devSueldo);
                     ups.Parameters.AddWithValue("$dp", (double)devPiezas);
                     ups.Parameters.AddWithValue("$dv", (double)devVentas);

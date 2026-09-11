@@ -1489,6 +1489,28 @@ namespace SistemaGestion
                 // Bono por producto (Bs): pago por unidad producida / vendida, igual para todos
                 AlterTableSafe(conn, tx, "ALTER TABLE Inventario ADD COLUMN BonoProduccionBs REAL NOT NULL DEFAULT 0");
                 AlterTableSafe(conn, tx, "ALTER TABLE Inventario ADD COLUMN BonoVentaBs REAL NOT NULL DEFAULT 0");
+                // Historial fechado de la tarifa de bono por producto (para calcular semanas pasadas)
+                var cmdTarHist = conn.CreateCommand(); cmdTarHist.Transaction = tx;
+                cmdTarHist.CommandText = @"
+                    CREATE TABLE IF NOT EXISTS TarifaProductoProduccion (
+                        Id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                        CodigoProducto TEXT NOT NULL,
+                        TarifaBs       REAL NOT NULL DEFAULT 0,
+                        FechaDesde     TEXT NOT NULL,
+                        FechaHasta     TEXT,
+                        Usuario        TEXT
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_tarprodprod ON TarifaProductoProduccion(CodigoProducto, FechaDesde);
+                    CREATE TABLE IF NOT EXISTS TarifaProductoVenta (
+                        Id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                        CodigoProducto TEXT NOT NULL,
+                        TarifaBs       REAL NOT NULL DEFAULT 0,
+                        FechaDesde     TEXT NOT NULL,
+                        FechaHasta     TEXT,
+                        Usuario        TEXT
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_tarprodventa ON TarifaProductoVenta(CodigoProducto, FechaDesde);";
+                cmdTarHist.ExecuteNonQuery();
 
                 if (versionActual < 8)
                     EjecutarMigracion(conn, tx, 8, @"
@@ -2356,11 +2378,24 @@ namespace SistemaGestion
                  BonoProduccionBs,BonoVentaBs)
                 VALUES($co,$de,$dp,$un,$en,$ca,$cant,$cp,$pr,$ex,$emi,$ema,$pv,$ua,$cpv,$pk,$bp,$bv)";
             BindInventario(cmd, i); cmd.ExecuteNonQuery();
+            RegistrarTarifaProducto("Produccion", i.Codigo, i.BonoProduccionBs);
+            RegistrarTarifaProducto("Venta",      i.Codigo, i.BonoVentaBs);
         }
 
         public static void ActualizarInventario(Inventario i)
         {
             using var c = Conn();
+            // El VALOR del bono por producto solo lo cambia Admin; si no, se conserva el anterior.
+            if (!Sesion.EsAdmin)
+            {
+                try {
+                    var qb = c.CreateCommand();
+                    qb.CommandText = "SELECT COALESCE(BonoProduccionBs,0), COALESCE(BonoVentaBs,0) FROM Inventario WHERE Codigo=$co";
+                    qb.Parameters.AddWithValue("$co", i.Codigo);
+                    using var rb = qb.ExecuteReader();
+                    if (rb.Read()) { i.BonoProduccionBs = D(rb,0); i.BonoVentaBs = D(rb,1); }
+                } catch {}
+            }
             var cmd = c.CreateCommand();
             cmd.CommandText = @"UPDATE Inventario SET Descripcion=$de,Departamento=$dp,Unidad=$un,
                 Enser=$en,CostoActual=$ca,CostoAnt=$cant,CostoPro=$cp,Precio=$pr,Existencia=$ex,
@@ -2368,6 +2403,8 @@ namespace SistemaGestion
                 BonoProduccionBs=$bp,BonoVentaBs=$bv
                 WHERE Codigo=$co";
             BindInventario(cmd, i); cmd.ExecuteNonQuery();
+            RegistrarTarifaProducto("Produccion", i.Codigo, i.BonoProduccionBs);
+            RegistrarTarifaProducto("Venta",      i.Codigo, i.BonoVentaBs);
         }
 
         public static void EliminarInventario(string codigo)
@@ -2396,6 +2433,71 @@ namespace SistemaGestion
             cmd.Parameters.AddWithValue("$pk",  (double)i.PesoKg);
             cmd.Parameters.AddWithValue("$bp",  (double)i.BonoProduccionBs);
             cmd.Parameters.AddWithValue("$bv",  (double)i.BonoVentaBs);
+        }
+
+        // ── Historial fechado de tarifas de bono por producto ──────────────────
+        private static string TablaTarifaBono(string tipo) =>
+            tipo == "Venta" ? "TarifaProductoVenta" : "TarifaProductoProduccion";
+
+        /// <summary>Registra (fechado) un cambio de tarifa de bono de un producto, solo si difiere de la vigente.</summary>
+        public static void RegistrarTarifaProducto(string tipo, string codigo, decimal tarifaBs)
+        {
+            if (string.IsNullOrWhiteSpace(codigo)) return;
+            string tabla = TablaTarifaBono(tipo);
+            try
+            {
+                using var c = Conn();
+                var q = c.CreateCommand();
+                q.CommandText = $"SELECT Id, TarifaBs FROM {tabla} WHERE CodigoProducto=$cod AND FechaHasta IS NULL ORDER BY FechaDesde DESC, Id DESC LIMIT 1";
+                q.Parameters.AddWithValue("$cod", codigo);
+                int idAbierta = -1; decimal tarifaVig = -1;
+                using (var r = q.ExecuteReader())
+                    if (r.Read()) { idAbierta = r.GetInt32(0); tarifaVig = D(r,1); }
+                if (idAbierta >= 0 && tarifaVig == tarifaBs) return;   // sin cambio
+                if (idAbierta < 0 && tarifaBs == 0) return;            // nada que registrar
+
+                if (idAbierta >= 0)
+                {
+                    var cu = c.CreateCommand();
+                    cu.CommandText = $"UPDATE {tabla} SET FechaHasta=$fh WHERE Id=$id";
+                    cu.Parameters.AddWithValue("$fh", DateTime.Today.AddDays(-1).ToString("yyyy-MM-dd"));
+                    cu.Parameters.AddWithValue("$id", idAbierta);
+                    cu.ExecuteNonQuery();
+                }
+                var ins = c.CreateCommand();
+                ins.CommandText = $"INSERT INTO {tabla} (CodigoProducto,TarifaBs,FechaDesde,FechaHasta,Usuario) VALUES ($cod,$ta,$fd,NULL,$us)";
+                ins.Parameters.AddWithValue("$cod", codigo);
+                ins.Parameters.AddWithValue("$ta", (double)tarifaBs);
+                ins.Parameters.AddWithValue("$fd", DateTime.Today.ToString("yyyy-MM-dd"));
+                ins.Parameters.AddWithValue("$us", Sesion.NombreUsuario ?? "Sistema");
+                ins.ExecuteNonQuery();
+                RegistrarAuditoria("BONO_PRODUCTO_CAMBIO", tabla, $"{codigo}: {tarifaVig:0.##} -> {tarifaBs:0.##} Bs");
+            }
+            catch { /* no interrumpir el guardado del producto */ }
+        }
+
+        /// <summary>Tarifa de bono (Bs) de un producto vigente en una fecha; si no hay historial, usa la actual del inventario.</summary>
+        public static decimal BonoProductoBs(string tipo, string codigo, DateTime fecha)
+        {
+            if (string.IsNullOrWhiteSpace(codigo)) return 0;
+            string tabla = TablaTarifaBono(tipo);
+            string f = fecha.ToString("yyyy-MM-dd");
+            using var c = Conn();
+            var q = c.CreateCommand();
+            q.CommandText = $@"SELECT TarifaBs FROM {tabla}
+                WHERE CodigoProducto=$cod AND FechaDesde<=$f AND (FechaHasta IS NULL OR $f<=FechaHasta)
+                ORDER BY FechaDesde DESC, Id DESC LIMIT 1";
+            q.Parameters.AddWithValue("$cod", codigo);
+            q.Parameters.AddWithValue("$f", f);
+            var o = q.ExecuteScalar();
+            if (o != null && o != DBNull.Value) return Convert.ToDecimal(o);
+            var qi = c.CreateCommand();
+            qi.CommandText = tipo == "Venta"
+                ? "SELECT COALESCE(BonoVentaBs,0) FROM Inventario WHERE Codigo=$cod"
+                : "SELECT COALESCE(BonoProduccionBs,0) FROM Inventario WHERE Codigo=$cod";
+            qi.Parameters.AddWithValue("$cod", codigo);
+            var oi = qi.ExecuteScalar();
+            return (oi != null && oi != DBNull.Value) ? Convert.ToDecimal(oi) : 0;
         }
 
         // ════════ CLIENTES ═══════════════════════════════════════════════════
