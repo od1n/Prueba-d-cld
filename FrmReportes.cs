@@ -305,13 +305,47 @@ Controls.AddRange(new Control[] { tabs, hdr, footer });
                 {
                     var lineas = await ObtenerLineasAsync();
                     pnlGraf.Visible = false; dgv.Visible = true;
+
+                    // Total vendido del período (para calcular la participación % de cada producto)
+                    decimal granTotal = lineas.Sum(x => x.Total);
+
                     dgv.DataSource = lineas
                         .GroupBy(l => new { l.Codigo, l.Descripcion })
                         .Select(g => new {
                             g.Key.Codigo, g.Key.Descripcion,
-                            TotalUnidades = g.Sum(x => x.Cantidad).ToString("N2"),
-                            TotalVendido  = g.Sum(x => x.Total).ToString("C2")
+                            Unidades    = g.Sum(x => x.Cantidad),
+                            Total       = g.Sum(x => x.Total),
+                            PrecioMin   = g.Min(x => x.PrecioUnit),
+                            PrecioMax   = g.Max(x => x.PrecioUnit),
+                            Facturas    = g.Select(x => x.NumFactura).Distinct().Count(),
+                            UltimaVenta = g.Max(x => x.Fecha)
+                        })
+                        .OrderByDescending(x => x.Total)
+                        .Select(x => new {
+                            x.Codigo, x.Descripcion,
+                            Unidades     = x.Unidades.ToString("N2"),
+                            TotalVendido = x.Total.ToString("C2"),
+                            // Precio promedio ponderado = total vendido / unidades vendidas
+                            PrecioProm   = (x.Unidades != 0 ? x.Total / x.Unidades : 0).ToString("C2"),
+                            PrecioMin    = x.PrecioMin.ToString("C2"),
+                            PrecioMax    = x.PrecioMax.ToString("C2"),
+                            Facturas     = x.Facturas.ToString("N0"),
+                            PctTotal     = (granTotal != 0 ? x.Total / granTotal * 100m : 0).ToString("N1") + " %",
+                            UltimaVenta  = x.UltimaVenta.ToString("dd/MM/yyyy")
                         }).ToList();
+
+                    // Encabezados legibles
+                    void Enc(string col, string txt) {
+                        if (dgv.Columns.Contains(col)) dgv.Columns[col].HeaderText = txt;
+                    }
+                    Enc("Unidades",     "Unidades");
+                    Enc("TotalVendido", "Total Vendido");
+                    Enc("PrecioProm",   "Precio Prom.");
+                    Enc("PrecioMin",    "Precio Mín.");
+                    Enc("PrecioMax",    "Precio Máx.");
+                    Enc("Facturas",     "N.° Facturas");
+                    Enc("PctTotal",     "% del Total");
+                    Enc("UltimaVenta",  "Última Venta");
                 }
                 catch (Exception ex) { MsgErr(ex); }
             };
