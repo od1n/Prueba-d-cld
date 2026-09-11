@@ -346,6 +346,15 @@ namespace SistemaGestion
                 AutoSize = true, Font = new Font("Segoe UI", 9f, FontStyle.Bold) };
             Controls.Add(lblSueldo);
             numSueldo = N(e?.SueldoBaseUSD ?? 0); y += 32;
+            if (!Sesion.PuedeEditarSueldo)
+            {
+                numSueldo.Enabled = false;   // el sueldo fijo solo lo cambian Ventas/Compras/Contabilidad/Admin
+                Controls.Add(new Label {
+                    Text = "(El sueldo solo lo cambian Ventas, Compras o Contabilidad)",
+                    Location = new Point(175, y - 6), AutoSize = true,
+                    Font = new Font("Segoe UI", 8f, FontStyle.Italic), ForeColor = Color.FromArgb(150, 60, 0) });
+                y += 18;
+            }
 
             lblSalNormal = new Label { Text = "Sal. normal mensual USD:", Location = new Point(16, y + 3),
                 AutoSize = true, Font = new Font("Segoe UI", 9f, FontStyle.Bold) };

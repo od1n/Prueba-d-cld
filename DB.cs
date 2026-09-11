@@ -4895,12 +4895,26 @@ namespace SistemaGestion
             cmd.ExecuteNonQuery();
             cmd.CommandText = "SELECT last_insert_rowid()";
             e.Id = (int)(long)cmd.ExecuteScalar();
-            RegistrarAuditoria("EMPLEADO_NUEVO", "Empleados", e.NombreCompleto);
+            RegistrarAuditoria("EMPLEADO_NUEVO", "Empleados",
+                $"{e.NombreCompleto} (sueldo fijo {e.SueldoBaseUSD:0.##} USD)");
         }
 
         public static void ActualizarEmpleado(Empleado e)
         {
             using var c = Conn();
+            // Sueldo fijo anterior, para auditar el cambio y proteger si no hay permiso
+            decimal sueldoAnt = -1;
+            try {
+                var qsa = c.CreateCommand();
+                qsa.CommandText = "SELECT COALESCE(SueldoBaseUSD,0) FROM Empleados WHERE Id=$id";
+                qsa.Parameters.AddWithValue("$id", e.Id);
+                var o = qsa.ExecuteScalar();
+                if (o != null && o != DBNull.Value) sueldoAnt = Convert.ToDecimal(o);
+            } catch {}
+            // El sueldo fijo solo lo cambian Admin/Ventas/Compras/Contabilidad; si no, se conserva
+            if (sueldoAnt >= 0 && e.SueldoBaseUSD != sueldoAnt && !Sesion.PuedeEditarSueldo)
+                e.SueldoBaseUSD = sueldoAnt;
+
             var cmd = c.CreateCommand();
             cmd.CommandText = @"UPDATE Empleados SET
                 Cedula=$ci,Nombre=$no,Apellido=$ap,Cargo=$ca,TipoEmpleado=$te,
@@ -4911,6 +4925,10 @@ namespace SistemaGestion
             BindEmpParams(cmd, e);
             cmd.Parameters.AddWithValue("$id", e.Id);
             cmd.ExecuteNonQuery();
+            // Registro de quién y cuándo cambió el sueldo fijo
+            if (sueldoAnt >= 0 && sueldoAnt != e.SueldoBaseUSD)
+                RegistrarAuditoria("EMPLEADO_SUELDO_CAMBIO", "Empleados",
+                    $"{e.NombreCompleto}: sueldo fijo {sueldoAnt:0.##} -> {e.SueldoBaseUSD:0.##} USD");
         }
 
         private static Empleado BindEmp(SqliteDataReader r) => new Empleado
@@ -6060,6 +6078,10 @@ namespace SistemaGestion
         public static bool EsAdmin        => TieneRol("Admin");
         public static bool TieneRol(string rol) => PermisosRol.ContieneRol(RolesEfectivos, rol);
         public static bool TienePermiso(string modulo) => PermisosRol.Permite(RolesEfectivos, modulo);
+
+        /// <summary>Quién puede cambiar el sueldo fijo: Admin, Ventas, Compras o Contabilidad.</summary>
+        public static bool PuedeEditarSueldo =>
+            EsAdmin || TieneRol("Ventas") || TieneRol("Compras") || TieneRol("Contabilidad");
 
         // ── Visibilidad de Notas de Entrega (v22) ───────────────────────────
         // Default false. Sólo Admin puede activarla con UsarMostrarNotasEntrega.

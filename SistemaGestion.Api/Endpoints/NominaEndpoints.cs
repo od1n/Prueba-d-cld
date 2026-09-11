@@ -27,11 +27,15 @@ namespace SistemaGestion.Api.Endpoints
                 return Results.Ok(lista);
             }).RequireAuthorization();
 
-            app.MapPost("/api/nomina/empleados", (EmpleadoRequest req) =>
+            app.MapPost("/api/nomina/empleados", (EmpleadoRequest req, HttpContext ctx) =>
             {
                 if (string.IsNullOrWhiteSpace(req.Cedula) || string.IsNullOrWhiteSpace(req.Nombre))
                     return Results.BadRequest(new { error = "Cédula y nombre son requeridos." });
                 using var c = Db.Conn();
+                // El sueldo fijo solo lo fijan Admin/Ventas/Compras/Contabilidad; si no, entra en 0.
+                bool puedeSueldo = ctx.User.IsInRole("Admin") || ctx.User.IsInRole("Ventas")
+                    || ctx.User.IsInRole("Compras") || ctx.User.IsInRole("Contabilidad");
+                decimal sueldoNuevo = puedeSueldo ? req.SueldoBaseUSD : 0m;
                 var ins = c.CreateCommand();
                 ins.CommandText = @"INSERT INTO Empleados
                     (Cedula,Nombre,Apellido,Cargo,TipoEmpleado,FechaIngreso,Activo,
@@ -51,7 +55,7 @@ namespace SistemaGestion.Api.Endpoints
                 ins.Parameters.AddWithValue("$tv", (double)req.TarifaVentaUSD);
                 ins.Parameters.AddWithValue("$sn", (double)req.SalarioNormalUSD);
                 ins.Parameters.AddWithValue("$fp", req.FrecuenciaPago ?? "Semanal");
-                ins.Parameters.AddWithValue("$sb", (double)req.SueldoBaseUSD);
+                ins.Parameters.AddWithValue("$sb", (double)sueldoNuevo);
                 ins.Parameters.AddWithValue("$ep", req.EligibleBonoProd ? 1 : 0);
                 ins.Parameters.AddWithValue("$ev", req.EligibleBonoVenta ? 1 : 0);
                 try { ins.ExecuteNonQuery(); }
@@ -60,12 +64,35 @@ namespace SistemaGestion.Api.Endpoints
                 var id = c.CreateCommand();
                 id.CommandText = "SELECT last_insert_rowid()";
                 int newId = (int)(long)(id.ExecuteScalar() ?? 0L);
+                try {
+                    var au = c.CreateCommand();
+                    au.CommandText = "INSERT INTO LogAuditoria (FechaHora,Usuario,Accion,Tabla,Detalle) VALUES ($fh,$us,$ac,$ta,$de)";
+                    au.Parameters.AddWithValue("$fh", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+                    au.Parameters.AddWithValue("$us", ctx.User.Identity?.Name ?? "Portal");
+                    au.Parameters.AddWithValue("$ac", "EMPLEADO_NUEVO");
+                    au.Parameters.AddWithValue("$ta", "Empleados");
+                    au.Parameters.AddWithValue("$de", $"{req.Nombre} {req.Apellido} (sueldo fijo {sueldoNuevo:0.##} USD)");
+                    au.ExecuteNonQuery();
+                } catch {}
                 return Results.Created($"/api/nomina/empleados/{newId}", new { id = newId });
             }).AddEndpointFilter(RequireRole.Of(TokenService.PuedeEscribirNomina)).RequireAuthorization();
 
-            app.MapPut("/api/nomina/empleados/{id:int}", (int id, EmpleadoRequest req) =>
+            app.MapPut("/api/nomina/empleados/{id:int}", (int id, EmpleadoRequest req, HttpContext ctx) =>
             {
                 using var c = Db.Conn();
+                // El sueldo fijo solo lo cambian Admin/Ventas/Compras/Contabilidad; queda registro de quién y cuándo.
+                decimal sueldoAnt = -1m;
+                try {
+                    var qsa = c.CreateCommand();
+                    qsa.CommandText = "SELECT COALESCE(SueldoBaseUSD,0) FROM Empleados WHERE Id=$id";
+                    qsa.Parameters.AddWithValue("$id", id);
+                    var oo = qsa.ExecuteScalar();
+                    if (oo != null && oo != DBNull.Value) sueldoAnt = Convert.ToDecimal(oo);
+                } catch {}
+                bool puedeSueldo = ctx.User.IsInRole("Admin") || ctx.User.IsInRole("Ventas")
+                    || ctx.User.IsInRole("Compras") || ctx.User.IsInRole("Contabilidad");
+                decimal sueldoFinal = (sueldoAnt >= 0 && req.SueldoBaseUSD != sueldoAnt && !puedeSueldo)
+                    ? sueldoAnt : req.SueldoBaseUSD;
                 var upd = c.CreateCommand();
                 upd.CommandText = @"UPDATE Empleados SET
                     Cedula=$ci,Nombre=$no,Apellido=$ap,Cargo=$ca,TipoEmpleado=$te,
@@ -87,10 +114,23 @@ namespace SistemaGestion.Api.Endpoints
                 upd.Parameters.AddWithValue("$tv", (double)req.TarifaVentaUSD);
                 upd.Parameters.AddWithValue("$sn", (double)req.SalarioNormalUSD);
                 upd.Parameters.AddWithValue("$fp", req.FrecuenciaPago ?? "Semanal");
-                upd.Parameters.AddWithValue("$sb", (double)req.SueldoBaseUSD);
+                upd.Parameters.AddWithValue("$sb", (double)sueldoFinal);
                 upd.Parameters.AddWithValue("$ep", req.EligibleBonoProd ? 1 : 0);
                 upd.Parameters.AddWithValue("$ev", req.EligibleBonoVenta ? 1 : 0);
                 int rows = upd.ExecuteNonQuery();
+                if (rows > 0 && sueldoAnt >= 0 && sueldoAnt != sueldoFinal)
+                {
+                    try {
+                        var au = c.CreateCommand();
+                        au.CommandText = "INSERT INTO LogAuditoria (FechaHora,Usuario,Accion,Tabla,Detalle) VALUES ($fh,$us,$ac,$ta,$de)";
+                        au.Parameters.AddWithValue("$fh", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+                        au.Parameters.AddWithValue("$us", ctx.User.Identity?.Name ?? "Portal");
+                        au.Parameters.AddWithValue("$ac", "EMPLEADO_SUELDO_CAMBIO");
+                        au.Parameters.AddWithValue("$ta", "Empleados");
+                        au.Parameters.AddWithValue("$de", $"Id {id}: sueldo fijo {sueldoAnt:0.##} -> {sueldoFinal:0.##} USD");
+                        au.ExecuteNonQuery();
+                    } catch {}
+                }
                 return rows == 0 ? Results.NotFound() : Results.Ok(new { ok = true });
             }).AddEndpointFilter(RequireRole.Of(TokenService.PuedeEscribirNomina)).RequireAuthorization();
 
