@@ -268,7 +268,8 @@ namespace SistemaGestion
         {
             var totalUSD = DatabaseService.TotalEgresosUSDPorPeriodo(d, h);
             var porCat   = DatabaseService.ResumenEgresosPorCategoria(d, h);
-            var pend     = DatabaseService.ObtenerEgresosPorPagar();
+            var pend     = DatabaseService.ObtenerCuentasPagar()
+                             .Where(c => c.Estado != "Pagada" && c.Saldo > 0.01m).ToList();
 
             var pnl = new Panel { Dock = DockStyle.Fill, BackColor = UITheme.FondoCard,
                 Padding = new Padding(20) };
@@ -284,7 +285,7 @@ namespace SistemaGestion
             pnlKpi.Controls.Add(KpiCard("CATEGORÍAS USADAS",
                 porCat.Count(x => x.TotalUSD > 0).ToString(), Color.FromArgb(15, 110, 86)), 2, 0);
             pnlKpi.Controls.Add(KpiCard("CxP PENDIENTES",
-                pend.Count.ToString() + " · $" + pend.Sum(g => g.MontoUSD).ToString("N0"),
+                pend.Count.ToString() + " · $" + pend.Sum(c => c.Saldo).ToString("N0"),
                 Color.FromArgb(210, 153, 34)), 3, 0);
             pnl.Controls.Add(pnlKpi);
 
@@ -414,7 +415,11 @@ namespace SistemaGestion
         // ── Tab Por Pagar ───────────────────────────────────────────────────
         private void RenderPorPagar(TabPage tab)
         {
-            var lista = DatabaseService.ObtenerEgresosPorPagar();
+            // Unificado: la lista de "por pagar" es la de Cuentas por Pagar (incluye
+            // las generadas automáticamente desde egresos a crédito y las manuales).
+            var lista = DatabaseService.ObtenerCuentasPagar()
+                            .Where(c => c.Estado != "Pagada" && c.Saldo > 0.01m)
+                            .OrderBy(c => c.FechaVence).ToList();
             var dgv = new DataGridView
             {
                 Dock = DockStyle.Fill, ReadOnly = true, AllowUserToAddRows = false,
@@ -425,46 +430,46 @@ namespace SistemaGestion
             };
             UITheme.EstilizarGrid(dgv);
             DateTime hoy = DateTime.Today;
-            dgv.DataSource = lista.Select(g => new {
-                g.Id,
-                Fecha     = g.Fecha.ToString("dd/MM/yyyy"),
-                Categoria = g.NombreCategoria,
-                g.Concepto,
-                g.Proveedor,
-                Vence     = g.FechaVencimiento?.ToString("dd/MM/yyyy") ?? "—",
-                Dias      = g.FechaVencimiento.HasValue
-                            ? ((g.FechaVencimiento.Value.Date - hoy).Days + " d")
-                            : "—",
-                USD       = "$ " + g.MontoUSD.ToString("N2")
+            dgv.DataSource = lista.Select(c => new {
+                c.Id,
+                c.Proveedor,
+                c.Concepto,
+                Referencia = c.NumFactura,
+                Emision = c.FechaEmision.ToString("dd/MM/yyyy"),
+                Vence   = c.FechaVence.ToString("dd/MM/yyyy"),
+                Dias    = (c.FechaVence.Date - hoy).Days + " d",
+                Monto   = "$ " + c.Monto.ToString("N2"),
+                Pagado  = "$ " + c.Pagado.ToString("N2"),
+                Saldo   = "$ " + c.Saldo.ToString("N2"),
+                c.Estado
             }).ToList();
-            if (dgv.Columns.Count > 0) dgv.Columns[0].Visible = false;
+            if (dgv.Columns.Contains("Id")) dgv.Columns["Id"].Visible = false;
 
             // Color a filas vencidas/próximas a vencer
             dgv.RowPrePaint += (s, e) =>
             {
                 if (e.RowIndex < 0 || e.RowIndex >= lista.Count) return;
-                var g = lista[e.RowIndex];
-                if (g.FechaVencimiento.HasValue)
-                {
-                    int dias = (g.FechaVencimiento.Value.Date - hoy).Days;
-                    if (dias < 0) dgv.Rows[e.RowIndex].DefaultCellStyle.BackColor = Color.FromArgb(253, 235, 235);
-                    else if (dias <= 7) dgv.Rows[e.RowIndex].DefaultCellStyle.BackColor = Color.FromArgb(255, 248, 220);
-                }
+                var c = lista[e.RowIndex];
+                int dias = (c.FechaVence.Date - hoy).Days;
+                if (dias < 0) dgv.Rows[e.RowIndex].DefaultCellStyle.BackColor = Color.FromArgb(253, 235, 235);
+                else if (dias <= 7) dgv.Rows[e.RowIndex].DefaultCellStyle.BackColor = Color.FromArgb(255, 248, 220);
             };
 
-            // Doble click para marcar pagado
+            // Doble clic → registrar un pago (parcial o total) de la cuenta
             dgv.DoubleClick += (s, e) =>
             {
                 if (dgv.CurrentRow == null) return;
                 int id = (int)dgv.CurrentRow.Cells["Id"].Value;
-                if (MessageBox.Show(this,
-                    "¿Marcar este egreso como PAGADO hoy (" + hoy.ToString("dd/MM/yyyy") + ")?",
-                    "Confirmar pago",
-                    MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+                var c = lista.FirstOrDefault(x => x.Id == id);
+                if (c == null) return;
                 try
                 {
-                    DatabaseService.MarcarEgresoPagado(id, hoy);
-                    RecargarTab();
+                    using var dlg = new DlgPagoCxP(c);
+                    if (dlg.ShowDialog(this) == DialogResult.OK)
+                    {
+                        DatabaseService.RegistrarPagoCxP(c.Id, dlg.Resultado);
+                        RecargarTab();
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -474,8 +479,8 @@ namespace SistemaGestion
             };
             tab.Controls.Add(dgv);
 
-            _lblResumenTotal.Text = "  " + lista.Count + " cuentas por pagar · Total: $ " +
-                lista.Sum(g => g.MontoUSD).ToString("N2") + " · doble click → marcar pagado";
+            _lblResumenTotal.Text = "  " + lista.Count + " cuentas por pagar · Saldo total: $ " +
+                lista.Sum(c => c.Saldo).ToString("N2") + " · doble clic → registrar pago";
         }
 
         // ── Tab Categorías ──────────────────────────────────────────────────
