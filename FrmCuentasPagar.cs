@@ -359,7 +359,9 @@ namespace SistemaGestion
             };
             _btnHlp.FlatAppearance.BorderSize = 0;
             _btnHlp.Click += (s, e) => AyudaService.Mostrar(this, "FrmCuentasPagar");
-            CargarDatos();
+            // Solo precargar datos cuando se edita una cuenta existente; en "Nueva"
+            // _original es null y CargarDatos() haría NullReferenceException.
+            if (_original != null) CargarDatos();
             CargarProveedores();
         }
 
