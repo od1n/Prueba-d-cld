@@ -278,8 +278,10 @@ namespace SistemaGestion
             if (cantidad <= 0) throw new ArgumentException("La cantidad debe ser mayor que cero.");
             if (costoUnitario < 0) throw new ArgumentException("El costo no puede ser negativo.");
 
-            using var conn = new SqliteConnection(ConnStr);
-            conn.Open();
+            // Conn() aplica WAL + busy_timeout; con una conexión cruda, si la
+            // conexión principal del egreso sigue abierta, esto fallaba con
+            // "database is locked" y la entrada al Kardex no se creaba.
+            using var conn = Conn();
             using var tx = conn.BeginTransaction();
             try
             {
@@ -350,8 +352,7 @@ namespace SistemaGestion
             string codigoInsumo, string referencia, decimal costoRealUnit)
         {
             if (string.IsNullOrEmpty(referencia)) return;
-            using var conn = new SqliteConnection(ConnStr);
-            conn.Open();
+            using var conn = Conn();   // WAL + busy_timeout (evita "database is locked")
             using var tx = conn.BeginTransaction();
             try
             {
@@ -426,8 +427,7 @@ namespace SistemaGestion
         {
             if (cantidad <= 0) throw new ArgumentException("Cantidad debe ser > 0.");
 
-            using var conn = new SqliteConnection(ConnStr);
-            conn.Open();
+            using var conn = Conn();   // WAL + busy_timeout (evita "database is locked")
             using var tx = conn.BeginTransaction();
             try
             {
