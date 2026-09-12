@@ -482,7 +482,7 @@ Controls.AddRange(new Control[] { tabs, hdr, footer });
             var pnlGraf = new Panel { Dock = DockStyle.Fill, BackColor = Color.White };
             pnlGraf.Resize += (s, e) => pnlGraf.Invalidate();
 
-            var series = new List<(string Cod, string Desc, Color Col, List<(DateTime F, decimal P)> Pts)>();
+            var series = new List<(string Cod, string Desc, Color Col, decimal Prom, List<(DateTime F, decimal P)> Pts)>();
             pnlGraf.Paint += (s, e) => PintarPrecios(e.Graphics, series, pnlGraf.Size);
 
             btnGraf.Click += async (s, e) =>
@@ -520,7 +520,12 @@ Controls.AddRange(new Control[] { tabs, hdr, footer });
                             var pts = grupo.OrderBy(x => x.Fecha)
                                 .Select(x => (F: x.Fecha, P: x.Precio)).ToList();
                             string desc = grupo.First().Descripcion;
-                            series.Add((grupo.Key, desc, _paleta[ci % _paleta.Length], pts));
+                            // Promedio del período: ponderado por cantidad (= total vendido / total unidades)
+                            decimal totCant = grupo.Sum(x => x.Cantidad);
+                            decimal prom = totCant != 0
+                                ? grupo.Sum(x => x.Precio * x.Cantidad) / totCant
+                                : 0;
+                            series.Add((grupo.Key, desc, _paleta[ci % _paleta.Length], prom, pts));
                             ci++;
                         }
                         pnlGraf.Invalidate();
@@ -1690,9 +1695,10 @@ Controls.AddRange(new Control[] { tabs, hdr, footer });
             }
         }
 
-        // Gráfico de evolución de precios: una línea por producto, eje X por fecha.
+        // Gráfico de evolución de precios: una línea por producto, eje X por fecha,
+        // más una línea punteada de referencia con el promedio del período por producto.
         private void PintarPrecios(Graphics g,
-            List<(string Cod, string Desc, Color Col, List<(DateTime F, decimal P)> Pts)> series,
+            List<(string Cod, string Desc, Color Col, decimal Prom, List<(DateTime F, decimal P)> Pts)> series,
             Size sz)
         {
             g.SmoothingMode = SmoothingMode.AntiAlias;
@@ -1712,7 +1718,7 @@ Controls.AddRange(new Control[] { tabs, hdr, footer });
             decimal yMin = Math.Max(0m, minP - margen), yMax = maxP + margen;
             if (yMax <= yMin) yMax = yMin + 1m;
 
-            int padL = 70, padR = 170, padT = 24, padB = 46;
+            int padL = 70, padR = 195, padT = 24, padB = 46;
             int w = sz.Width - padL - padR, h = sz.Height - padT - padB;
             if (w < 60 || h < 60) return;
 
@@ -1756,14 +1762,27 @@ Controls.AddRange(new Control[] { tabs, hdr, footer });
                 using var br  = new SolidBrush(s.Col);
                 var pts = s.Pts.OrderBy(p => p.F)
                     .Select(p => new PointF(MapX(p.F), MapY(p.P))).ToArray();
+
+                // Línea de referencia: promedio del período (punteada, mismo color)
+                using (var penProm = new Pen(Color.FromArgb(150, s.Col), 1.4f)
+                       { DashStyle = DashStyle.Dash })
+                {
+                    float yp = MapY(s.Prom);
+                    g.DrawLine(penProm, padL, yp, padL + w, yp);
+                }
+
                 if (pts.Length >= 2) g.DrawLines(pen, pts);
                 foreach (var pt in pts) g.FillEllipse(br, pt.X - 3, pt.Y - 3, 6, 6);
 
-                // Leyenda
-                g.FillRectangle(br, padL + w + 14, padT + si * 18, 12, 10);
-                string leg = s.Cod + "  " + s.Desc;
-                if (leg.Length > 28) leg = leg.Substring(0, 27) + "…";
-                g.DrawString(leg, fntL, Brushes.Black, padL + w + 30, padT + si * 18 - 2);
+                // Leyenda: nombre + promedio del período
+                int ly = padT + si * 30;
+                g.FillRectangle(br, padL + w + 14, ly + 1, 12, 10);
+                string nombre = s.Cod + " " + s.Desc;
+                if (nombre.Length > 20) nombre = nombre.Substring(0, 19) + "…";
+                g.DrawString(nombre, fntL, Brushes.Black, padL + w + 30, ly - 2);
+                using var brProm = new SolidBrush(s.Col);
+                g.DrawString("prom período: " + s.Prom.ToString("N2"),
+                    fntS, brProm, padL + w + 30, ly + 11);
             }
         }
 

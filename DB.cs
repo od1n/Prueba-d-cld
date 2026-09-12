@@ -4020,11 +4020,11 @@ namespace SistemaGestion
         /// (DetallesFactura.PrecioUnit); cae al precio de inventario solo si la línea no
         /// tiene precio guardado (datos anteriores a v27).
         /// </summary>
-        public static List<(string Codigo, string Descripcion, DateTime Fecha, decimal Precio)>
+        public static List<(string Codigo, string Descripcion, DateTime Fecha, decimal Precio, decimal Cantidad)>
             ObtenerPreciosProductoPorPeriodo(
                 List<string> codigos, DateTime desde, DateTime hasta, string tipoDoc = "TODAS")
         {
-            var list = new List<(string, string, DateTime, decimal)>();
+            var list = new List<(string, string, DateTime, decimal, decimal)>();
             if (codigos == null || codigos.Count == 0) return list;
 
             var inParams = new List<string>();
@@ -4066,7 +4066,7 @@ namespace SistemaGestion
                 decimal cant  = D(r, 4);
                 decimal precio = cant != 0 ? monto / cant : 0;
                 var fecha = DateTime.TryParse(S(r, 2), out var f) ? f : DateTime.MinValue;
-                list.Add((S(r, 0), S(r, 1), fecha, precio));
+                list.Add((S(r, 0), S(r, 1), fecha, precio, cant));
             }
             return list;
         }
