@@ -38,6 +38,7 @@ namespace SistemaGestion
         private NumericUpDown  _numTasa = null!;
         private Label          _lblConvUsd = null!, _lblConvBs = null!;
         private CheckBox       _chkPendiente = null!;
+        private NumericUpDown  _numPagado = null!;
         private DateTimePicker _dtpVence = null!;
         private TextBox        _txtComprobante = null!;
         private Button         _btnAdjuntar = null!, _btnVerComprobante = null!;
@@ -313,25 +314,37 @@ namespace SistemaGestion
             pnl.Controls.AddRange(new Control[] { _lblConvUsd, _lblConvBs });
             y += 40;
 
-            // ── Estado / vencimiento ────────────────────────────────────────
+            // ── Pago / crédito ──────────────────────────────────────────────
+            // Si NO se paga completo, el saldo genera una Cuenta por Pagar.
             _chkPendiente = new CheckBox
             {
-                Text = "Marcar como PENDIENTE de pago (CxP)",
+                Text = "Pago a crédito (parcial o sin pagar) — genera Cuenta por Pagar",
                 Font = UITheme.Body, AutoSize = true,
                 Location = new Point(0, y), ForeColor = UITheme.AzulOscuro,
                 Checked = _egreso.Estado == "Pendiente"
             };
-            _chkPendiente.CheckedChanged += (s, e) =>
-                _dtpVence.Enabled = _chkPendiente.Checked;
             pnl.Controls.Add(_chkPendiente);
+            y += 26;
+            pnl.Controls.Add(new Label { Text = "Monto abonado (USD)", Font = UITheme.BodyBold,
+                Location = new Point(0, y), AutoSize = true, ForeColor = UITheme.AzulOscuro });
             pnl.Controls.Add(new Label { Text = "Vence el", Font = UITheme.BodyBold,
                 Location = new Point(360, y), AutoSize = true, ForeColor = UITheme.AzulOscuro });
             y += 22;
+            _numPagado = new NumericUpDown { Location = new Point(0, y), Size = new Size(200, 28),
+                Font = new Font("Segoe UI", 11f), Maximum = 99_999_999m, DecimalPlaces = 2,
+                ThousandsSeparator = true,
+                Value = _egreso.PagadoUSD > 0 ? _egreso.PagadoUSD : 0m,
+                Enabled = _chkPendiente.Checked };
             _dtpVence = new DateTimePicker { Location = new Point(360, y),
                 Size = new Size(200, 28), Format = DateTimePickerFormat.Short,
                 Value = _egreso.FechaVencimiento ?? DateTime.Today.AddDays(30),
                 Enabled = _chkPendiente.Checked };
-            pnl.Controls.Add(_dtpVence);
+            _chkPendiente.CheckedChanged += (s, e) =>
+            {
+                _numPagado.Enabled = _chkPendiente.Checked;
+                _dtpVence.Enabled  = _chkPendiente.Checked;
+            };
+            pnl.Controls.AddRange(new Control[] { _numPagado, _dtpVence });
             y += 50;
 
             // ── Comprobante ─────────────────────────────────────────────────
@@ -640,9 +653,23 @@ namespace SistemaGestion
                 _egreso.TipoTasa       = TipoTasaSeleccionado();
                 _egreso.TasaUsada      = _numTasa.Value;
                 _egreso.MontoOriginal  = _numMonto.Value;
-                _egreso.Estado         = _chkPendiente.Checked ? "Pendiente" : "Pagado";
-                _egreso.FechaVencimiento = _chkPendiente.Checked ? _dtpVence.Value.Date : (DateTime?)null;
-                _egreso.FechaPago      = _chkPendiente.Checked ? (DateTime?)null : DateTime.Today;
+                // Pago: a crédito → se abona lo indicado (USD) y el saldo genera CxP;
+                // completo → GuardarEgreso iguala PagadoUSD al total. El estado y la
+                // Cuenta por Pagar se derivan en GuardarEgreso a partir de PagadoUSD.
+                if (_chkPendiente.Checked)
+                {
+                    _egreso.PagadoUSD        = _numPagado.Value;
+                    _egreso.Estado           = "Pendiente";
+                    _egreso.FechaVencimiento = _dtpVence.Value.Date;
+                    _egreso.FechaPago        = _numPagado.Value > 0 ? DateTime.Today : (DateTime?)null;
+                }
+                else
+                {
+                    _egreso.PagadoUSD        = 0m;   // GuardarEgreso lo iguala al total
+                    _egreso.Estado           = "Pagado";
+                    _egreso.FechaVencimiento = null;
+                    _egreso.FechaPago        = DateTime.Today;
+                }
                 _egreso.RutaComprobante = _txtComprobante.Text.Trim();
                 _egreso.Observaciones  = _txtObs.Text.Trim();
                 // MP: capturar insumo + cantidad

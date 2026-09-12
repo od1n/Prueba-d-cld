@@ -49,6 +49,10 @@ namespace SistemaGestion
         public decimal  MontoOriginal   { get; set; }
         public decimal  MontoUSD        { get; set; }
         public decimal  MontoBs         { get; set; }
+        // Pago / CxP: cuánto se abonó (en USD). Si PagadoUSD < MontoUSD el saldo
+        // genera automáticamente una Cuenta por Pagar. Por defecto se paga completo.
+        public decimal  PagadoUSD       { get; set; }
+        public decimal  SaldoUSD        => Math.Max(0m, MontoUSD - PagadoUSD);
         // Estado / CxP
         public string   Estado          { get; set; } = "Pagado";  // 'Pendiente' | 'Pagado' | 'Anulado'
         public DateTime? FechaVencimiento { get; set; }
@@ -138,6 +142,28 @@ namespace SistemaGestion
 
             CalcularMontos(g);
 
+            // ── Pago / estado a partir de lo abonado (PagadoUSD) ────────────────
+            // Compatibilidad: si el caller marcó 'Pagado' sin abono explícito, se
+            // asume pago completo. Si PagadoUSD < MontoUSD el egreso queda Pendiente
+            // y el saldo generará una Cuenta por Pagar (más abajo).
+            if (g.Estado != "Anulado")
+            {
+                if (g.Estado == "Pagado" && g.PagadoUSD <= 0) g.PagadoUSD = g.MontoUSD;
+                if (g.PagadoUSD < 0) g.PagadoUSD = 0;
+                if (g.PagadoUSD >= g.MontoUSD - 0.01m)
+                {
+                    g.PagadoUSD = g.MontoUSD;
+                    g.Estado = "Pagado";
+                    if (g.FechaPago == null) g.FechaPago = DateTime.Today;
+                    g.FechaVencimiento = null;
+                }
+                else
+                {
+                    g.Estado = "Pendiente";
+                    if (g.FechaPago == null && g.PagadoUSD > 0) g.FechaPago = DateTime.Today;
+                }
+            }
+
             // Capturar snapshot de IdTasaCambio si la conversión usó BCV o Paralelo.
             if (g.IdTasaCambio == null && g.TipoTasa is "BCV" or "PARALELO")
             {
@@ -161,13 +187,13 @@ namespace SistemaGestion
                 cmd.CommandText = @"INSERT INTO Gastos
                     (Fecha, IdCategoria, Concepto, Proveedor, IdInsumo, Cantidad,
                      MonedaOriginal, TipoTasa, TasaUsada, IdTasaCambio,
-                     MontoOriginal, MontoUSD, MontoBs,
+                     MontoOriginal, MontoUSD, MontoBs, PagadoUSD,
                      Estado, FechaVencimiento, FechaPago, RutaComprobante,
                      Usuario, FechaRegistro, Observaciones)
                     VALUES
                     ($f, $cat, $con, $prov, $iins, $cant,
                      $mon, $tt, $tu, $idt,
-                     $mo, $musd, $mbs,
+                     $mo, $musd, $mbs, $pag,
                      $es, $fv, $fp, $rc,
                      $us, $fr, $obs);
                     SELECT last_insert_rowid();";
@@ -178,7 +204,7 @@ namespace SistemaGestion
                     Fecha=$f, IdCategoria=$cat, Concepto=$con, Proveedor=$prov,
                     IdInsumo=$iins, Cantidad=$cant,
                     MonedaOriginal=$mon, TipoTasa=$tt, TasaUsada=$tu, IdTasaCambio=$idt,
-                    MontoOriginal=$mo, MontoUSD=$musd, MontoBs=$mbs,
+                    MontoOriginal=$mo, MontoUSD=$musd, MontoBs=$mbs, PagadoUSD=$pag,
                     Estado=$es, FechaVencimiento=$fv, FechaPago=$fp, RutaComprobante=$rc,
                     Observaciones=$obs
                     WHERE Id=$id";
@@ -198,6 +224,7 @@ namespace SistemaGestion
             cmd.Parameters.AddWithValue("$mo",  (double)g.MontoOriginal);
             cmd.Parameters.AddWithValue("$musd",(double)g.MontoUSD);
             cmd.Parameters.AddWithValue("$mbs", (double)g.MontoBs);
+            cmd.Parameters.AddWithValue("$pag", (double)g.PagadoUSD);
             cmd.Parameters.AddWithValue("$es",  g.Estado);
             cmd.Parameters.AddWithValue("$fv",  (object?)g.FechaVencimiento?.ToString("yyyy-MM-dd") ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$fp",  (object?)g.FechaPago?.ToString("yyyy-MM-dd")        ?? DBNull.Value);
@@ -250,6 +277,27 @@ namespace SistemaGestion
                     RegistrarAuditoria("GASTO_KARDEX_FALLO", "Gastos",
                         "Egreso#" + idResultante + " no actualizó kardex: " + ex.Message);
                 }
+            }
+
+            // ── Egreso a crédito → Cuenta por Pagar por el saldo ────────────────
+            // Si quedó saldo pendiente (PagadoUSD < MontoUSD) se crea/actualiza una
+            // CxP ligada a este egreso; si se pagó completo y existía una, se salda.
+            try
+            {
+                SincronizarCxPDesdeEgreso(
+                    idEgreso: idResultante,
+                    proveedor: g.Proveedor ?? "",
+                    concepto:  g.Concepto,
+                    numRef:    "Egreso #" + idResultante,
+                    montoUSD:  g.MontoUSD,
+                    pagadoUSD: g.PagadoUSD,
+                    emision:   g.Fecha,
+                    vence:     g.FechaVencimiento ?? g.Fecha.AddDays(30));
+            }
+            catch (Exception ex)
+            {
+                RegistrarAuditoria("GASTO_CXP_FALLO", "Gastos",
+                    "Egreso#" + idResultante + " no sincronizó CxP: " + ex.Message);
             }
 
             return idResultante;
@@ -344,7 +392,8 @@ namespace SistemaGestion
                        g.MontoOriginal, g.MontoUSD, g.MontoBs,
                        g.Estado, g.FechaVencimiento, g.FechaPago,
                        COALESCE(g.RutaComprobante,''),
-                       g.Usuario, g.FechaRegistro, COALESCE(g.Observaciones,'')
+                       g.Usuario, g.FechaRegistro, COALESCE(g.Observaciones,''),
+                       COALESCE(g.PagadoUSD,0)
                 FROM Gastos g
                 LEFT JOIN CategoriasGasto c ON c.Id = g.IdCategoria
                 WHERE g.Fecha >= $d AND g.Fecha <= $h ");
@@ -383,7 +432,8 @@ namespace SistemaGestion
                        g.MontoOriginal, g.MontoUSD, g.MontoBs,
                        g.Estado, g.FechaVencimiento, g.FechaPago,
                        COALESCE(g.RutaComprobante,''),
-                       g.Usuario, g.FechaRegistro, COALESCE(g.Observaciones,'')
+                       g.Usuario, g.FechaRegistro, COALESCE(g.Observaciones,''),
+                       COALESCE(g.PagadoUSD,0)
                 FROM Gastos g
                 LEFT JOIN CategoriasGasto c ON c.Id = g.IdCategoria
                 WHERE g.Estado = 'Pendiente'
@@ -553,7 +603,8 @@ namespace SistemaGestion
             RutaComprobante = r.GetString(18),
             Usuario         = r.GetString(19),
             FechaRegistro   = DateTime.TryParse(r.GetString(20), out var fr) ? fr : DateTime.MinValue,
-            Observaciones   = r.GetString(21)
+            Observaciones   = r.GetString(21),
+            PagadoUSD       = r.FieldCount > 22 && !r.IsDBNull(22) ? (decimal)r.GetDouble(22) : 0m
         };
     }
 }

@@ -1115,7 +1115,10 @@ namespace SistemaGestion
             foreach (var sqlFix in new[] {
                 "ALTER TABLE MovimientosInventario ADD COLUMN TipoKardex    TEXT DEFAULT 'PRODUCTO'",
                 "ALTER TABLE MovimientosInventario ADD COLUMN CostoUnitario REAL DEFAULT 0",
-                "ALTER TABLE ProductosProveedor  ADD COLUMN CostoPromedio REAL DEFAULT 0" })
+                "ALTER TABLE ProductosProveedor  ADD COLUMN CostoPromedio REAL DEFAULT 0",
+                // Egreso a crédito (pago parcial → Cuenta por Pagar por el saldo)
+                "ALTER TABLE Gastos       ADD COLUMN PagadoUSD REAL DEFAULT 0",
+                "ALTER TABLE CuentasPagar ADD COLUMN IdEgreso  INTEGER" })
             {
                 try { using var fix = c.CreateCommand(); fix.CommandText = sqlFix; fix.ExecuteNonQuery(); }
                 catch (Exception exFix)

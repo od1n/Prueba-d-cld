@@ -126,6 +126,81 @@ namespace SistemaGestion
             cmd.ExecuteNonQuery();
         }
 
+        /// <summary>
+        /// Crea o actualiza la Cuenta por Pagar ligada a un egreso según su saldo.
+        /// Si el egreso quedó pagado completo y existía una CxP ligada, la marca pagada.
+        /// Es idempotente: una CxP por egreso (ligada por IdEgreso).
+        /// </summary>
+        public static void SincronizarCxPDesdeEgreso(
+            int idEgreso, string proveedor, string concepto, string numRef,
+            decimal montoUSD, decimal pagadoUSD, DateTime emision, DateTime vence)
+        {
+            if (idEgreso <= 0) return;
+            decimal saldo = montoUSD - pagadoUSD;
+            using var conn = Conn();
+
+            int idCxP = -1;
+            var q = conn.CreateCommand();
+            q.CommandText = "SELECT Id FROM CuentasPagar WHERE IdEgreso=$ie LIMIT 1";
+            q.Parameters.AddWithValue("$ie", idEgreso);
+            var o = q.ExecuteScalar();
+            if (o != null && o != DBNull.Value) idCxP = Convert.ToInt32(o);
+
+            if (saldo <= 0.01m)
+            {
+                if (idCxP > 0)
+                {
+                    var up = conn.CreateCommand();
+                    up.CommandText = "UPDATE CuentasPagar SET Monto=$mo, Pagado=$mo, Estado='Pagada' WHERE Id=$id";
+                    up.Parameters.AddWithValue("$mo", (double)montoUSD);
+                    up.Parameters.AddWithValue("$id", idCxP);
+                    up.ExecuteNonQuery();
+                }
+                return;
+            }
+
+            string estado = pagadoUSD > 0 ? "Parcial" : "Pendiente";
+            if (idCxP > 0)
+            {
+                var up = conn.CreateCommand();
+                up.CommandText = @"UPDATE CuentasPagar SET
+                    Proveedor=$pr, Concepto=$co, NumFactura=$nf,
+                    Monto=$mo, Pagado=$pa, FechaEmision=$fe, FechaVence=$fv, Estado=$es
+                    WHERE Id=$id";
+                up.Parameters.AddWithValue("$pr", proveedor ?? "");
+                up.Parameters.AddWithValue("$co", concepto ?? "");
+                up.Parameters.AddWithValue("$nf", numRef ?? "");
+                up.Parameters.AddWithValue("$mo", (double)montoUSD);
+                up.Parameters.AddWithValue("$pa", (double)pagadoUSD);
+                up.Parameters.AddWithValue("$fe", emision.ToString("yyyy-MM-dd"));
+                up.Parameters.AddWithValue("$fv", vence.ToString("yyyy-MM-dd"));
+                up.Parameters.AddWithValue("$es", estado);
+                up.Parameters.AddWithValue("$id", idCxP);
+                up.ExecuteNonQuery();
+            }
+            else
+            {
+                var ins = conn.CreateCommand();
+                ins.CommandText = @"INSERT INTO CuentasPagar
+                    (CodigoProveedor,Proveedor,Concepto,NumFactura,Monto,Pagado,
+                     FechaEmision,FechaVence,Estado,Observaciones,IdEgreso)
+                    VALUES('',$pr,$co,$nf,$mo,$pa,$fe,$fv,$es,$ob,$ie)";
+                ins.Parameters.AddWithValue("$pr", proveedor ?? "");
+                ins.Parameters.AddWithValue("$co", concepto ?? "");
+                ins.Parameters.AddWithValue("$nf", numRef ?? "");
+                ins.Parameters.AddWithValue("$mo", (double)montoUSD);
+                ins.Parameters.AddWithValue("$pa", (double)pagadoUSD);
+                ins.Parameters.AddWithValue("$fe", emision.ToString("yyyy-MM-dd"));
+                ins.Parameters.AddWithValue("$fv", vence.ToString("yyyy-MM-dd"));
+                ins.Parameters.AddWithValue("$es", estado);
+                ins.Parameters.AddWithValue("$ob", "Generada automáticamente desde el egreso #" + idEgreso);
+                ins.Parameters.AddWithValue("$ie", idEgreso);
+                ins.ExecuteNonQuery();
+                RegistrarAuditoria("CXP_AUTO_EGRESO", "CuentasPagar",
+                    $"{concepto} — {proveedor} — saldo ${saldo:N2} (egreso #{idEgreso})");
+            }
+        }
+
         public static void EliminarCuentaPagar(int id)
         {
             using var conn = Conn();
