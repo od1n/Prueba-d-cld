@@ -392,24 +392,38 @@ namespace SistemaGestion
                 Categoria = g.NombreCategoria,
                 g.Concepto,
                 g.Proveedor,
-                Pago      = TipoTasaCorta(g.TipoTasa),
-                Original  = (g.MonedaOriginal == "USD" ? "$ " : "Bs ") + g.MontoOriginal.ToString("N2"),
-                USD       = "$ " + g.MontoUSD.ToString("N2"),
-                Estado    = g.Estado
+                Pago      = g.PrecioPendiente ? "—" : TipoTasaCorta(g.TipoTasa),
+                Original  = g.PrecioPendiente ? "—"
+                             : (g.MonedaOriginal == "USD" ? "$ " : "Bs ") + g.MontoOriginal.ToString("N2"),
+                USD       = g.PrecioPendiente ? "—" : "$ " + g.MontoUSD.ToString("N2"),
+                Estado    = g.PrecioPendiente ? "PRECIO PENDIENTE" : g.Estado
             }).ToList();
             if (dgv.Columns.Count > 0) dgv.Columns[0].Visible = false;
+
+            // Resaltar egresos con precio pendiente (naranja suave).
+            dgv.RowPrePaint += (s, e) =>
+            {
+                if (e.RowIndex < 0 || e.RowIndex >= lista.Count) return;
+                if (lista[e.RowIndex].PrecioPendiente)
+                    dgv.Rows[e.RowIndex].DefaultCellStyle.BackColor = Color.FromArgb(255, 244, 224);
+            };
+
             dgv.DoubleClick += (s, e) =>
             {
                 if (dgv.CurrentRow == null) return;
                 int id = (int)dgv.CurrentRow.Cells["Id"].Value;
-                EditarGasto(id);
+                var g = lista.FirstOrDefault(x => x.Id == id);
+                if (g != null && g.PrecioPendiente) CompletarPrecio(g);
+                else EditarGasto(id);
             };
             tab.Controls.Add(dgv);
 
             decimal totalUSD = lista.Sum(g => g.MontoUSD);
+            int pendPrecio = lista.Count(g => g.PrecioPendiente);
             _lblResumenTotal.Text = "  " + lista.Count + " egresos · Total: $ " +
                 totalUSD.ToString("N2") + " (" + (soloMP ? "Materia Prima" : "Gastos Operativos") +
-                ") · doble click para editar";
+                ")" + (pendPrecio > 0 ? " · " + pendPrecio + " con PRECIO PENDIENTE (doble clic para completar)"
+                                       : " · doble click para editar");
         }
 
         // ── Tab Por Pagar ───────────────────────────────────────────────────
@@ -568,6 +582,33 @@ namespace SistemaGestion
             }
         }
 
+        // ── Completar precio de una nota de entrega (Fase 2) ────────────────
+        private void CompletarPrecio(Egreso g)
+        {
+            try
+            {
+                using var dlg = new DlgCompletarPrecio(g);
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                DatabaseService.CompletarPrecioEgreso(
+                    idEgreso: g.Id,
+                    montoOriginal: dlg.MontoOriginal,
+                    monedaOriginal: dlg.Moneda,
+                    tipoTasa: dlg.TipoTasa,
+                    tasaUsada: dlg.Tasa,
+                    pagadoUSD: dlg.PagadoUSD,
+                    vence: dlg.Vence);
+                MessageBox.Show(this,
+                    "Precio completado. Se actualizaron los montos, el Kardex y la Cuenta por Pagar.",
+                    "Listo", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                RecargarTab();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, ex.Message, "Error",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
         // ── Helpers ─────────────────────────────────────────────────────────
         private static string TipoTasaCorta(string t) => t switch
         {
@@ -592,6 +633,176 @@ namespace SistemaGestion
             }
             catch { }
             return UITheme.Azul;
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  DlgCompletarPrecio — completa el precio de una nota de entrega (Fase 2)
+    // ════════════════════════════════════════════════════════════════════════
+    public class DlgCompletarPrecio : Form
+    {
+        public decimal   MontoOriginal { get; private set; }
+        public string    Moneda        { get; private set; } = "USD";
+        public string    TipoTasa      { get; private set; } = "USD_DIRECTO";
+        public decimal   Tasa          { get; private set; }
+        public decimal   PagadoUSD     { get; private set; }
+        public DateTime? Vence         { get; private set; }
+
+        private ComboBox _cmbMoneda = null!, _cmbTipoTasa = null!;
+        private NumericUpDown _numTasa = null!, _numBase = null!, _numIva = null!, _numPagado = null!;
+        private Label _lblTotal = null!;
+        private CheckBox _chkCredito = null!;
+        private DateTimePicker _dtpVence = null!;
+        private decimal _tasaBCV, _tasaParalelo;
+
+        public DlgCompletarPrecio(Egreso g)
+        {
+            Text = "Completar precio — " + g.Concepto;
+            ClientSize = new Size(460, 430);
+            StartPosition = FormStartPosition.CenterParent;
+            FormBorderStyle = FormBorderStyle.Sizable;
+            MinimumSize = new Size(476, 469);
+            MaximizeBox = false; MinimizeBox = false;
+            BackColor = Color.FromArgb(245, 247, 250);
+            Font = new Font("Segoe UI", 9.5f);
+
+            try
+            {
+                var t = DatabaseService.ObtenerTasaPorFecha(g.Fecha);
+                if (t != null) { _tasaBCV = t.TasaBCV; _tasaParalelo = t.TasaParalelo; }
+            }
+            catch { }
+
+            var hdr = new Panel { Dock = DockStyle.Top, Height = 52, BackColor = Color.FromArgb(150, 90, 0) };
+            hdr.Controls.Add(new Label
+            {
+                Text = "Nota de entrega #" + g.Id + "  ·  " + g.Proveedor +
+                       (g.IdInsumo.HasValue ? "   |   Cantidad: " + g.Cantidad.ToString("N2") : ""),
+                ForeColor = Color.White, Font = new Font("Segoe UI", 10f, FontStyle.Bold),
+                Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter
+            });
+            Controls.Add(hdr);
+
+            var pnl = new Panel { Location = new Point(20, 64), Size = new Size(420, 300) };
+            int y = 0;
+            Label L(string t) { var l = new Label { Text = t, Location = new Point(0, y + 4), AutoSize = true, ForeColor = Color.FromArgb(44, 62, 80) }; return l; }
+
+            pnl.Controls.Add(L("Moneda:"));
+            _cmbMoneda = new ComboBox { Location = new Point(150, y), Size = new Size(270, 24), DropDownStyle = ComboBoxStyle.DropDownList };
+            _cmbMoneda.Items.AddRange(new object[] { "USD — Dólares", "BS — Bolívares" });
+            _cmbMoneda.SelectedIndex = 0;
+            pnl.Controls.Add(_cmbMoneda); y += 34;
+
+            pnl.Controls.Add(L("Tipo de tasa:"));
+            _cmbTipoTasa = new ComboBox { Location = new Point(150, y), Size = new Size(270, 24), DropDownStyle = ComboBoxStyle.DropDownList };
+            _cmbTipoTasa.Items.AddRange(new object[] { "USD directo", "BCV", "Paralelo", "Personalizada" });
+            _cmbTipoTasa.SelectedIndex = 0;
+            pnl.Controls.Add(_cmbTipoTasa); y += 34;
+
+            pnl.Controls.Add(L("Tasa Bs/USD:"));
+            _numTasa = new NumericUpDown { Location = new Point(150, y), Size = new Size(270, 24),
+                Maximum = 1_000_000m, DecimalPlaces = 4, Enabled = false };
+            pnl.Controls.Add(_numTasa); y += 34;
+
+            pnl.Controls.Add(L("Base imponible:"));
+            _numBase = new NumericUpDown { Location = new Point(150, y), Size = new Size(270, 24),
+                Maximum = 99_999_999m, DecimalPlaces = 2, ThousandsSeparator = true };
+            pnl.Controls.Add(_numBase); y += 34;
+
+            pnl.Controls.Add(L("IVA %:"));
+            _numIva = new NumericUpDown { Location = new Point(150, y), Size = new Size(270, 24),
+                Maximum = 100m, DecimalPlaces = 2, Value = 16m };
+            pnl.Controls.Add(_numIva); y += 34;
+
+            pnl.Controls.Add(L("Total:"));
+            _lblTotal = new Label { Location = new Point(150, y + 2), AutoSize = true,
+                Font = new Font("Segoe UI", 11f, FontStyle.Bold), ForeColor = Color.FromArgb(15, 110, 86),
+                Text = "0,00" };
+            pnl.Controls.Add(_lblTotal); y += 34;
+
+            _chkCredito = new CheckBox { Text = "A crédito (abono parcial)", Location = new Point(0, y),
+                AutoSize = true, ForeColor = Color.FromArgb(44, 62, 80) };
+            pnl.Controls.Add(_chkCredito); y += 28;
+
+            pnl.Controls.Add(L("Abonado (USD):"));
+            _numPagado = new NumericUpDown { Location = new Point(150, y), Size = new Size(120, 24),
+                Maximum = 99_999_999m, DecimalPlaces = 2, ThousandsSeparator = true, Enabled = false };
+            pnl.Controls.Add(_numPagado);
+            _dtpVence = new DateTimePicker { Location = new Point(280, y), Size = new Size(140, 24),
+                Format = DateTimePickerFormat.Short, Value = g.FechaVencimiento ?? DateTime.Today.AddDays(30),
+                Enabled = false };
+            pnl.Controls.Add(_dtpVence); y += 34;
+
+            Controls.Add(pnl);
+
+            var btnCancelar = new Button { Text = "Cancelar", Size = new Size(95, 32), Location = new Point(245, 380),
+                Anchor = AnchorStyles.Bottom | AnchorStyles.Right,
+                FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(149, 165, 166), ForeColor = Color.White,
+                FlatAppearance = { BorderSize = 0 }, DialogResult = DialogResult.Cancel };
+            var btnOk = new Button { Text = "Completar", Size = new Size(95, 32), Location = new Point(345, 380),
+                Anchor = AnchorStyles.Bottom | AnchorStyles.Right,
+                FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(39, 174, 96), ForeColor = Color.White,
+                FlatAppearance = { BorderSize = 0 } };
+            Controls.AddRange(new Control[] { btnCancelar, btnOk });
+            AcceptButton = btnOk; CancelButton = btnCancelar;
+
+            void Recalc()
+            {
+                decimal total = Math.Round(_numBase.Value * (1m + _numIva.Value / 100m), 2);
+                _lblTotal.Text = (_cmbMoneda.SelectedIndex == 1 ? "Bs " : "$ ") + total.ToString("N2");
+            }
+            void AplicarTipoTasa()
+            {
+                int i = _cmbTipoTasa.SelectedIndex;
+                _numTasa.Enabled = i != 0;               // USD directo no usa tasa
+                if (i == 1 && _tasaBCV > 0) _numTasa.Value = Math.Min(_numTasa.Maximum, _tasaBCV);
+                else if (i == 2 && _tasaParalelo > 0) _numTasa.Value = Math.Min(_numTasa.Maximum, _tasaParalelo);
+            }
+            _numBase.ValueChanged += (s, e) => Recalc();
+            _numIva.ValueChanged  += (s, e) => Recalc();
+            _cmbMoneda.SelectedIndexChanged += (s, e) => Recalc();
+            _cmbTipoTasa.SelectedIndexChanged += (s, e) => AplicarTipoTasa();
+            _chkCredito.CheckedChanged += (s, e) =>
+            {
+                _numPagado.Enabled = _chkCredito.Checked;
+                _dtpVence.Enabled  = _chkCredito.Checked;
+            };
+            Recalc();
+
+            btnOk.Click += (s, e) =>
+            {
+                if (_numBase.Value <= 0)
+                {
+                    MessageBox.Show(this, "Ingrese la base imponible (mayor que cero).", "Validación",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+                string[] tt = { "USD_DIRECTO", "BCV", "PARALELO", "PERSONALIZADA" };
+                TipoTasa = tt[_cmbTipoTasa.SelectedIndex];
+                Moneda   = _cmbMoneda.SelectedIndex == 1 ? "BS" : "USD";
+                Tasa     = _numTasa.Value;
+                if (TipoTasa != "USD_DIRECTO" && Tasa <= 0)
+                {
+                    MessageBox.Show(this, "La tasa debe ser mayor que cero para el tipo seleccionado.",
+                        "Validación", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+                MontoOriginal = Math.Round(_numBase.Value * (1m + _numIva.Value / 100m), 2);
+                if (_chkCredito.Checked)
+                {
+                    PagadoUSD = _numPagado.Value;
+                    Vence     = _dtpVence.Value.Date;
+                }
+                else
+                {
+                    // Pago completo: enviamos un abono >= al total; el back-end lo topa
+                    // al MontoUSD real (MontoOriginal siempre es >= MontoUSD) y lo marca
+                    // como Pagado.
+                    PagadoUSD = MontoOriginal;
+                    Vence     = null;
+                }
+                DialogResult = DialogResult.OK;
+            };
         }
     }
 

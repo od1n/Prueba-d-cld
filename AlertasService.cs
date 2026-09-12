@@ -13,12 +13,17 @@ namespace SistemaGestion
         public List<CuentaCobrar> CxCVencidas       { get; set; } = new();
         public List<CuentaCobrar> CxCProximasVencer { get; set; } = new();
         public List<ProgramaMant> MantVencido       { get; set; } = new();
+        // Fase 2: egresos con precio pendiente (nota de entrega sin montos) que el
+        // administrador debe completar.
+        public List<Egreso>       PreciosPendientes { get; set; } = new();
 
         public bool TieneAlertas =>
-            StockBajo.Count > 0 || CxCVencidas.Count > 0 || CxCProximasVencer.Count > 0 || MantVencido.Count > 0;
+            StockBajo.Count > 0 || CxCVencidas.Count > 0 || CxCProximasVencer.Count > 0
+            || MantVencido.Count > 0 || PreciosPendientes.Count > 0;
 
         public int TotalAlertas =>
-            StockBajo.Count + CxCVencidas.Count + CxCProximasVencer.Count + MantVencido.Count;
+            StockBajo.Count + CxCVencidas.Count + CxCProximasVencer.Count
+            + MantVencido.Count + PreciosPendientes.Count;
 
         /// <summary>
         /// True si hay al menos una alerta que no fue silenciada hoy.
@@ -41,6 +46,7 @@ namespace SistemaGestion
                 if (CxCVencidas.Count       > 0 && !silenciadas.Contains("cxc_vencidas"))      return true;
                 if (CxCProximasVencer.Count > 0 && !silenciadas.Contains("cxc_por_vencer"))    return true;
                 if (MantVencido.Count       > 0 && !silenciadas.Contains("mantenimiento"))     return true;
+                if (PreciosPendientes.Count > 0 && !silenciadas.Contains("precios_pendientes"))return true;
                 return false;
             }
         }
@@ -195,6 +201,39 @@ namespace SistemaGestion
                         data.MantVencido.Add(prog);
                 }
             }
+
+            // ------------------------------------------------------------------
+            // 5. EGRESOS CON PRECIO PENDIENTE (nota de entrega sin montos)
+            //    El admin debe completar el precio. Se envuelve en try/catch por
+            //    si la columna PrecioPendiente aún no existe en una BD vieja.
+            // ------------------------------------------------------------------
+            try
+            {
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = @"
+                    SELECT g.Id, g.Fecha, g.Concepto, COALESCE(g.Proveedor,''),
+                           COALESCE(g.Cantidad,0), g.IdInsumo, COALESCE(c.Nombre,'')
+                    FROM Gastos g
+                    LEFT JOIN CategoriasGasto c ON c.Id = g.IdCategoria
+                    WHERE COALESCE(g.PrecioPendiente,0) = 1 AND g.Estado != 'Anulado'
+                    ORDER BY g.Fecha ASC, g.Id ASC";
+                using var r = cmd.ExecuteReader();
+                while (r.Read())
+                {
+                    data.PreciosPendientes.Add(new Egreso
+                    {
+                        Id              = Convert.ToInt32(r.GetInt32(0)),
+                        Fecha           = DateTime.TryParse(r.GetString(1), out var fp) ? fp : DateTime.Today,
+                        Concepto        = r.IsDBNull(2) ? "" : r.GetString(2),
+                        Proveedor       = r.IsDBNull(3) ? "" : r.GetString(3),
+                        Cantidad        = (decimal)r.GetDouble(4),
+                        IdInsumo        = r.IsDBNull(5) ? (int?)null : r.GetInt32(5),
+                        NombreCategoria = r.IsDBNull(6) ? "" : r.GetString(6),
+                        PrecioPendiente = true
+                    });
+                }
+            }
+            catch { /* columna PrecioPendiente inexistente en BD vieja: ignorar */ }
 
             return data;
         }

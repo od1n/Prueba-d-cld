@@ -276,6 +276,86 @@ namespace SistemaGestion
             catch { tx.Rollback(); throw; }
         }
 
+        /// <summary>
+        /// Fase 2 — Ajusta el costo de una entrada de insumo que se registró con
+        /// costo PROVISIONAL (precio pendiente). Corrige el CostoUnitario del
+        /// movimiento de Kardex y recalcula el costo promedio del insumo cargando
+        /// la diferencia de valor sobre el stock actual. Cuando la mercancía no se
+        /// ha consumido, el promedio resultante coincide con el ponderado exacto.
+        /// </summary>
+        public static void AjustarCostoEntradaKardex(
+            string codigoInsumo, string referencia, decimal costoRealUnit)
+        {
+            if (string.IsNullOrEmpty(referencia)) return;
+            using var conn = new SqliteConnection(ConnStr);
+            conn.Open();
+            using var tx = conn.BeginTransaction();
+            try
+            {
+                // Localizar el movimiento de entrada provisional por referencia.
+                var cmb = conn.CreateCommand(); cmb.Transaction = tx;
+                cmb.CommandText = @"SELECT IdMovimiento, Cantidad, CostoUnitario, COALESCE(Concepto,'')
+                    FROM MovimientosInventario
+                    WHERE TipoKardex='MATERIA_PRIMA' AND TipoMovimiento='ENTRADA'
+                      AND CodigoProducto=$cod AND Referencia=$re
+                    ORDER BY IdMovimiento DESC LIMIT 1";
+                cmb.Parameters.AddWithValue("$cod", codigoInsumo);
+                cmb.Parameters.AddWithValue("$re", referencia);
+                int idMov = 0; decimal cantidad = 0m, costoProv = 0m; string concepto = "";
+                using (var rm = cmb.ExecuteReader())
+                {
+                    if (rm.Read())
+                    {
+                        idMov     = rm.GetInt32(0);
+                        cantidad  = rm.IsDBNull(1) ? 0m : (decimal)rm.GetDouble(1);
+                        costoProv = rm.IsDBNull(2) ? 0m : (decimal)rm.GetDouble(2);
+                        concepto  = rm.IsDBNull(3) ? "" : rm.GetString(3);
+                    }
+                }
+                if (idMov == 0) { tx.Rollback(); return; }  // sin movimiento que ajustar
+
+                // Estado actual del insumo.
+                var crp = conn.CreateCommand(); crp.Transaction = tx;
+                crp.CommandText = "SELECT StockActual, PrecioPromedio FROM ProductosProveedor WHERE CodigoInterno=$cod";
+                crp.Parameters.AddWithValue("$cod", codigoInsumo);
+                decimal stock = 0m, avg = 0m;
+                using (var rp = crp.ExecuteReader())
+                {
+                    if (rp.Read())
+                    {
+                        stock = rp.IsDBNull(0) ? 0m : (decimal)rp.GetDouble(0);
+                        avg   = rp.IsDBNull(1) ? 0m : (decimal)rp.GetDouble(1);
+                    }
+                }
+
+                // Diferencia de valor total y nuevo promedio (cargado al stock actual).
+                decimal delta  = cantidad * (costoRealUnit - costoProv);
+                decimal avgNew = stock > 0 ? Math.Round(avg + delta / stock, 4) : costoRealUnit;
+                if (avgNew < 0) avgNew = 0m;
+
+                // Corregir el movimiento (costo real) y anotar en el concepto.
+                var um = conn.CreateCommand(); um.Transaction = tx;
+                um.CommandText = "UPDATE MovimientosInventario SET CostoUnitario=$cu, Concepto=$co WHERE IdMovimiento=$id";
+                um.Parameters.AddWithValue("$cu", (double)costoRealUnit);
+                um.Parameters.AddWithValue("$co", concepto + " [precio completado]");
+                um.Parameters.AddWithValue("$id", idMov);
+                um.ExecuteNonQuery();
+
+                // Actualizar costo promedio y último precio de compra del insumo.
+                var up = conn.CreateCommand(); up.Transaction = tx;
+                up.CommandText = "UPDATE ProductosProveedor SET PrecioPromedio=$pp, PrecioUltCompra=$pu WHERE CodigoInterno=$cod";
+                up.Parameters.AddWithValue("$pp", (double)avgNew);
+                up.Parameters.AddWithValue("$pu", (double)costoRealUnit);
+                up.Parameters.AddWithValue("$cod", codigoInsumo);
+                up.ExecuteNonQuery();
+
+                tx.Commit();
+                RegistrarAuditoria("KARDEX_MP_AJUSTE_COSTO", "MovimientosInventario",
+                    $"{codigoInsumo} ref={referencia} costo {costoProv:N4}→{costoRealUnit:N4} (prom→{avgNew:N4})");
+            }
+            catch { tx.Rollback(); throw; }
+        }
+
         // ── Kardex A — Salidas manuales de insumos ───────────────────────────
         public static MovimientoInventario RegistrarSalidaInsumo(
             string codigoInsumo, decimal cantidad, string concepto,

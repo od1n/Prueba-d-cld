@@ -38,6 +38,7 @@ namespace SistemaGestion
         private NumericUpDown  _numTasa = null!;
         private Label          _lblConvUsd = null!, _lblConvBs = null!;
         private CheckBox       _chkPendiente = null!;
+        private CheckBox       _chkPrecioPendiente = null!;
         private NumericUpDown  _numPagado = null!;
         private DateTimePicker _dtpVence = null!;
         private TextBox        _txtComprobante = null!;
@@ -331,6 +332,19 @@ namespace SistemaGestion
             pnl.Controls.AddRange(new Control[] { _lblConvUsd, _lblConvBs });
             y += 40;
 
+            // ── Precio pendiente (nota de entrega sin montos) ────────────────
+            // La mercancía se registra ahora (cantidad + insumo) y el precio lo
+            // completa luego el admin; dispara una alerta de "precio pendiente".
+            _chkPrecioPendiente = new CheckBox
+            {
+                Text = "Precio pendiente (nota de entrega sin montos) — el admin lo completa luego",
+                Font = UITheme.Body, AutoSize = true,
+                Location = new Point(0, y), ForeColor = Color.FromArgb(150, 90, 0),
+                Checked = _egreso.PrecioPendiente
+            };
+            pnl.Controls.Add(_chkPrecioPendiente);
+            y += 26;
+
             // ── Pago / crédito ──────────────────────────────────────────────
             // Si NO se paga completo, el saldo genera una Cuenta por Pagar.
             _chkPendiente = new CheckBox
@@ -363,6 +377,22 @@ namespace SistemaGestion
             };
             pnl.Controls.AddRange(new Control[] { _numPagado, _dtpVence });
             y += 50;
+
+            // Con "precio pendiente" los montos aún no se conocen: se deshabilitan
+            // los campos de monto/tasa/pago para evitar capturar valores inválidos.
+            void AplicarPrecioPendiente()
+            {
+                bool pp = _chkPrecioPendiente.Checked;
+                _numMonto.Enabled     = !pp;
+                _numTasa.Enabled      = !pp;
+                _numPrecioUnit.Enabled= !pp;
+                _chkPendiente.Enabled = !pp;
+                _numPagado.Enabled    = !pp && _chkPendiente.Checked;
+                _dtpVence.Enabled     = !pp && _chkPendiente.Checked;
+                if (pp) { _numMonto.Value = 0m; _numPrecioUnit.Value = 0m; }
+            }
+            _chkPrecioPendiente.CheckedChanged += (s, e) => AplicarPrecioPendiente();
+            AplicarPrecioPendiente();
 
             // ── Comprobante ─────────────────────────────────────────────────
             pnl.Controls.Add(new Label { Text = "Comprobante (foto/PDF, opcional)", Font = UITheme.BodyBold,
@@ -639,7 +669,9 @@ namespace SistemaGestion
             _v.Requerido(_txtConcepto, "Concepto requerido")
               .Custom(_cmbCategoria, _cmbCategoria.SelectedItem != null, "Selecciona una categoría");
             if (!_v.EsValido) return;
-            if (_numMonto.Value <= 0)
+
+            bool precioPendiente = _chkPrecioPendiente.Checked;
+            if (!precioPendiente && _numMonto.Value <= 0)
             {
                 MostrarError("El monto debe ser mayor que cero.");
                 _numMonto.Focus(); return;
@@ -659,6 +691,15 @@ namespace SistemaGestion
                     MostrarError("La cantidad debe ser mayor que cero.");
                     _numCantidad.Focus(); return;
                 }
+            }
+            else if (precioPendiente)
+            {
+                // Precio pendiente sin materia prima: solo tiene sentido documental.
+                if (MessageBox.Show(this,
+                        "Marcaste 'precio pendiente' pero la categoría no es materia prima.\n" +
+                        "Se registrará el egreso sin monto y quedará como pendiente de precio.\n\n¿Continuar?",
+                        "Precio pendiente", MessageBoxButtons.YesNo, MessageBoxIcon.Question)
+                    != DialogResult.Yes) return;
             }
             try
             {
@@ -705,10 +746,20 @@ namespace SistemaGestion
                 _egreso.TipoTasa       = TipoTasaSeleccionado();
                 _egreso.TasaUsada      = _numTasa.Value;
                 _egreso.MontoOriginal  = _numMonto.Value;
+                _egreso.PrecioPendiente = precioPendiente;
                 // Pago: a crédito → se abona lo indicado (USD) y el saldo genera CxP;
                 // completo → GuardarEgreso iguala PagadoUSD al total. El estado y la
                 // Cuenta por Pagar se derivan en GuardarEgreso a partir de PagadoUSD.
-                if (_chkPendiente.Checked)
+                if (precioPendiente)
+                {
+                    // Sin montos aún; GuardarEgreso deja el egreso en 'Pendiente' de precio.
+                    _egreso.MontoOriginal    = 0m;
+                    _egreso.PagadoUSD        = 0m;
+                    _egreso.Estado           = "Pendiente";
+                    _egreso.FechaVencimiento = _dtpVence.Value.Date;
+                    _egreso.FechaPago        = null;
+                }
+                else if (_chkPendiente.Checked)
                 {
                     _egreso.PagadoUSD        = _numPagado.Value;
                     _egreso.Estado           = "Pendiente";

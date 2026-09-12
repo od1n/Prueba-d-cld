@@ -54,6 +54,10 @@ namespace SistemaGestion
         // genera automáticamente una Cuenta por Pagar. Por defecto se paga completo.
         public decimal  PagadoUSD       { get; set; }
         public decimal  SaldoUSD        => Math.Max(0m, MontoUSD - PagadoUSD);
+        // Precio pendiente: la nota de entrega llegó sin montos. Se registra la
+        // mercancía (cantidad + insumo) pero el precio lo completa luego el admin.
+        // Mientras está pendiente NO genera CxP (monto desconocido).
+        public bool     PrecioPendiente { get; set; }
         // Estado / CxP
         public string   Estado          { get; set; } = "Pagado";  // 'Pendiente' | 'Pagado' | 'Anulado'
         public DateTime? FechaVencimiento { get; set; }
@@ -134,20 +138,41 @@ namespace SistemaGestion
             if (g == null) throw new ArgumentNullException(nameof(g));
             if (g.IdCategoria == 0) throw new Exception("Categoría requerida.");
             if (string.IsNullOrWhiteSpace(g.Concepto)) throw new Exception("Concepto requerido.");
-            if (g.MontoOriginal <= 0) throw new Exception("El monto debe ser mayor que cero.");
+            // Con precio pendiente el monto llega en 0 (nota de entrega sin montos);
+            // en ese caso exigimos cantidad para poder registrar la mercancía.
+            if (g.PrecioPendiente)
+            {
+                // Si es materia prima, la mercancía entra al Kardex y necesita cantidad.
+                if (g.IdInsumo.HasValue && g.IdInsumo.Value > 0 && g.Cantidad <= 0)
+                    throw new Exception("Con precio pendiente de materia prima debe indicar la cantidad recibida.");
+            }
+            else if (g.MontoOriginal <= 0)
+                throw new Exception("El monto debe ser mayor que cero.");
 
             string rol = Sesion.RolesEfectivos;
             if (!Sesion.EsAdmin && !PermisosRol.Permite(rol, "EgresosRegistrar"))
                 throw new UnauthorizedAccessException(
                     "Tu rol (" + rol + ") no tiene permiso para registrar egresos.");
 
-            CalcularMontos(g);
+            if (g.PrecioPendiente)
+            {
+                // Sin montos todavía: no calculamos conversión ni pago.
+                g.MontoOriginal = 0; g.MontoUSD = 0; g.MontoBs = 0;
+                g.PagadoUSD = 0;
+                g.Estado = "Pendiente";
+                g.FechaPago = null;
+                if (g.FechaVencimiento == null) g.FechaVencimiento = g.Fecha.AddDays(30);
+            }
+            else
+            {
+                CalcularMontos(g);
+            }
 
             // ── Pago / estado a partir de lo abonado (PagadoUSD) ────────────────
             // Compatibilidad: si el caller marcó 'Pagado' sin abono explícito, se
             // asume pago completo. Si PagadoUSD < MontoUSD el egreso queda Pendiente
             // y el saldo generará una Cuenta por Pagar (más abajo).
-            if (g.Estado != "Anulado")
+            if (!g.PrecioPendiente && g.Estado != "Anulado")
             {
                 if (g.Estado == "Pagado" && g.PagadoUSD <= 0) g.PagadoUSD = g.MontoUSD;
                 if (g.PagadoUSD < 0) g.PagadoUSD = 0;
@@ -188,13 +213,13 @@ namespace SistemaGestion
                 cmd.CommandText = @"INSERT INTO Gastos
                     (Fecha, IdCategoria, Concepto, Proveedor, CodigoProveedor, IdInsumo, Cantidad,
                      MonedaOriginal, TipoTasa, TasaUsada, IdTasaCambio,
-                     MontoOriginal, MontoUSD, MontoBs, PagadoUSD,
+                     MontoOriginal, MontoUSD, MontoBs, PagadoUSD, PrecioPendiente,
                      Estado, FechaVencimiento, FechaPago, RutaComprobante,
                      Usuario, FechaRegistro, Observaciones)
                     VALUES
                     ($f, $cat, $con, $prov, $cprov, $iins, $cant,
                      $mon, $tt, $tu, $idt,
-                     $mo, $musd, $mbs, $pag,
+                     $mo, $musd, $mbs, $pag, $pp,
                      $es, $fv, $fp, $rc,
                      $us, $fr, $obs);
                     SELECT last_insert_rowid();";
@@ -206,6 +231,7 @@ namespace SistemaGestion
                     IdInsumo=$iins, Cantidad=$cant,
                     MonedaOriginal=$mon, TipoTasa=$tt, TasaUsada=$tu, IdTasaCambio=$idt,
                     MontoOriginal=$mo, MontoUSD=$musd, MontoBs=$mbs, PagadoUSD=$pag,
+                    PrecioPendiente=$pp,
                     Estado=$es, FechaVencimiento=$fv, FechaPago=$fp, RutaComprobante=$rc,
                     Observaciones=$obs
                     WHERE Id=$id";
@@ -227,6 +253,7 @@ namespace SistemaGestion
             cmd.Parameters.AddWithValue("$musd",(double)g.MontoUSD);
             cmd.Parameters.AddWithValue("$mbs", (double)g.MontoBs);
             cmd.Parameters.AddWithValue("$pag", (double)g.PagadoUSD);
+            cmd.Parameters.AddWithValue("$pp",  g.PrecioPendiente ? 1 : 0);
             cmd.Parameters.AddWithValue("$es",  g.Estado);
             cmd.Parameters.AddWithValue("$fv",  (object?)g.FechaVencimiento?.ToString("yyyy-MM-dd") ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$fp",  (object?)g.FechaPago?.ToString("yyyy-MM-dd")        ?? DBNull.Value);
@@ -261,13 +288,19 @@ namespace SistemaGestion
                     var pp = ObtenerProductoProveedorPorId(g.IdInsumo.Value);
                     if (pp != null && !string.IsNullOrEmpty(pp.CodigoInterno))
                     {
-                        decimal precioUnit = g.Cantidad > 0
-                            ? Math.Round(g.MontoUSD / g.Cantidad, 4) : 0m;
+                        // Con precio pendiente la mercancía entra igual al Kardex, pero
+                        // a costo PROVISIONAL = costo promedio actual del insumo, de modo
+                        // que el promedio ponderado no se distorsione a 0 mientras se
+                        // espera el precio real. Al completar el precio se ajusta el costo.
+                        decimal precioUnit = g.PrecioPendiente
+                            ? pp.PrecioPromedio
+                            : (g.Cantidad > 0 ? Math.Round(g.MontoUSD / g.Cantidad, 4) : 0m);
                         RegistrarEntradaInsumo(
                             codigoInsumo: pp.CodigoInterno,
                             cantidad: g.Cantidad,
                             costoUnitario: precioUnit,
-                            concepto: "Compra MP — egreso #" + idResultante + " — " + g.Concepto,
+                            concepto: (g.PrecioPendiente ? "Compra MP (precio pendiente) — egreso #" : "Compra MP — egreso #")
+                                       + idResultante + " — " + g.Concepto,
                             referencia: "Gasto#" + idResultante,
                             usuario: g.Usuario);
                     }
@@ -284,8 +317,11 @@ namespace SistemaGestion
             // ── Egreso a crédito → Cuenta por Pagar por el saldo ────────────────
             // Si quedó saldo pendiente (PagadoUSD < MontoUSD) se crea/actualiza una
             // CxP ligada a este egreso; si se pagó completo y existía una, se salda.
+            // Con precio pendiente el monto es desconocido → no se crea CxP todavía;
+            // se generará al completar el precio.
             try
             {
+                if (!g.PrecioPendiente)
                 SincronizarCxPDesdeEgreso(
                     idEgreso: idResultante,
                     proveedor: g.Proveedor ?? "",
@@ -396,7 +432,8 @@ namespace SistemaGestion
                        g.Estado, g.FechaVencimiento, g.FechaPago,
                        COALESCE(g.RutaComprobante,''),
                        g.Usuario, g.FechaRegistro, COALESCE(g.Observaciones,''),
-                       COALESCE(g.PagadoUSD,0), COALESCE(g.CodigoProveedor,'')
+                       COALESCE(g.PagadoUSD,0), COALESCE(g.CodigoProveedor,''),
+                       COALESCE(g.PrecioPendiente,0)
                 FROM Gastos g
                 LEFT JOIN CategoriasGasto c ON c.Id = g.IdCategoria
                 WHERE g.Fecha >= $d AND g.Fecha <= $h ");
@@ -436,10 +473,11 @@ namespace SistemaGestion
                        g.Estado, g.FechaVencimiento, g.FechaPago,
                        COALESCE(g.RutaComprobante,''),
                        g.Usuario, g.FechaRegistro, COALESCE(g.Observaciones,''),
-                       COALESCE(g.PagadoUSD,0), COALESCE(g.CodigoProveedor,'')
+                       COALESCE(g.PagadoUSD,0), COALESCE(g.CodigoProveedor,''),
+                       COALESCE(g.PrecioPendiente,0)
                 FROM Gastos g
                 LEFT JOIN CategoriasGasto c ON c.Id = g.IdCategoria
-                WHERE g.Estado = 'Pendiente'
+                WHERE g.Estado = 'Pendiente' AND COALESCE(g.PrecioPendiente,0) = 0
                 ORDER BY g.FechaVencimiento ASC NULLS LAST, g.Fecha ASC";
             using var r = cmd.ExecuteReader();
             while (r.Read()) list.Add(BindEgreso(r));
@@ -608,7 +646,183 @@ namespace SistemaGestion
             FechaRegistro   = DateTime.TryParse(r.GetString(20), out var fr) ? fr : DateTime.MinValue,
             Observaciones   = r.GetString(21),
             PagadoUSD       = r.FieldCount > 22 && !r.IsDBNull(22) ? (decimal)r.GetDouble(22) : 0m,
-            CodigoProveedor = r.FieldCount > 23 && !r.IsDBNull(23) ? r.GetString(23) : ""
+            CodigoProveedor = r.FieldCount > 23 && !r.IsDBNull(23) ? r.GetString(23) : "",
+            PrecioPendiente = r.FieldCount > 24 && !r.IsDBNull(24) && r.GetInt32(24) == 1
         };
+
+        // ── Fase 2: egreso con precio pendiente ──────────────────────────────
+        /// <summary>Egreso individual por Id (para completar precio / detalle).</summary>
+        public static Egreso? ObtenerEgresoPorId(int id)
+        {
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = @"
+                SELECT g.Id, g.Fecha, g.IdCategoria, COALESCE(c.Nombre,''),
+                       g.Concepto, COALESCE(g.Proveedor,''),
+                       g.IdInsumo, COALESCE(g.Cantidad, 0),
+                       g.MonedaOriginal, g.TipoTasa, g.TasaUsada, g.IdTasaCambio,
+                       g.MontoOriginal, g.MontoUSD, g.MontoBs,
+                       g.Estado, g.FechaVencimiento, g.FechaPago,
+                       COALESCE(g.RutaComprobante,''),
+                       g.Usuario, g.FechaRegistro, COALESCE(g.Observaciones,''),
+                       COALESCE(g.PagadoUSD,0), COALESCE(g.CodigoProveedor,''),
+                       COALESCE(g.PrecioPendiente,0)
+                FROM Gastos g
+                LEFT JOIN CategoriasGasto c ON c.Id = g.IdCategoria
+                WHERE g.Id = $id";
+            cmd.Parameters.AddWithValue("$id", id);
+            using var r = cmd.ExecuteReader();
+            return r.Read() ? BindEgreso(r) : null;
+        }
+
+        /// <summary>Egresos con precio pendiente (nota de entrega sin montos).</summary>
+        public static List<Egreso> ObtenerEgresosPrecioPendiente()
+        {
+            var list = new List<Egreso>();
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = @"
+                SELECT g.Id, g.Fecha, g.IdCategoria, COALESCE(c.Nombre,''),
+                       g.Concepto, COALESCE(g.Proveedor,''),
+                       g.IdInsumo, COALESCE(g.Cantidad, 0),
+                       g.MonedaOriginal, g.TipoTasa, g.TasaUsada, g.IdTasaCambio,
+                       g.MontoOriginal, g.MontoUSD, g.MontoBs,
+                       g.Estado, g.FechaVencimiento, g.FechaPago,
+                       COALESCE(g.RutaComprobante,''),
+                       g.Usuario, g.FechaRegistro, COALESCE(g.Observaciones,''),
+                       COALESCE(g.PagadoUSD,0), COALESCE(g.CodigoProveedor,''),
+                       COALESCE(g.PrecioPendiente,0)
+                FROM Gastos g
+                LEFT JOIN CategoriasGasto c ON c.Id = g.IdCategoria
+                WHERE COALESCE(g.PrecioPendiente,0) = 1 AND g.Estado != 'Anulado'
+                ORDER BY g.Fecha ASC, g.Id ASC";
+            using var r = cmd.ExecuteReader();
+            while (r.Read()) list.Add(BindEgreso(r));
+            return list;
+        }
+
+        /// <summary>
+        /// Completa el precio de un egreso registrado como "precio pendiente".
+        /// Recalcula los montos (a partir de MontoOriginal + tasa), quita la marca
+        /// de pendiente, aplica el abono, ajusta el costo en el Kardex del insumo y
+        /// sincroniza la Cuenta por Pagar por el saldo.
+        /// </summary>
+        public static void CompletarPrecioEgreso(
+            int idEgreso, decimal montoOriginal, string monedaOriginal,
+            string tipoTasa, decimal tasaUsada, decimal pagadoUSD,
+            DateTime? vence, int? idTasaCambio = null)
+        {
+            string rol = Sesion.RolesEfectivos;
+            if (!Sesion.EsAdmin && !PermisosRol.Permite(rol, "EgresosRegistrar"))
+                throw new UnauthorizedAccessException(
+                    "Tu rol no tiene permiso para completar precios de egresos.");
+
+            var g = ObtenerEgresoPorId(idEgreso)
+                    ?? throw new Exception("Egreso #" + idEgreso + " no encontrado.");
+            if (!g.PrecioPendiente)
+                throw new Exception("El egreso #" + idEgreso + " no tiene precio pendiente.");
+            if (montoOriginal <= 0)
+                throw new Exception("El monto debe ser mayor que cero.");
+
+            // Recalcular montos con los datos reales de la factura.
+            g.PrecioPendiente = false;
+            g.MonedaOriginal  = monedaOriginal;
+            g.TipoTasa        = tipoTasa;
+            g.TasaUsada       = tasaUsada;
+            g.MontoOriginal   = montoOriginal;
+            if (idTasaCambio.HasValue) g.IdTasaCambio = idTasaCambio;
+            CalcularMontos(g);
+
+            // Snapshot de tasa para reportes históricos (igual que GuardarEgreso).
+            if (g.IdTasaCambio == null && g.TipoTasa is "BCV" or "PARALELO")
+            {
+                try { var t = ObtenerTasaPorFecha(g.Fecha); if (t != null) g.IdTasaCambio = t.Id; }
+                catch { }
+            }
+
+            // Abono / estado.
+            if (pagadoUSD < 0) pagadoUSD = 0;
+            g.PagadoUSD = pagadoUSD;
+            if (g.PagadoUSD >= g.MontoUSD - 0.01m)
+            {
+                g.PagadoUSD = g.MontoUSD; g.Estado = "Pagado";
+                g.FechaPago = DateTime.Today; g.FechaVencimiento = null;
+            }
+            else
+            {
+                g.Estado = "Pendiente";
+                if (g.PagadoUSD > 0) g.FechaPago = DateTime.Today;
+                if (vence.HasValue) g.FechaVencimiento = vence;
+                else if (g.FechaVencimiento == null) g.FechaVencimiento = g.Fecha.AddDays(30);
+            }
+
+            using (var c = Conn())
+            {
+                var cmd = c.CreateCommand();
+                cmd.CommandText = @"UPDATE Gastos SET
+                    MonedaOriginal=$mon, TipoTasa=$tt, TasaUsada=$tu, IdTasaCambio=$idt,
+                    MontoOriginal=$mo, MontoUSD=$musd, MontoBs=$mbs, PagadoUSD=$pag,
+                    PrecioPendiente=0, Estado=$es, FechaVencimiento=$fv, FechaPago=$fp
+                    WHERE Id=$id";
+                cmd.Parameters.AddWithValue("$mon", g.MonedaOriginal);
+                cmd.Parameters.AddWithValue("$tt",  g.TipoTasa);
+                cmd.Parameters.AddWithValue("$tu",  (double)g.TasaUsada);
+                cmd.Parameters.AddWithValue("$idt", (object?)g.IdTasaCambio ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("$mo",  (double)g.MontoOriginal);
+                cmd.Parameters.AddWithValue("$musd",(double)g.MontoUSD);
+                cmd.Parameters.AddWithValue("$mbs", (double)g.MontoBs);
+                cmd.Parameters.AddWithValue("$pag", (double)g.PagadoUSD);
+                cmd.Parameters.AddWithValue("$es",  g.Estado);
+                cmd.Parameters.AddWithValue("$fv",  (object?)g.FechaVencimiento?.ToString("yyyy-MM-dd") ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("$fp",  (object?)g.FechaPago?.ToString("yyyy-MM-dd") ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("$id",  idEgreso);
+                cmd.ExecuteNonQuery();
+            }
+
+            RegistrarAuditoria("GASTO_PRECIO_COMPLETADO", "Gastos",
+                $"#{idEgreso} USD={g.MontoUSD:N2} ({g.TipoTasa}) {g.Concepto}");
+
+            // ── Ajuste de costo en Kardex (si es materia prima) ─────────────────
+            if (g.IdInsumo.HasValue && g.IdInsumo.Value > 0 && g.Cantidad > 0)
+            {
+                try
+                {
+                    var pp = ObtenerProductoProveedorPorId(g.IdInsumo.Value);
+                    if (pp != null && !string.IsNullOrEmpty(pp.CodigoInterno))
+                    {
+                        decimal costoRealUnit = Math.Round(g.MontoUSD / g.Cantidad, 4);
+                        AjustarCostoEntradaKardex(
+                            codigoInsumo: pp.CodigoInterno,
+                            referencia:   "Gasto#" + idEgreso,
+                            costoRealUnit: costoRealUnit);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    RegistrarAuditoria("GASTO_KARDEX_AJUSTE_FALLO", "Gastos",
+                        "Egreso#" + idEgreso + " no ajustó costo en kardex: " + ex.Message);
+                }
+            }
+
+            // ── Cuenta por Pagar por el saldo, ahora que se conoce el monto ─────
+            try
+            {
+                SincronizarCxPDesdeEgreso(
+                    idEgreso: idEgreso,
+                    proveedor: g.Proveedor ?? "",
+                    codigoProveedor: g.CodigoProveedor ?? "",
+                    concepto:  g.Concepto,
+                    numRef:    "Egreso #" + idEgreso,
+                    montoUSD:  g.MontoUSD,
+                    pagadoUSD: g.PagadoUSD,
+                    emision:   g.Fecha,
+                    vence:     g.FechaVencimiento ?? g.Fecha.AddDays(30));
+            }
+            catch (Exception ex)
+            {
+                RegistrarAuditoria("GASTO_CXP_FALLO", "Gastos",
+                    "Egreso#" + idEgreso + " no sincronizó CxP: " + ex.Message);
+            }
+        }
     }
 }

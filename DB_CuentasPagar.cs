@@ -257,17 +257,24 @@ namespace SistemaGestion
                 cmd.Parameters.AddWithValue("$ob", pago.Observaciones ?? "");
                 cmd.ExecuteNonQuery();
 
-                // Leer monto y pagado actuales
+                // Leer monto, pagado y egreso ligado actuales
                 var cmdLeer = conn.CreateCommand();
                 cmdLeer.Transaction = tx;
-                cmdLeer.CommandText = "SELECT Monto, Pagado FROM CuentasPagar WHERE Id=$id";
+                cmdLeer.CommandText = "SELECT Monto, Pagado, IdEgreso FROM CuentasPagar WHERE Id=$id";
                 cmdLeer.Parameters.AddWithValue("$id", idCuenta);
-                using var r = cmdLeer.ExecuteReader();
-                r.Read();
-                decimal monto  = (decimal)(double)r["Monto"];
-                decimal pagado = (decimal)(double)r["Pagado"] + pago.Monto;
+                decimal monto, pagado;
+                int idEgreso = 0;
+                using (var r = cmdLeer.ExecuteReader())
+                {
+                    r.Read();
+                    monto  = (decimal)(double)r["Monto"];
+                    pagado = (decimal)(double)r["Pagado"] + pago.Monto;
+                    var oe = r["IdEgreso"];
+                    if (oe != null && oe != DBNull.Value) idEgreso = Convert.ToInt32(oe);
+                }
 
-                string nuevoEstado = pagado >= monto ? "Pagada"
+                if (pagado < 0) pagado = 0;
+                string nuevoEstado = pagado >= monto - 0.01m ? "Pagada"
                     : pagado > 0 ? "Parcial" : "Pendiente";
 
                 // Actualizar saldo y estado
@@ -280,9 +287,54 @@ namespace SistemaGestion
                 cmdUpd.Parameters.AddWithValue("$id", idCuenta);
                 cmdUpd.ExecuteNonQuery();
 
+                // ── Consistencia: sincronizar el egreso ligado ──────────────
+                // Si esta CxP nació de un egreso (Gastos), reflejar el pago allí
+                // para que el registro del egreso no quede como 'Pendiente' obsoleto.
+                if (idEgreso > 0)
+                {
+                    // El pago de la CxP se expresa en USD; el abonado del egreso
+                    // se lleva al mismo valor (topeado a su MontoUSD).
+                    var cmdEgr = conn.CreateCommand();
+                    cmdEgr.Transaction = tx;
+                    cmdEgr.CommandText = "SELECT MontoUSD, Estado FROM Gastos WHERE Id=$id";
+                    cmdEgr.Parameters.AddWithValue("$id", idEgreso);
+                    decimal montoEgr = 0m; string estadoEgr = "";
+                    using (var re = cmdEgr.ExecuteReader())
+                    {
+                        if (re.Read())
+                        {
+                            montoEgr  = (decimal)(double)re["MontoUSD"];
+                            estadoEgr = re["Estado"]?.ToString() ?? "";
+                        }
+                    }
+
+                    // No tocar egresos anulados.
+                    if (estadoEgr != "Anulado" && montoEgr > 0)
+                    {
+                        decimal pagadoEgr = Math.Min(pagado, montoEgr);
+                        bool completo = pagadoEgr >= montoEgr - 0.01m;
+                        string estadoNuevoEgr = completo ? "Pagado" : "Pendiente";
+
+                        var upEgr = conn.CreateCommand();
+                        upEgr.Transaction = tx;
+                        upEgr.CommandText = completo
+                            ? @"UPDATE Gastos SET PagadoUSD=$pa, Estado=$es,
+                                   FechaPago=COALESCE(FechaPago,$hoy), FechaVencimiento=NULL
+                                WHERE Id=$id"
+                            : @"UPDATE Gastos SET PagadoUSD=$pa, Estado=$es WHERE Id=$id";
+                        upEgr.Parameters.AddWithValue("$pa", (double)pagadoEgr);
+                        upEgr.Parameters.AddWithValue("$es", estadoNuevoEgr);
+                        if (completo)
+                            upEgr.Parameters.AddWithValue("$hoy", pago.Fecha.ToString("yyyy-MM-dd"));
+                        upEgr.Parameters.AddWithValue("$id", idEgreso);
+                        upEgr.ExecuteNonQuery();
+                    }
+                }
+
                 tx.Commit();
                 RegistrarAuditoria("CXP_PAGO", "CuentasPagar",
-                    $"Id={idCuenta} — Pago ${pago.Monto:N2} — Estado: {nuevoEstado}");
+                    $"Id={idCuenta} — Pago ${pago.Monto:N2} — Estado: {nuevoEstado}"
+                    + (idEgreso > 0 ? $" (egreso #{idEgreso} sincronizado)" : ""));
             }
             catch { tx.Rollback(); throw; }
         }

@@ -69,6 +69,7 @@ namespace SistemaGestion
         private const string CLAVE_CXC       = "cxc_vencidas";
         private const string CLAVE_CXC_PROX  = "cxc_por_vencer";
         private const string CLAVE_MANT      = "mantenimiento";
+        private const string CLAVE_PRECIO    = "precios_pendientes";
 
         // ── Constructor ─────────────────────────────────────────────────
 
@@ -224,6 +225,7 @@ namespace SistemaGestion
                 1 => CLAVE_CXC,
                 2 => CLAVE_CXC_PROX,
                 3 => CLAVE_MANT,
+                4 => CLAVE_PRECIO,
                 _ => null
             };
             if (clave == null) return;
@@ -257,7 +259,7 @@ namespace SistemaGestion
                 if (ctrl is Panel p && p.Height == 48) { p.Invalidate(); break; }
 
             // Si todos estan silenciados, cerrar
-            if (EstaSilenciada(CLAVE_STOCK) && EstaSilenciada(CLAVE_CXC) && EstaSilenciada(CLAVE_CXC_PROX) && EstaSilenciada(CLAVE_MANT))
+            if (EstaSilenciada(CLAVE_STOCK) && EstaSilenciada(CLAVE_CXC) && EstaSilenciada(CLAVE_CXC_PROX) && EstaSilenciada(CLAVE_MANT) && EstaSilenciada(CLAVE_PRECIO))
             {
                 MessageBox.Show("Todas las alertas han sido ignoradas por hoy.",
                     "Listo", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -281,6 +283,7 @@ namespace SistemaGestion
                 ("CxC Vencidas",    _data.CxCVencidas.Count,       Color.FromArgb(230, 126, 34), CLAVE_CXC),
                 ("CxC Por Vencer",  _data.CxCProximasVencer.Count, Color.FromArgb(52, 152, 219), CLAVE_CXC_PROX),
                 ("Mantenimiento",   _data.MantVencido.Count,       Color.FromArgb(142, 68, 173), CLAVE_MANT),
+                ("Precio Pendiente",_data.PreciosPendientes.Count, Color.FromArgb(150, 90, 0),   CLAVE_PRECIO),
             };
 
             int x = 10;
@@ -342,6 +345,12 @@ namespace SistemaGestion
             tabMant.Controls.Add(CrearGridMant());
             tabControl.TabPages.Add(tabMant);
 
+            var tabPrecio = new TabPage($"Precio Pendiente  ({_data.PreciosPendientes.Count})")
+                { BackColor = EstaSilenciada(CLAVE_PRECIO) ? Color.FromArgb(240,245,240) : Color.FromArgb(245,247,250) };
+            if (EstaSilenciada(CLAVE_PRECIO)) tabPrecio.Text += " ✓";
+            tabPrecio.Controls.Add(CrearGridPrecio());
+            tabControl.TabPages.Add(tabPrecio);
+
             // Seleccionar el tab con mas alertas no silenciado
             int maxIdx = 0, maxVal = EstaSilenciada(CLAVE_STOCK) ? -1 : _data.StockBajo.Count;
             if (!EstaSilenciada(CLAVE_CXC) && _data.CxCVencidas.Count > maxVal)
@@ -349,7 +358,9 @@ namespace SistemaGestion
             if (!EstaSilenciada(CLAVE_CXC_PROX) && _data.CxCProximasVencer.Count > maxVal)
             { maxVal = _data.CxCProximasVencer.Count; maxIdx = 2; }
             if (!EstaSilenciada(CLAVE_MANT) && _data.MantVencido.Count > maxVal)
-                maxIdx = 3;
+            { maxVal = _data.MantVencido.Count; maxIdx = 3; }
+            if (!EstaSilenciada(CLAVE_PRECIO) && _data.PreciosPendientes.Count > maxVal)
+                maxIdx = 4;
             tabControl.SelectedIndex = maxIdx;
         }
 
@@ -470,6 +481,33 @@ namespace SistemaGestion
                     ? Color.FromArgb(255, 210, 210) : Color.FromArgb(255, 243, 220);
             }
             if (_data.MantVencido.Count == 0) AgregarLabelVacio(dgv, "✓  Sin mantenimientos vencidos", Color.FromArgb(39, 174, 96));
+            return dgv;
+        }
+
+        private Control CrearGridPrecio()
+        {
+            var dgv = CrearDGV();
+            dgv.Columns.Add(new DataGridViewTextBoxColumn { Name = "colFecha",    HeaderText = "Fecha",       FillWeight = 15 });
+            dgv.Columns.Add(new DataGridViewTextBoxColumn { Name = "colProv",     HeaderText = "Proveedor",   FillWeight = 25 });
+            dgv.Columns.Add(new DataGridViewTextBoxColumn { Name = "colConcepto", HeaderText = "Concepto",    FillWeight = 30 });
+            dgv.Columns.Add(new DataGridViewTextBoxColumn { Name = "colCat",      HeaderText = "Categoría",   FillWeight = 20 });
+            dgv.Columns.Add(new DataGridViewTextBoxColumn { Name = "colCant",     HeaderText = "Cantidad",    FillWeight = 10,
+                DefaultCellStyle = new DataGridViewCellStyle { Alignment = DataGridViewContentAlignment.MiddleRight } });
+
+            if (EstaSilenciada(CLAVE_PRECIO)) { MostrarMensajeSilenciada(dgv, "Alerta de precio pendiente ignorada hoy"); return dgv; }
+
+            foreach (var item in _data.PreciosPendientes.OrderBy(x => x.Fecha))
+            {
+                int row = dgv.Rows.Add();
+                dgv.Rows[row].Cells["colFecha"].Value    = item.Fecha.ToString("dd/MM/yyyy");
+                dgv.Rows[row].Cells["colProv"].Value     = item.Proveedor;
+                dgv.Rows[row].Cells["colConcepto"].Value = item.Concepto;
+                dgv.Rows[row].Cells["colCat"].Value      = item.NombreCategoria;
+                dgv.Rows[row].Cells["colCant"].Value     = item.Cantidad > 0 ? item.Cantidad.ToString("N2") : "—";
+                dgv.Rows[row].DefaultCellStyle.BackColor = Color.FromArgb(255, 244, 224);
+            }
+            if (_data.PreciosPendientes.Count == 0)
+                AgregarLabelVacio(dgv, "✓  Sin egresos con precio pendiente", Color.FromArgb(39, 174, 96));
             return dgv;
         }
 

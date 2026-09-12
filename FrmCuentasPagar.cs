@@ -368,9 +368,12 @@ namespace SistemaGestion
         private void InitializeComponent()
         {
             this.Text = _original == null ? "Nueva Cuenta por Pagar" : "Editar Cuenta por Pagar";
-            this.Size = new Size(460, 400);
+            // ClientSize (área útil, sin barra de título ni bordes) para que nada
+            // quede cortado; ventana redimensionable con un tamaño mínimo.
+            this.ClientSize = new Size(460, 400);
             this.StartPosition = FormStartPosition.CenterParent;
-            this.FormBorderStyle = FormBorderStyle.FixedDialog;
+            this.FormBorderStyle = FormBorderStyle.Sizable;
+            this.MinimumSize = new Size(476, 439);
             this.MaximizeBox = false; this.MinimizeBox = false;
             this.BackColor = Color.FromArgb(245,247,250);
             this.Font = new Font("Segoe UI", 9.5f);
@@ -422,10 +425,12 @@ namespace SistemaGestion
             txtObservaciones = new TextBox { Location = new Point(130, y), Size = new Size(280, 24) };
             pnl.Controls.Add(txtObservaciones);
 
-            btnCancelar = new Button { Text = "Cancelar", Size = new Size(95, 32), Location = new Point(240, 348),
+            btnCancelar = new Button { Text = "Cancelar", Size = new Size(95, 32), Location = new Point(245, 356),
+                Anchor = AnchorStyles.Bottom | AnchorStyles.Right,
                 FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(149,165,166), ForeColor = Color.White,
                 FlatAppearance = { BorderSize = 0 }, DialogResult = DialogResult.Cancel };
-            btnGuardar = new Button { Text = "Guardar", Size = new Size(95, 32), Location = new Point(345, 348),
+            btnGuardar = new Button { Text = "Guardar", Size = new Size(95, 32), Location = new Point(350, 356),
+                Anchor = AnchorStyles.Bottom | AnchorStyles.Right,
                 FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(39,174,96), ForeColor = Color.White,
                 FlatAppearance = { BorderSize = 0 } };
             btnGuardar.Click += BtnGuardar_Click;
@@ -504,9 +509,12 @@ namespace SistemaGestion
         public DlgPagoCxP(CuentaPagar cuenta)
         {
             this.Text = $"Registrar Pago — {cuenta.Proveedor}";
-            this.Size = new Size(400, 310);
+            // ClientSize (área útil) para que los botones no queden cortados por la
+            // barra de título; ventana redimensionable con tamaño mínimo.
+            this.ClientSize = new Size(395, 272);
             this.StartPosition = FormStartPosition.CenterParent;
-            this.FormBorderStyle = FormBorderStyle.FixedDialog;
+            this.FormBorderStyle = FormBorderStyle.Sizable;
+            this.MinimumSize = new Size(411, 311);
             this.MaximizeBox = false; this.MinimizeBox = false;
             this.BackColor = Color.FromArgb(245,247,250);
             this.Font = new Font("Segoe UI", 9.5f);
@@ -542,10 +550,12 @@ namespace SistemaGestion
             txtObservaciones = new TextBox { Location = new Point(130, y), Size = new Size(225, 24) };
             pnl.Controls.Add(txtObservaciones);
 
-            var btnCancelar = new Button { Text = "Cancelar", Size = new Size(90, 30), Location = new Point(180, 272),
+            var btnCancelar = new Button { Text = "Cancelar", Size = new Size(90, 30), Location = new Point(180, 230),
+                Anchor = AnchorStyles.Bottom | AnchorStyles.Right,
                 FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(149,165,166), ForeColor = Color.White,
                 FlatAppearance = { BorderSize = 0 }, DialogResult = DialogResult.Cancel };
-            var btnGuardar = new Button { Text = "Registrar", Size = new Size(90, 30), Location = new Point(280, 272),
+            var btnGuardar = new Button { Text = "Registrar", Size = new Size(90, 30), Location = new Point(280, 230),
+                Anchor = AnchorStyles.Bottom | AnchorStyles.Right,
                 FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(39,174,96), ForeColor = Color.White,
                 FlatAppearance = { BorderSize = 0 } };
             btnGuardar.Click += (s, e) =>

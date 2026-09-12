@@ -1120,7 +1120,9 @@ namespace SistemaGestion
                 "ALTER TABLE Gastos       ADD COLUMN PagadoUSD REAL DEFAULT 0",
                 "ALTER TABLE CuentasPagar ADD COLUMN IdEgreso  INTEGER",
                 // Enlace del egreso al directorio de Proveedores
-                "ALTER TABLE Gastos       ADD COLUMN CodigoProveedor TEXT" })
+                "ALTER TABLE Gastos       ADD COLUMN CodigoProveedor TEXT",
+                // Fase 2: nota de entrega sin precios → egreso con precio pendiente
+                "ALTER TABLE Gastos       ADD COLUMN PrecioPendiente INTEGER DEFAULT 0" })
             {
                 try { using var fix = c.CreateCommand(); fix.CommandText = sqlFix; fix.ExecuteNonQuery(); }
                 catch (Exception exFix)
