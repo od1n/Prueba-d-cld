@@ -1131,6 +1131,74 @@ namespace SistemaGestion
                         Console.WriteLine($"[DB] WARN fix Kardex: {exFix.Message}");
                 }
             }
+
+            // ── Corregir MovimientosInventario: quitar la FK a Inventario(Codigo) ──
+            //   La tabla nació SOLO para productos terminados (catálogo Inventario),
+            //   con FOREIGN KEY(CodigoProducto) REFERENCES Inventario(Codigo). Ahora
+            //   también guarda el Kardex de MATERIA PRIMA, cuyos códigos viven en
+            //   ProductosProveedor (INS-xxx) y NO están en Inventario. Con las FK
+            //   activas, cada entrada de materia prima fallaba con "FOREIGN KEY
+            //   constraint failed" y el Kardex quedaba vacío. SQLite no permite quitar
+            //   una FK con ALTER, así que se reconstruye la tabla SIN la FK. Es
+            //   idempotente: solo actúa si la FK todavía está definida.
+            try
+            {
+                bool tieneFK = false;
+                using (var chk = c.CreateCommand())
+                {
+                    chk.CommandText = "PRAGMA foreign_key_list(MovimientosInventario)";
+                    using var rfk = chk.ExecuteReader();
+                    tieneFK = rfk.Read();   // hay al menos una FK definida en la tabla
+                }
+                if (tieneFK)
+                {
+                    // foreign_keys debe estar OFF y FUERA de transacción para el rebuild.
+                    using (var off = c.CreateCommand())
+                    { off.CommandText = "PRAGMA foreign_keys=OFF"; off.ExecuteNonQuery(); }
+
+                    using (var reb = c.CreateCommand())
+                    {
+                        reb.CommandText = @"
+                            BEGIN;
+                            CREATE TABLE MovimientosInventario_new (
+                                IdMovimiento   INTEGER PRIMARY KEY AUTOINCREMENT,
+                                FechaHora      TEXT    NOT NULL,
+                                CodigoProducto TEXT    NOT NULL,
+                                TipoMovimiento TEXT    NOT NULL,
+                                Concepto       TEXT,
+                                Cantidad       REAL    NOT NULL DEFAULT 0,
+                                SaldoAnterior  REAL    NOT NULL DEFAULT 0,
+                                NuevoSaldo     REAL    NOT NULL DEFAULT 0,
+                                Referencia     TEXT,
+                                Usuario        TEXT,
+                                TipoKardex     TEXT    DEFAULT 'PRODUCTO',
+                                CostoUnitario  REAL    DEFAULT 0
+                            );
+                            INSERT INTO MovimientosInventario_new
+                                (IdMovimiento,FechaHora,CodigoProducto,TipoMovimiento,Concepto,
+                                 Cantidad,SaldoAnterior,NuevoSaldo,Referencia,Usuario,TipoKardex,CostoUnitario)
+                            SELECT IdMovimiento,FechaHora,CodigoProducto,TipoMovimiento,Concepto,
+                                   Cantidad,SaldoAnterior,NuevoSaldo,Referencia,Usuario,
+                                   COALESCE(TipoKardex,'PRODUCTO'),COALESCE(CostoUnitario,0)
+                            FROM MovimientosInventario;
+                            DROP TABLE MovimientosInventario;
+                            ALTER TABLE MovimientosInventario_new RENAME TO MovimientosInventario;
+                            COMMIT;";
+                        reb.ExecuteNonQuery();
+                    }
+
+                    using (var on = c.CreateCommand())
+                    { on.CommandText = "PRAGMA foreign_keys=ON"; on.ExecuteNonQuery(); }
+
+                    Console.WriteLine("[DB] MovimientosInventario reconstruida SIN la FK a Inventario (Kardex de materia prima corregido).");
+                }
+            }
+            catch (Exception exFk)
+            {
+                Console.WriteLine("[DB] WARN corrigiendo FK MovimientosInventario: " + exFk.Message);
+                try { using var on = c.CreateCommand(); on.CommandText = "PRAGMA foreign_keys=ON"; on.ExecuteNonQuery(); } catch { }
+            }
+
             try
             {
                 using var idxK = c.CreateCommand();

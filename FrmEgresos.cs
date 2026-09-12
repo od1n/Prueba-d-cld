@@ -439,7 +439,43 @@ namespace SistemaGestion
                     dgv.Rows[e.RowIndex].Selected = true;
             };
 
+            // ── Barra de acciones (botón visible de Anular) ─────────────────
+            var barra = new Panel { Dock = DockStyle.Top, Height = 42,
+                BackColor = UITheme.FondoCard, Padding = new Padding(8, 6, 8, 6) };
+            barra.Paint += (s, e) => e.Graphics.DrawLine(new Pen(UITheme.Borde),
+                0, barra.Height - 1, barra.Width, barra.Height - 1);
+
+            var btnAnularSel = new Button { Text = "🚫  Anular egreso seleccionado",
+                FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(192, 57, 43),
+                ForeColor = Color.White, Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
+                Cursor = Cursors.Hand, Size = new Size(240, 30), Dock = DockStyle.Left };
+            btnAnularSel.FlatAppearance.BorderSize = 0;
+            btnAnularSel.Click += (s, e) =>
+            {
+                var g = FilaSeleccionada(dgv, lista);
+                if (g == null)
+                {
+                    MessageBox.Show(this,
+                        "Selecciona primero un egreso: haz clic en su fila de la lista.",
+                        "Sin selección", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+                AnularEgresoConConfirmacion(g);
+            };
+            var lblHint = new Label { Dock = DockStyle.Fill,
+                Text = "   Selecciona una fila y pulsa Anular  ·  o haz clic derecho sobre el egreso",
+                TextAlign = ContentAlignment.MiddleLeft, ForeColor = UITheme.TextoTenue,
+                Font = new Font("Segoe UI", 8.5f, FontStyle.Italic) };
+            // Dentro de la barra: el Fill (etiqueta) se agrega primero y el Left
+            // (botón) después, para que el botón ocupe su ancho a la izquierda y
+            // la etiqueta el resto, sin superponerse.
+            barra.Controls.Add(lblHint);
+            barra.Controls.Add(btnAnularSel);
+
+            // Orden de docking: la grilla (Fill) se agrega primero y la barra (Top)
+            // después, para que la barra quede arriba y la grilla ocupe el resto.
             tab.Controls.Add(dgv);
+            tab.Controls.Add(barra);
 
             decimal totalUSD = lista.Sum(g => g.MontoUSD);
             int pendPrecio = lista.Count(g => g.PrecioPendiente);
