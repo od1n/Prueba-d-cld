@@ -439,6 +439,12 @@ namespace SistemaGestion
                 _numPagado.Enabled    = !pp && _chkPendiente.Checked;
                 _dtpVence.Enabled     = !pp && _chkPendiente.Checked;
                 if (pp) { _numMonto.Value = 0m; _numPrecioUnit.Value = 0m; }
+                // Si NO es precio pendiente, el campo de tasa debe respetar el tipo
+                // de pago: USD directo / BCV / Paralelo quedan deshabilitados (y USD
+                // directo en 0); solo Personalizada es editable. Sin esto, al
+                // desmarcar precio pendiente la tasa quedaba activa con un valor viejo
+                // (p. ej. 4,00) aunque el pago fuera en USD directo.
+                if (!pp) OnTipoTasaChanged();
                 // Precio pendiente → la columna de precio de la grilla es de solo lectura.
                 if (_gridLineas != null && _gridLineas.Columns.Count > 2)
                     _gridLineas.Columns[2].ReadOnly = pp;

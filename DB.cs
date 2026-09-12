@@ -3685,6 +3685,11 @@ namespace SistemaGestion
             var cmd = c.CreateCommand();
 
             var where = new System.Collections.Generic.List<string>();
+            // Kardex B es SOLO productos terminados. Excluir los movimientos de
+            // materia prima (que comparten la misma tabla con TipoKardex='MATERIA_PRIMA'),
+            // para que no aparezcan aquí. Los registros antiguos sin tipo se
+            // consideran producto terminado.
+            where.Add("COALESCE(TipoKardex,'PRODUCTO') = 'PRODUCTO'");
             if (codigoProducto != null) where.Add("CodigoProducto = $cod");
             if (desde != null)          where.Add("FechaHora >= $desde");
             if (hasta != null)          where.Add("FechaHora <= $hasta");
