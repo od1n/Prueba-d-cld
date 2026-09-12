@@ -965,8 +965,18 @@ CargarDatos();
             };
             void RefrescarTipoDoc()
             {
-                var tipo = DatabaseService.ClasificarTipoDocumento(
-                    _ivaCalculado, chkExportacion.Checked);
+                // En SOLO LECTURA usar el TipoDocumento REAL guardado de la factura
+                // (el recálculo en vivo daría "NotaEntrega" porque las líneas aún no
+                // están cargadas cuando corre la primera vez). En edición/nuevo sí se
+                // clasifica en vivo según el IVA y la exportación actuales.
+                string tipo;
+                if (_soloLectura && f != null)
+                    tipo = string.IsNullOrEmpty(f.TipoDocumento)
+                         ? DatabaseService.ClasificarTipoDocumento(f.IvaF, f.EsExportacion)
+                         : f.TipoDocumento;
+                else
+                    tipo = DatabaseService.ClasificarTipoDocumento(
+                        _ivaCalculado, chkExportacion.Checked);
                 switch (tipo)
                 {
                     case "FacturaConIVA":

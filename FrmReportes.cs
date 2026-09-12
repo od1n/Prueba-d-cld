@@ -51,6 +51,7 @@ namespace SistemaGestion
             tabs.TabPages.Add(TabResumen());
             tabs.TabPages.Add(TabClientes());
             tabs.TabPages.Add(TabVentas());
+            tabs.TabPages.Add(TabPrecios());
             tabs.TabPages.Add(TabVentasCliente());
             tabs.TabPages.Add(TabAbonos());
             tabs.TabPages.Add(TabCuentasCobrar());
@@ -402,6 +403,158 @@ Controls.AddRange(new Control[] { tabs, hdr, footer });
                 catch (Exception ex) { MsgErr(ex); }
             };
 
+            tab.Controls.Add(pnl);
+            return tab;
+        }
+
+        // ══════════════════════════════════════════════════════════
+        //  PRECIOS — evolución del precio de uno o varios productos
+        // ══════════════════════════════════════════════════════════
+        private TabPage TabPrecios()
+        {
+            var tab = new TabPage("Precios");
+            var pnl = new Panel { Dock = DockStyle.Fill, BackColor = Color.White };
+
+            // ── Barra superior: fechas, filtro con IVA, botones ──────────────
+            var bar = new Panel { Dock = DockStyle.Top, Height = 48,
+                BackColor = Color.FromArgb(228, 242, 232) };
+            int fx = 8;
+            bar.Controls.Add(Lbl("Desde:", fx, 14)); fx += 52;
+            var dtpD = new DateTimePicker { Location = new Point(fx, 10), Size = new Size(110, 26),
+                Format = DateTimePickerFormat.Short, Value = DateTime.Today.AddMonths(-3) };
+            bar.Controls.Add(dtpD); fx += 118;
+            bar.Controls.Add(Lbl("Hasta:", fx, 14)); fx += 50;
+            var dtpH = new DateTimePicker { Location = new Point(fx, 10), Size = new Size(110, 26),
+                Format = DateTimePickerFormat.Short, Value = DateTime.Today };
+            bar.Controls.Add(dtpH); fx += 124;
+
+            bar.Controls.Add(Lbl("Documentos:", fx, 14)); fx += 78;
+            var cmbTipo = new ComboBox { Location = new Point(fx, 10), Size = new Size(190, 26),
+                DropDownStyle = ComboBoxStyle.DropDownList };
+            cmbTipo.Items.AddRange(new object[]
+                { "Ambas", "Solo legales (con IVA)", "Solo notas de entrega" });
+            cmbTipo.SelectedIndex = 0;
+            bar.Controls.Add(cmbTipo); fx += 200;
+
+            var btnGraf    = BtnAccion("Graficar", Color.FromArgb(100, 60, 160), new Point(fx, 8)); fx += 94;
+            var btnLimpiar = BtnAccion("Limpiar",  Color.FromArgb(120, 120, 130), new Point(fx, 8));
+            bar.Controls.AddRange(new Control[] { btnGraf, btnLimpiar });
+
+            // ── Panel izquierdo: buscador + lista de productos con casillas ──
+            var pnlIzq = new Panel { Dock = DockStyle.Left, Width = 300, BackColor = Color.White,
+                Padding = new Padding(6) };
+            var clb = new CheckedListBox { Dock = DockStyle.Fill, CheckOnClick = true,
+                Font = new Font("Segoe UI", 8.5f), IntegralHeight = false };
+            var txtBuscar = new TextBox { Dock = DockStyle.Top };
+            var lblHdr = new Label { Text = "Productos (marca uno o varios):", Dock = DockStyle.Top,
+                Height = 22, Font = new Font("Segoe UI", 9f, FontStyle.Bold) };
+
+            var todosProd = DatabaseService.ObtenerInventario()
+                .Select(i => (Cod: i.Codigo, Txt: i.Codigo + " — " + i.Descripcion))
+                .OrderBy(x => x.Cod, StringComparer.Ordinal).ToList();
+            var marcados = new HashSet<string>();
+
+            void CargarLista(string filtro)
+            {
+                string f = (filtro ?? "").Trim().ToLower();
+                clb.BeginUpdate();
+                clb.Items.Clear();
+                foreach (var p in todosProd)
+                    if (f.Length == 0 || p.Txt.ToLower().Contains(f))
+                        clb.Items.Add(p.Txt, marcados.Contains(p.Cod));
+                clb.EndUpdate();
+            }
+            clb.ItemCheck += (s, e) =>
+            {
+                string txt = clb.Items[e.Index].ToString();
+                string cod = txt.Split('—')[0].Trim();
+                if (e.NewValue == CheckState.Checked) marcados.Add(cod);
+                else marcados.Remove(cod);
+            };
+            txtBuscar.TextChanged += (s, e) => CargarLista(txtBuscar.Text);
+            CargarLista("");
+
+            pnlIzq.Controls.Add(clb);
+            pnlIzq.Controls.Add(txtBuscar);
+            pnlIzq.Controls.Add(lblHdr);
+
+            // ── Panel derecho: gráfico ───────────────────────────────────────
+            var pnlGraf = new Panel { Dock = DockStyle.Fill, BackColor = Color.White };
+            pnlGraf.Resize += (s, e) => pnlGraf.Invalidate();
+
+            var series = new List<(string Cod, string Desc, Color Col, List<(DateTime F, decimal P)> Pts)>();
+            pnlGraf.Paint += (s, e) => PintarPrecios(e.Graphics, series, pnlGraf.Size);
+
+            btnGraf.Click += async (s, e) =>
+            {
+                try
+                {
+                    var cods = marcados.ToList();
+                    if (cods.Count == 0)
+                    {
+                        MessageBox.Show("Marca al menos un producto en la lista de la izquierda.",
+                            "Sin productos", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        return;
+                    }
+                    if (cods.Count > 10)
+                    {
+                        MessageBox.Show("Marca hasta 10 productos a la vez para que el gráfico sea legible.",
+                            "Demasiados productos", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        return;
+                    }
+
+                    Cursor.Current = Cursors.WaitCursor; this.UseWaitCursor = true;
+                    btnGraf.Enabled = false;
+                    try
+                    {
+                        var d = dtpD.Value.Date; var h = dtpH.Value.Date;
+                        string modo = cmbTipo.SelectedIndex == 1 ? "IVA"
+                                    : cmbTipo.SelectedIndex == 2 ? "NOTA" : "TODAS";
+                        var datos = await Task.Run(() =>
+                            DatabaseService.ObtenerPreciosProductoPorPeriodo(cods, d, h, modo));
+
+                        series.Clear();
+                        int ci = 0;
+                        foreach (var grupo in datos.GroupBy(x => x.Codigo))
+                        {
+                            var pts = grupo.OrderBy(x => x.Fecha)
+                                .Select(x => (F: x.Fecha, P: x.Precio)).ToList();
+                            string desc = grupo.First().Descripcion;
+                            series.Add((grupo.Key, desc, _paleta[ci % _paleta.Length], pts));
+                            ci++;
+                        }
+                        pnlGraf.Invalidate();
+
+                        if (series.Count == 0)
+                        {
+                            string suf = modo == "IVA"  ? " (solo facturas con IVA)."
+                                       : modo == "NOTA" ? " (solo notas de entrega)."
+                                       : ".";
+                            MessageBox.Show("No hay ventas de esos productos en el rango indicado" + suf,
+                                "Sin datos", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        }
+                    }
+                    finally
+                    {
+                        this.UseWaitCursor = false; Cursor.Current = Cursors.Default;
+                        btnGraf.Enabled = true;
+                    }
+                }
+                catch (Exception ex) { MsgErr(ex); }
+            };
+
+            btnLimpiar.Click += (s, e) =>
+            {
+                marcados.Clear();
+                CargarLista(txtBuscar.Text);
+                series.Clear();
+                pnlGraf.Invalidate();
+            };
+
+            // Orden de agregado para el docking: contenido, izquierdo, barra
+            pnl.Controls.Add(pnlGraf);
+            pnl.Controls.Add(pnlIzq);
+            pnl.Controls.Add(bar);
             tab.Controls.Add(pnl);
             return tab;
         }
@@ -1534,6 +1687,83 @@ Controls.AddRange(new Control[] { tabs, hdr, footer });
                 g.FillRectangle(new SolidBrush(color), padL+w+5, padT+ai*16, 12, 10);
                 g.DrawString(anos[ai].ToString(), fntS,
                     new SolidBrush(color), padL+w+20, padT+ai*16-1);
+            }
+        }
+
+        // Gráfico de evolución de precios: una línea por producto, eje X por fecha.
+        private void PintarPrecios(Graphics g,
+            List<(string Cod, string Desc, Color Col, List<(DateTime F, decimal P)> Pts)> series,
+            Size sz)
+        {
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            if (series == null || series.Count == 0 || series.All(s => s.Pts.Count == 0))
+            {
+                g.DrawString("Marca uno o varios productos a la izquierda y presiona 'Graficar'.",
+                    new Font("Segoe UI", 10f), Brushes.Gray, 20, 20);
+                return;
+            }
+
+            var todos = series.SelectMany(s => s.Pts).ToList();
+            DateTime minF = todos.Min(p => p.F), maxF = todos.Max(p => p.F);
+            decimal minP = todos.Min(p => p.P), maxP = todos.Max(p => p.P);
+            double spanDias = (maxF - minF).TotalDays; if (spanDias <= 0) spanDias = 1;
+            decimal rango = maxP - minP;
+            decimal margen = rango > 0 ? rango * 0.10m : (maxP > 0 ? maxP * 0.10m : 1m);
+            decimal yMin = Math.Max(0m, minP - margen), yMax = maxP + margen;
+            if (yMax <= yMin) yMax = yMin + 1m;
+
+            int padL = 70, padR = 170, padT = 24, padB = 46;
+            int w = sz.Width - padL - padR, h = sz.Height - padT - padB;
+            if (w < 60 || h < 60) return;
+
+            using var penEje  = new Pen(Color.FromArgb(180, 180, 190));
+            using var penGrid = new Pen(Color.FromArgb(232, 232, 238));
+            using var fntS = new Font("Segoe UI", 7.5f);
+            using var fntL = new Font("Segoe UI", 8f);
+
+            // Ejes
+            g.DrawLine(penEje, padL, padT, padL, padT + h);
+            g.DrawLine(penEje, padL, padT + h, padL + w, padT + h);
+            g.DrawString("Precio", fntS, Brushes.Gray, 6, padT - 16);
+
+            // Eje Y: 5 líneas guía con etiqueta de precio
+            const int nY = 5;
+            for (int i = 0; i <= nY; i++)
+            {
+                float y = padT + h - i * (h / (float)nY);
+                decimal val = yMin + (yMax - yMin) * i / nY;
+                g.DrawLine(penGrid, padL, y, padL + w, y);
+                g.DrawString(val.ToString("N2"), fntS, Brushes.Gray, 4, y - 7);
+            }
+
+            // Eje X: hasta 6 marcas de fecha
+            int nX = Math.Min(6, Math.Max(1, (int)spanDias));
+            for (int i = 0; i <= nX; i++)
+            {
+                float x = padL + i * (w / (float)nX);
+                var fecha = minF.AddDays(spanDias * i / nX);
+                g.DrawString(fecha.ToString("dd/MM/yy"), fntS, Brushes.Gray, x - 22, padT + h + 6);
+            }
+
+            float MapX(DateTime f) => padL + (float)((f - minF).TotalDays / spanDias * w);
+            float MapY(decimal p) => padT + h - (float)((double)((p - yMin) / (yMax - yMin)) * h);
+
+            for (int si = 0; si < series.Count; si++)
+            {
+                var s = series[si];
+                if (s.Pts.Count == 0) continue;
+                using var pen = new Pen(s.Col, 2f);
+                using var br  = new SolidBrush(s.Col);
+                var pts = s.Pts.OrderBy(p => p.F)
+                    .Select(p => new PointF(MapX(p.F), MapY(p.P))).ToArray();
+                if (pts.Length >= 2) g.DrawLines(pen, pts);
+                foreach (var pt in pts) g.FillEllipse(br, pt.X - 3, pt.Y - 3, 6, 6);
+
+                // Leyenda
+                g.FillRectangle(br, padL + w + 14, padT + si * 18, 12, 10);
+                string leg = s.Cod + "  " + s.Desc;
+                if (leg.Length > 28) leg = leg.Substring(0, 27) + "…";
+                g.DrawString(leg, fntL, Brushes.Black, padL + w + 30, padT + si * 18 - 2);
             }
         }
 

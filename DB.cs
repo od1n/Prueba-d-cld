@@ -4009,6 +4009,68 @@ namespace SistemaGestion
             return list;
         }
 
+        /// <summary>
+        /// Evolución del precio unitario de venta de uno o varios productos en un rango,
+        /// agregando por día (promedio ponderado por cantidad de ese día).
+        /// tipoDoc controla qué documentos entran:
+        ///   "IVA"  → solo facturas legales con IVA (TipoDocumento = 'FacturaConIVA'),
+        ///   "NOTA" → solo notas de entrega       (TipoDocumento = 'NotaEntrega'),
+        ///   otro   → ambas (sin filtro por tipo).
+        /// Nunca incluye facturas anuladas. Usa el precio REAL de cada línea
+        /// (DetallesFactura.PrecioUnit); cae al precio de inventario solo si la línea no
+        /// tiene precio guardado (datos anteriores a v27).
+        /// </summary>
+        public static List<(string Codigo, string Descripcion, DateTime Fecha, decimal Precio)>
+            ObtenerPreciosProductoPorPeriodo(
+                List<string> codigos, DateTime desde, DateTime hasta, string tipoDoc = "TODAS")
+        {
+            var list = new List<(string, string, DateTime, decimal)>();
+            if (codigos == null || codigos.Count == 0) return list;
+
+            var inParams = new List<string>();
+            for (int i = 0; i < codigos.Count; i++) inParams.Add("$c" + i);
+
+            string filtroTipo = tipoDoc switch
+            {
+                "IVA"  => "AND COALESCE(f.TipoDocumento,'FacturaConIVA') = 'FacturaConIVA' ",
+                "NOTA" => "AND COALESCE(f.TipoDocumento,'FacturaConIVA') = 'NotaEntrega' ",
+                _      => ""   // TODAS (ambas)
+            };
+
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = @"
+                SELECT df.Codigo,
+                       COALESCE(i.Descripcion, df.Codigo) AS Descripcion,
+                       f.Fecha,
+                       SUM(df.Cantidad * COALESCE(NULLIF(df.PrecioUnit,0), i.Precio, 0)) AS Monto,
+                       SUM(df.Cantidad) AS Cant
+                FROM Facturas f
+                INNER JOIN DetallesFactura df ON df.IdFactura = f.rowid
+                LEFT  JOIN Inventario     i  ON i.Codigo     = df.Codigo
+                WHERE f.Fecha >= $desde AND f.Fecha <= $hasta
+                  AND COALESCE(f.Anulada,0) = 0
+                  AND df.Codigo IN (" + string.Join(",", inParams) + @")
+                  " + filtroTipo + @"
+                GROUP BY df.Codigo, f.Fecha
+                ORDER BY df.Codigo, f.Fecha";
+            cmd.Parameters.AddWithValue("$desde", desde.ToString("yyyy-MM-dd"));
+            cmd.Parameters.AddWithValue("$hasta", hasta.ToString("yyyy-MM-dd"));
+            for (int i = 0; i < codigos.Count; i++)
+                cmd.Parameters.AddWithValue("$c" + i, codigos[i]);
+
+            using var r = cmd.ExecuteReader();
+            while (r.Read())
+            {
+                decimal monto = D(r, 3);
+                decimal cant  = D(r, 4);
+                decimal precio = cant != 0 ? monto / cant : 0;
+                var fecha = DateTime.TryParse(S(r, 2), out var f) ? f : DateTime.MinValue;
+                list.Add((S(r, 0), S(r, 1), fecha, precio));
+            }
+            return list;
+        }
+
         // ── REPORTES OPTIMIZADOS ─────────────────────────────────────────
         // Filtran por fecha en SQL (índices ya creados en Inicializar).
         // Reemplazan el patrón "ObtenerXxx() + LINQ.Where(fecha)" que traía
