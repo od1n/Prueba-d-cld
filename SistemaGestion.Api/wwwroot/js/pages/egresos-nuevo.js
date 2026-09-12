@@ -40,6 +40,12 @@ const fTotalBs     = document.getElementById('fTotalBs');
 const fNotas       = document.getElementById('fNotas');
 const btnAddLinea  = document.getElementById('btnAddLinea');
 const tablaDetalles= document.getElementById('tablaDetalles');
+const fPrecioPendiente = document.getElementById('fPrecioPendiente');
+const fACredito    = document.getElementById('fACredito');
+const fAbonado     = document.getElementById('fAbonado');
+const fVence       = document.getElementById('fVence');
+const zonaPago     = document.getElementById('zonaPago');
+const zonaCredito  = document.getElementById('zonaCredito');
 const btnVolver1   = document.getElementById('btnVolver1');
 const btnIrPaso3   = document.getElementById('btnIrPaso3');
 const error2       = document.getElementById('error2');
@@ -445,16 +451,34 @@ function sincronizarTotales() {
     if (t > 0 && usd > 0) fTotalBs.value = (usd * t).toFixed(2);
 }
 
+// ── Pago / crédito / precio pendiente ────────────────────────────────────────
+function aplicarPrecioPendiente() {
+    const pp = fPrecioPendiente.checked;
+    // Con precio pendiente no se conocen los montos: se deshabilitan.
+    zonaPago.style.opacity = pp ? '.5' : '1';
+    [fACredito, fAbonado, fVence].forEach(el => { if (el) el.disabled = pp; });
+    [fTotalUSD, fTotalBs, fTasa].forEach(el => { if (el) el.disabled = pp; });
+    if (pp) { fTotalUSD.value = '0'; fTotalBs.value = '0'; fACredito.checked = false; zonaCredito.style.display = 'none'; }
+}
+function aplicarCredito() {
+    zonaCredito.style.display = fACredito.checked ? 'grid' : 'none';
+}
+fPrecioPendiente.addEventListener('change', aplicarPrecioPendiente);
+fACredito.addEventListener('change', aplicarCredito);
+
 // ── Validación y paso 3 ──────────────────────────────────────────────────────
 btnIrPaso3.addEventListener('click', () => {
     ocultarError(error2);
+    const precioPendiente = fPrecioPendiente.checked;
     if (!fFecha.value) return mostrarError(error2, 'La fecha es obligatoria.');
-    if (parseFloat(fTotalUSD.value) <= 0 && parseFloat(fTotalBs.value) <= 0)
+    if (!precioPendiente && parseFloat(fTotalUSD.value) <= 0 && parseFloat(fTotalBs.value) <= 0)
         return mostrarError(error2, 'Ingresa el monto total del documento.');
     if (filas.length === 0)
         return mostrarError(error2, 'Agrega al menos una línea de detalle.');
     if (filas.some(f => !f.desc.trim()))
         return mostrarError(error2, 'Todas las líneas deben tener descripción.');
+    if (precioPendiente && filas.some(f => (f.cant || 0) <= 0))
+        return mostrarError(error2, 'Con precio pendiente, cada línea debe indicar la cantidad recibida.');
 
     renderResumen();
     irPaso(3);
@@ -508,11 +532,22 @@ function renderResumen() {
         </tr>`;
     });
 
+    let pagoInfo = '';
+    if (fPrecioPendiente.checked) {
+        pagoInfo = `<div class="eg-warning" style="margin-top:.6rem">⏳ <strong>Precio pendiente</strong>: se registra la mercancía sin montos; el administrador completará el precio luego.</div>`;
+    } else if (fACredito.checked) {
+        const ab = parseFloat(fAbonado.value) || 0;
+        pagoInfo = `<div style="margin-top:.6rem">Pago a crédito — Abonado: <strong>$${fmt2(ab)}</strong> · Saldo (CxP): <strong>$${fmt2(Math.max(0, tUSD - ab))}</strong>${fVence.value ? ` · Vence: ${fVence.value}` : ''}</div>`;
+    } else {
+        pagoInfo = `<div style="margin-top:.6rem">Pago completo</div>`;
+    }
+
     html += `</tbody></table>
         <div class="eg-resumen-totales">
-          <span>Total USD: <strong>$${fmt2(tUSD)}</strong></span>
-          ${tBs > 0 ? `<span>Total Bs: <strong>Bs ${fmt2(tBs)}</strong></span>` : ''}
-        </div>`;
+          ${fPrecioPendiente.checked ? '<span>Total: <strong>— (pendiente)</strong></span>' : `<span>Total USD: <strong>$${fmt2(tUSD)}</strong></span>`}
+          ${!fPrecioPendiente.checked && tBs > 0 ? `<span>Total Bs: <strong>Bs ${fmt2(tBs)}</strong></span>` : ''}
+        </div>
+        ${pagoInfo}`;
 
     resumenFinal.innerHTML = html;
 }
@@ -543,6 +578,11 @@ btnGuardar.addEventListener('click', async () => {
         tasaBCV       : tasa,
         rutaComprobante: null,
         notas         : fNotas.value || null,
+        // Fase 3: pago a crédito / precio pendiente
+        precioPendiente : fPrecioPendiente.checked,
+        aCredito        : fACredito.checked,
+        pagadoUSD       : fACredito.checked ? (parseFloat(fAbonado.value) || 0) : 0,
+        fechaVencimiento: (fACredito.checked || fPrecioPendiente.checked) && fVence.value ? fVence.value : null,
         detalles      : filas.map(f => ({
             descripcion   : f.desc,
             idArticulo    : f.idArt,
@@ -568,7 +608,9 @@ btnGuardar.addEventListener('click', async () => {
         }
 
         const data = await resp.json();
-        success3.textContent = `Egreso #${data.id} guardado correctamente.`;
+        success3.textContent = data.precioPendiente
+            ? `Egreso #${data.id} guardado con PRECIO PENDIENTE. El administrador lo completará luego.`
+            : `Egreso #${data.id} guardado correctamente.`;
         success3.style.display = 'block';
         btnGuardar.style.display = 'none';
         

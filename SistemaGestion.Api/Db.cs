@@ -58,7 +58,16 @@ namespace SistemaGestion.Api
                     "ALTER TABLE Inventario ADD COLUMN BonoVentaBs REAL NOT NULL DEFAULT 0",
                     // Historial fechado de tarifas de bono por producto (para calcular semanas pasadas)
                     "CREATE TABLE IF NOT EXISTS TarifaProductoProduccion (Id INTEGER PRIMARY KEY AUTOINCREMENT, CodigoProducto TEXT NOT NULL, TarifaBs REAL NOT NULL DEFAULT 0, FechaDesde TEXT NOT NULL, FechaHasta TEXT, Usuario TEXT)",
-                    "CREATE TABLE IF NOT EXISTS TarifaProductoVenta (Id INTEGER PRIMARY KEY AUTOINCREMENT, CodigoProducto TEXT NOT NULL, TarifaBs REAL NOT NULL DEFAULT 0, FechaDesde TEXT NOT NULL, FechaHasta TEXT, Usuario TEXT)"
+                    "CREATE TABLE IF NOT EXISTS TarifaProductoVenta (Id INTEGER PRIMARY KEY AUTOINCREMENT, CodigoProducto TEXT NOT NULL, TarifaBs REAL NOT NULL DEFAULT 0, FechaDesde TEXT NOT NULL, FechaHasta TEXT, Usuario TEXT)",
+                    // Egresos: pago parcial (crédito → Cuenta por Pagar) y precio pendiente
+                    // (nota de entrega sin montos). Mantiene paridad con la app de escritorio.
+                    "ALTER TABLE Gastos ADD COLUMN PagadoUSD REAL DEFAULT 0",
+                    "ALTER TABLE Gastos ADD COLUMN CodigoProveedor TEXT",
+                    "ALTER TABLE Gastos ADD COLUMN PrecioPendiente INTEGER DEFAULT 0",
+                    "ALTER TABLE ProductosProveedor ADD COLUMN CostoPromedio REAL DEFAULT 0",
+                    "ALTER TABLE MovimientosInventario ADD COLUMN TipoKardex TEXT DEFAULT 'PRODUCTO'",
+                    "ALTER TABLE MovimientosInventario ADD COLUMN CostoUnitario REAL DEFAULT 0",
+                    "ALTER TABLE CuentasPagar ADD COLUMN IdEgreso INTEGER"
                 };
                 foreach (var sql in fixes)
                 {
@@ -117,6 +126,40 @@ namespace SistemaGestion.Api
                     cmdPp.ExecuteNonQuery();
                 }
                 catch (Exception ex) { Console.WriteLine($"[API] WARN ParticipantesProduccionDia: {ex.Message}"); }
+
+                // Cuentas por Pagar / Pagos (compartidas con escritorio). Red de
+                // seguridad por si la API toca la BD antes que la app de escritorio.
+                try
+                {
+                    using var cmdCxP = c.CreateCommand();
+                    cmdCxP.CommandText = @"
+                        CREATE TABLE IF NOT EXISTS CuentasPagar (
+                            Id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                            CodigoProveedor TEXT,
+                            Proveedor       TEXT,
+                            Concepto        TEXT NOT NULL,
+                            NumFactura      TEXT,
+                            Monto           REAL DEFAULT 0,
+                            Pagado          REAL DEFAULT 0,
+                            FechaEmision    TEXT NOT NULL,
+                            FechaVence      TEXT NOT NULL,
+                            Estado          TEXT DEFAULT 'Pendiente',
+                            Observaciones   TEXT,
+                            IdEgreso        INTEGER
+                        );
+                        CREATE TABLE IF NOT EXISTS PagosCxP (
+                            Id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                            IdCuenta      INTEGER NOT NULL,
+                            Fecha         TEXT NOT NULL,
+                            Monto         REAL DEFAULT 0,
+                            FormaPago     TEXT,
+                            Referencia    TEXT,
+                            Observaciones TEXT
+                        );
+                        CREATE INDEX IF NOT EXISTS IX_CuentasPagar_Egreso ON CuentasPagar(IdEgreso);";
+                    cmdCxP.ExecuteNonQuery();
+                }
+                catch (Exception ex) { Console.WriteLine($"[API] WARN CuentasPagar/PagosCxP: {ex.Message}"); }
             }
             catch (Exception ex)
             {

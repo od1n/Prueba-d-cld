@@ -190,9 +190,10 @@ namespace SistemaGestion.Api.Endpoints
             app.MapPost("/api/egresos",
                 async (HttpContext ctx, EgresoNuevoRequest req) =>
             {
+                bool precioPendiente = req.PrecioPendiente;
                 if (req.Detalles is null || req.Detalles.Count == 0)
                     return Results.BadRequest(new { error = "Se requiere al menos un detalle." });
-                if (req.MontoUSD <= 0 && req.MontoBs <= 0)
+                if (!precioPendiente && req.MontoUSD <= 0 && req.MontoBs <= 0)
                     return Results.BadRequest(new { error = "El monto debe ser mayor a 0." });
 
                 var usuario = ctx.User?.FindFirstValue(ClaimTypes.Name) ?? "Portal";
@@ -201,16 +202,59 @@ namespace SistemaGestion.Api.Endpoints
                 using var tx = c.BeginTransaction();
                 try
                 {
-                    // Determinar tipo de tasa y montos
-                    var tipoTasa    = req.TasaBCV > 0 ? "BCV" : "USD_DIRECTO";
-                    var montoOrig   = req.MontoUSD > 0 ? req.MontoUSD : req.MontoBs;
-                    var monedaOrig  = req.MontoUSD > 0 ? "USD" : "BS";
-                    var montoUSD    = req.MontoUSD > 0
-                        ? req.MontoUSD
-                        : (req.TasaBCV > 0 ? Math.Round(req.MontoBs / req.TasaBCV, 4) : 0);
-                    var montoBs     = req.MontoBs > 0
-                        ? req.MontoBs
-                        : (req.TasaBCV > 0 ? Math.Round(req.MontoUSD * req.TasaBCV, 2) : 0);
+                    // Determinar tipo de tasa y montos. Con precio pendiente los
+                    // montos son 0 (la nota de entrega llegó sin precios).
+                    string tipoTasa, monedaOrig;
+                    decimal montoOrig, montoUSD, montoBs;
+                    if (precioPendiente)
+                    {
+                        tipoTasa = "USD_DIRECTO"; monedaOrig = "USD";
+                        montoOrig = 0; montoUSD = 0; montoBs = 0;
+                    }
+                    else
+                    {
+                        tipoTasa   = req.TasaBCV > 0 ? "BCV" : "USD_DIRECTO";
+                        montoOrig  = req.MontoUSD > 0 ? req.MontoUSD : req.MontoBs;
+                        monedaOrig = req.MontoUSD > 0 ? "USD" : "BS";
+                        montoUSD   = req.MontoUSD > 0
+                            ? req.MontoUSD
+                            : (req.TasaBCV > 0 ? Math.Round(req.MontoBs / req.TasaBCV, 4) : 0);
+                        montoBs    = req.MontoBs > 0
+                            ? req.MontoBs
+                            : (req.TasaBCV > 0 ? Math.Round(req.MontoUSD * req.TasaBCV, 2) : 0);
+                    }
+
+                    // Abono / estado. Por defecto se asume pago completo. Si el
+                    // egreso es a crédito (ACredito) se toma el abono indicado y el
+                    // saldo genera una Cuenta por Pagar. Con precio pendiente no hay
+                    // pago todavía y no se crea CxP (monto desconocido).
+                    decimal pagadoUSD;
+                    string  estado;
+                    if (precioPendiente)
+                    {
+                        pagadoUSD = 0; estado = "Pendiente";
+                    }
+                    else if (req.ACredito)
+                    {
+                        pagadoUSD = req.PagadoUSD < 0 ? 0 : req.PagadoUSD;
+                        if (pagadoUSD >= montoUSD - 0.01m) { pagadoUSD = montoUSD; estado = "Pagado"; }
+                        else estado = "Pendiente";
+                    }
+                    else
+                    {
+                        pagadoUSD = montoUSD; estado = "Pagado";
+                    }
+
+                    // Fechas
+                    var fechaStr = req.FechaGasto ?? DateTime.Today.ToString("yyyy-MM-dd");
+                    DateTime fechaGasto = DateTime.TryParse(fechaStr, out var fg) ? fg : DateTime.Today;
+                    string? venceStr = null;
+                    if (estado == "Pendiente" && !precioPendiente)
+                        venceStr = (req.FechaVencimiento ?? fechaGasto.AddDays(30).ToString("yyyy-MM-dd"));
+                    else if (precioPendiente)
+                        venceStr = (req.FechaVencimiento ?? fechaGasto.AddDays(30).ToString("yyyy-MM-dd"));
+                    string? fechaPagoStr = estado == "Pagado" ? DateTime.Today.ToString("yyyy-MM-dd")
+                                          : (pagadoUSD > 0 ? DateTime.Today.ToString("yyyy-MM-dd") : null);
 
                     // Construir concepto: "Compra a Proveedor" o usar descripción
                     var concepto = !string.IsNullOrWhiteSpace(req.Proveedor)
@@ -230,21 +274,24 @@ namespace SistemaGestion.Api.Endpoints
                     cmdG.Transaction = tx;
                     cmdG.CommandText = @"
                         INSERT INTO Gastos
-                            (Fecha, IdCategoria, Concepto, Proveedor, IdInsumo, Cantidad,
+                            (Fecha, IdCategoria, Concepto, Proveedor, CodigoProveedor, IdInsumo, Cantidad,
                              MonedaOriginal, TipoTasa, TasaUsada, IdTasaCambio,
-                             MontoOriginal, MontoUSD, MontoBs,
-                             Estado, RutaComprobante, Usuario, FechaRegistro, Observaciones)
+                             MontoOriginal, MontoUSD, MontoBs, PagadoUSD, PrecioPendiente,
+                             Estado, FechaVencimiento, FechaPago, RutaComprobante,
+                             Usuario, FechaRegistro, Observaciones)
                         VALUES
-                            (@fecha, @idCat, @conc, @prov, NULL, @cant,
+                            (@fecha, @idCat, @conc, @prov, @cprov, NULL, @cant,
                              @mon, @tt, @tasa, NULL,
-                             @mo, @usd, @bs,
-                             'Pagado', @ruta, @usr, datetime('now','localtime'), @obs);
+                             @mo, @usd, @bs, @pag, @pp,
+                             @estado, @fv, @fp, @ruta,
+                             @usr, datetime('now','localtime'), @obs);
                         SELECT last_insert_rowid();";
 
-                    cmdG.Parameters.AddWithValue("@fecha", req.FechaGasto ?? DateTime.Today.ToString("yyyy-MM-dd"));
+                    cmdG.Parameters.AddWithValue("@fecha", fechaStr);
                     cmdG.Parameters.AddWithValue("@idCat", (object?)req.IdCategoria ?? DBNull.Value);
                     cmdG.Parameters.AddWithValue("@conc",  concepto);
                     cmdG.Parameters.AddWithValue("@prov",  req.Proveedor  ?? "");
+                    cmdG.Parameters.AddWithValue("@cprov", req.CodigoProveedor ?? "");
                     cmdG.Parameters.AddWithValue("@cant",  (double)(req.CantidadTotal > 0
                                                                ? req.CantidadTotal
                                                                : req.Detalles.Sum(d => d.Cantidad)));
@@ -254,6 +301,11 @@ namespace SistemaGestion.Api.Endpoints
                     cmdG.Parameters.AddWithValue("@mo",    (double)montoOrig);
                     cmdG.Parameters.AddWithValue("@usd",   (double)montoUSD);
                     cmdG.Parameters.AddWithValue("@bs",    (double)montoBs);
+                    cmdG.Parameters.AddWithValue("@pag",   (double)pagadoUSD);
+                    cmdG.Parameters.AddWithValue("@pp",    precioPendiente ? 1 : 0);
+                    cmdG.Parameters.AddWithValue("@estado",estado);
+                    cmdG.Parameters.AddWithValue("@fv",    (object?)venceStr ?? DBNull.Value);
+                    cmdG.Parameters.AddWithValue("@fp",    (object?)fechaPagoStr ?? DBNull.Value);
                     cmdG.Parameters.AddWithValue("@ruta",  req.RutaComprobante ?? "");
                     cmdG.Parameters.AddWithValue("@usr",   usuario);
                     cmdG.Parameters.AddWithValue("@obs",   obs);
@@ -282,8 +334,10 @@ namespace SistemaGestion.Api.Endpoints
                         cmdD.Parameters.AddWithValue("@cant",  (double)det.Cantidad);
                         cmdD.Parameters.AddWithValue("@pu",    (double)det.PrecioUnitario);
                         cmdD.Parameters.AddWithValue("@sub",   (double)det.Subtotal);
+                        cmdD.ExecuteNonQuery();
 
-                        // Materia Prima: actualizar stock + CPP en ProductosProveedor
+                        // Materia Prima: actualizar stock + costo promedio en ProductosProveedor.
+                        // Con precio pendiente entra a costo PROVISIONAL (promedio actual).
                         if (esInv == 1 && det.IdArticulo.HasValue && det.Cantidad > 0)
                         {
                             ActualizarInventarioMP(
@@ -292,13 +346,27 @@ namespace SistemaGestion.Api.Endpoints
                                 det.Cantidad,
                                 det.PrecioUnitario,
                                 idGasto,
-                                usuario
+                                usuario,
+                                precioPendiente
                             );
                         }
                     }
 
+                    // Egreso a crédito → Cuenta por Pagar por el saldo (salvo precio pendiente)
+                    if (!precioPendiente)
+                        SincronizarCxPDesdeEgreso(c, tx, idGasto, req.Proveedor ?? "",
+                            req.CodigoProveedor ?? "", concepto, "Egreso #" + idGasto,
+                            montoUSD, pagadoUSD, fechaStr, venceStr ?? fechaGasto.AddDays(30).ToString("yyyy-MM-dd"));
+
                     tx.Commit();
-                    return Results.Ok(new { id = idGasto, mensaje = "Egreso registrado correctamente." });
+                    return Results.Ok(new {
+                        id = idGasto,
+                        estado,
+                        precioPendiente,
+                        mensaje = precioPendiente
+                            ? "Egreso registrado con precio pendiente. Complételo cuando llegue la factura."
+                            : "Egreso registrado correctamente."
+                    });
                 }
                 catch (Exception ex)
                 {
@@ -510,6 +578,167 @@ namespace SistemaGestion.Api.Endpoints
                     lista.Add(new CatGastoDto(r.GetInt32(0), Db.S(r, 1), Db.I(r, 2) == 1));
                 return Results.Ok(lista);
             }).RequireAuthorization();
+
+            // ── 8. Egresos con precio pendiente (nota de entrega sin montos) ─
+            // GET /api/egresos/precio-pendiente
+            app.MapGet("/api/egresos/precio-pendiente", () =>
+            {
+                var lista = new List<object>();
+                using var c   = Db.Conn();
+                using var cmd = c.CreateCommand();
+                cmd.CommandText = @"
+                    SELECT g.Id, g.Fecha, g.Concepto, COALESCE(g.Proveedor,''),
+                           COALESCE(g.Cantidad,0), COALESCE(cg.Nombre,'')
+                    FROM Gastos g
+                    LEFT JOIN CategoriasGasto cg ON cg.Id = g.IdCategoria
+                    WHERE COALESCE(g.PrecioPendiente,0) = 1 AND g.Estado != 'Anulado'
+                    ORDER BY g.Fecha ASC, g.Id ASC";
+                using var r = cmd.ExecuteReader();
+                while (r.Read())
+                    lista.Add(new {
+                        id        = r.GetInt32(0),
+                        fecha     = Db.S(r, 1),
+                        concepto  = Db.S(r, 2),
+                        proveedor = Db.S(r, 3),
+                        cantidad  = Db.D(r, 4),
+                        categoria = Db.S(r, 5)
+                    });
+                return Results.Ok(lista);
+            }).RequireAuthorization();
+
+            // ── 9. Completar precio de una nota de entrega ──────────────────
+            // PUT /api/egresos/{id}/completar-precio
+            app.MapPut("/api/egresos/{id:int}/completar-precio",
+                (int id, CompletarPrecioRequest req) =>
+            {
+                if (req.MontoUSD <= 0 && req.MontoBs <= 0)
+                    return Results.BadRequest(new { error = "El monto debe ser mayor a 0." });
+
+                using var c  = Db.Conn();
+                using var tx = c.BeginTransaction();
+                try
+                {
+                    // Leer el egreso y validar que tenga precio pendiente.
+                    string proveedor = "", codProv = "", concepto = "", fechaStr = DateTime.Today.ToString("yyyy-MM-dd");
+                    bool esPendiente = false;
+                    using (var q = c.CreateCommand())
+                    {
+                        q.Transaction = tx;
+                        q.CommandText = @"SELECT COALESCE(Proveedor,''), COALESCE(CodigoProveedor,''),
+                            COALESCE(Concepto,''), Fecha, COALESCE(PrecioPendiente,0)
+                            FROM Gastos WHERE Id=@id";
+                        q.Parameters.AddWithValue("@id", id);
+                        using var r = q.ExecuteReader();
+                        if (!r.Read()) { tx.Rollback(); return Results.NotFound(new { error = "Egreso no encontrado." }); }
+                        proveedor   = r.GetString(0);
+                        codProv     = r.GetString(1);
+                        concepto    = r.GetString(2);
+                        fechaStr    = Db.S(r, 3);
+                        esPendiente = r.GetInt32(4) == 1;
+                    }
+                    if (!esPendiente) { tx.Rollback(); return Results.BadRequest(new { error = "El egreso no tiene precio pendiente." }); }
+
+                    DateTime fechaGasto = DateTime.TryParse(fechaStr, out var fg) ? fg : DateTime.Today;
+
+                    // Recalcular montos.
+                    var tipoTasa   = req.TasaBCV > 0 ? "BCV" : "USD_DIRECTO";
+                    var monedaOrig = req.MontoUSD > 0 ? "USD" : "BS";
+                    var montoOrig  = req.MontoUSD > 0 ? req.MontoUSD : req.MontoBs;
+                    var montoUSD   = req.MontoUSD > 0 ? req.MontoUSD
+                                     : (req.TasaBCV > 0 ? Math.Round(req.MontoBs / req.TasaBCV, 4) : 0);
+                    var montoBs    = req.MontoBs > 0 ? req.MontoBs
+                                     : (req.TasaBCV > 0 ? Math.Round(req.MontoUSD * req.TasaBCV, 2) : 0);
+
+                    // Abono / estado.
+                    decimal pagadoUSD; string estado;
+                    if (req.ACredito)
+                    {
+                        pagadoUSD = req.PagadoUSD < 0 ? 0 : req.PagadoUSD;
+                        if (pagadoUSD >= montoUSD - 0.01m) { pagadoUSD = montoUSD; estado = "Pagado"; }
+                        else estado = "Pendiente";
+                    }
+                    else { pagadoUSD = montoUSD; estado = "Pagado"; }
+
+                    string? venceStr = estado == "Pendiente"
+                        ? (req.FechaVencimiento ?? fechaGasto.AddDays(30).ToString("yyyy-MM-dd"))
+                        : null;
+                    string? fechaPagoStr = estado == "Pagado" || pagadoUSD > 0
+                        ? DateTime.Today.ToString("yyyy-MM-dd") : null;
+
+                    // Actualizar la cabecera Gastos.
+                    using (var up = c.CreateCommand())
+                    {
+                        up.Transaction = tx;
+                        up.CommandText = @"UPDATE Gastos SET
+                            MonedaOriginal=@mon, TipoTasa=@tt, TasaUsada=@tasa,
+                            MontoOriginal=@mo, MontoUSD=@usd, MontoBs=@bs, PagadoUSD=@pag,
+                            PrecioPendiente=0, Estado=@es, FechaVencimiento=@fv, FechaPago=@fp
+                            WHERE Id=@id";
+                        up.Parameters.AddWithValue("@mon", monedaOrig);
+                        up.Parameters.AddWithValue("@tt", tipoTasa);
+                        up.Parameters.AddWithValue("@tasa", (double)req.TasaBCV);
+                        up.Parameters.AddWithValue("@mo", (double)montoOrig);
+                        up.Parameters.AddWithValue("@usd", (double)montoUSD);
+                        up.Parameters.AddWithValue("@bs", (double)montoBs);
+                        up.Parameters.AddWithValue("@pag", (double)pagadoUSD);
+                        up.Parameters.AddWithValue("@es", estado);
+                        up.Parameters.AddWithValue("@fv", (object?)venceStr ?? DBNull.Value);
+                        up.Parameters.AddWithValue("@fp", (object?)fechaPagoStr ?? DBNull.Value);
+                        up.Parameters.AddWithValue("@id", id);
+                        up.ExecuteNonQuery();
+                    }
+
+                    // Actualizar precios de las líneas y ajustar el Kardex de cada
+                    // insumo de materia prima con su costo real.
+                    if (req.Detalles != null)
+                    {
+                        foreach (var det in req.Detalles)
+                        {
+                            using (var ud = c.CreateCommand())
+                            {
+                                ud.Transaction = tx;
+                                ud.CommandText = det.IdArticulo.HasValue
+                                    ? "UPDATE DetallesGasto SET PrecioUnitario=@pu, Subtotal=@sub WHERE IdGasto=@id AND IdArticulo=@art"
+                                    : "UPDATE DetallesGasto SET PrecioUnitario=@pu, Subtotal=@sub WHERE IdGasto=@id AND Descripcion=@desc";
+                                ud.Parameters.AddWithValue("@pu", (double)det.PrecioUnitario);
+                                ud.Parameters.AddWithValue("@sub", (double)det.Subtotal);
+                                ud.Parameters.AddWithValue("@id", id);
+                                if (det.IdArticulo.HasValue) ud.Parameters.AddWithValue("@art", det.IdArticulo.Value);
+                                else ud.Parameters.AddWithValue("@desc", det.Descripcion ?? "");
+                                ud.ExecuteNonQuery();
+                            }
+
+                            // Ajuste de costo en Kardex (materia prima).
+                            if (det.IdArticulo.HasValue && det.Cantidad > 0 && det.PrecioUnitario > 0)
+                            {
+                                string codigoInterno = "";
+                                using (var q = c.CreateCommand())
+                                {
+                                    q.Transaction = tx;
+                                    q.CommandText = "SELECT COALESCE(CodigoInterno,'') FROM ProductosProveedor WHERE Id=@art";
+                                    q.Parameters.AddWithValue("@art", det.IdArticulo.Value);
+                                    codigoInterno = (q.ExecuteScalar() as string) ?? "";
+                                }
+                                if (!string.IsNullOrEmpty(codigoInterno))
+                                    AjustarCostoEntradaKardex(c, tx, codigoInterno, "Gasto#" + id, det.PrecioUnitario);
+                            }
+                        }
+                    }
+
+                    // Cuenta por Pagar por el saldo, ahora que se conoce el monto.
+                    SincronizarCxPDesdeEgreso(c, tx, id, proveedor, codProv, concepto,
+                        "Egreso #" + id, montoUSD, pagadoUSD, fechaStr,
+                        venceStr ?? fechaGasto.AddDays(30).ToString("yyyy-MM-dd"));
+
+                    tx.Commit();
+                    return Results.Ok(new { id, estado, montoUSD, mensaje = "Precio completado correctamente." });
+                }
+                catch (Exception ex)
+                {
+                    tx.Rollback();
+                    return Results.Problem($"Error al completar precio: {ex.Message}", statusCode: 500);
+                }
+            }).AddEndpointFilter(RequireRole.Of(TokenService.PuedeEscribirEgresos)).RequireAuthorization();
         }
 
         // ── Adaptar respuesta del digitalizador Python al formato del portal ────
@@ -566,20 +795,25 @@ namespace SistemaGestion.Api.Endpoints
             };
         }
 
-        // ── Actualizar stock + CPP (Materia Prima) ───────────────────────────
+        // ── Actualizar stock + costo promedio (Materia Prima) ────────────────
+        // precioPendiente: la nota de entrega llegó sin precios; la mercancía entra
+        // a costo PROVISIONAL = costo promedio actual, para no distorsionar el
+        // promedio ponderado. Al completar el precio se ajusta (AjustarCostoEntradaKardex).
         private static void ActualizarInventarioMP(
             SqliteConnection c, SqliteTransaction tx,
             int idArticulo, decimal cantidad, decimal precioUnitario,
-            int idGasto, string usuario)
+            int idGasto, string usuario, bool precioPendiente = false)
         {
-            // 1. Leer estado actual del insumo
+            // 1. Leer estado actual del insumo. El promedio se toma de PrecioPromedio
+            //    (columna canónica de escritorio) con respaldo a CostoPromedio.
             string codigoInterno = "";
             decimal stockAnt = 0, costoAnt = 0;
             using (var cmdL = c.CreateCommand())
             {
                 cmdL.Transaction = tx;
                 cmdL.CommandText = @"
-                    SELECT CodigoInterno, COALESCE(StockActual, 0), COALESCE(CostoPromedio, 0)
+                    SELECT CodigoInterno, COALESCE(StockActual, 0),
+                           COALESCE(NULLIF(PrecioPromedio,0), CostoPromedio, 0)
                     FROM ProductosProveedor WHERE Id = @id;";
                 cmdL.Parameters.AddWithValue("@id", idArticulo);
                 using var rL = cmdL.ExecuteReader();
@@ -592,23 +826,29 @@ namespace SistemaGestion.Api.Endpoints
             }
             if (string.IsNullOrEmpty(codigoInterno)) return;  // insumo no encontrado
 
-            // 2. Calcular nuevo stock y nuevo CPP
+            // Costo de entrada: provisional (= promedio actual) si el precio está
+            // pendiente; así el promedio ponderado no cambia hasta completar el precio.
+            decimal costoEntrada = precioPendiente ? costoAnt : precioUnitario;
+
+            // 2. Calcular nuevo stock y nuevo costo promedio ponderado
             var nuevoStock = stockAnt + cantidad;
             var nuevoCosto = nuevoStock > 0
-                ? Math.Round((stockAnt * costoAnt + cantidad * precioUnitario) / nuevoStock, 4)
-                : precioUnitario;
+                ? Math.Round((stockAnt * costoAnt + cantidad * costoEntrada) / nuevoStock, 4)
+                : costoEntrada;
 
-            // 3. Actualizar ProductosProveedor
+            // 3. Actualizar ProductosProveedor (ambas columnas de promedio para
+            //    mantener consistencia entre web y escritorio).
             using (var cmdU = c.CreateCommand())
             {
                 cmdU.Transaction = tx;
                 cmdU.CommandText = @"
                     UPDATE ProductosProveedor
-                    SET StockActual = @ns, CostoPromedio = @ncp, PrecioUltCompra = @pu
+                    SET StockActual = @ns, CostoPromedio = @ncp, PrecioPromedio = @ncp,
+                        PrecioUltCompra = @pu
                     WHERE Id = @id;";
                 cmdU.Parameters.AddWithValue("@ns",  (double)nuevoStock);
                 cmdU.Parameters.AddWithValue("@ncp", (double)nuevoCosto);
-                cmdU.Parameters.AddWithValue("@pu",  (double)precioUnitario);
+                cmdU.Parameters.AddWithValue("@pu",  (double)costoEntrada);
                 cmdU.Parameters.AddWithValue("@id",  idArticulo);
                 cmdU.ExecuteNonQuery();
             }
@@ -626,14 +866,164 @@ namespace SistemaGestion.Api.Endpoints
                      @cant, @sa, @ns,
                      @ref, @usr, 'MATERIA_PRIMA', @cu);";
             cmdM.Parameters.AddWithValue("@cod",  codigoInterno);
-            cmdM.Parameters.AddWithValue("@conc", $"Compra — Gasto #{idGasto}");
+            cmdM.Parameters.AddWithValue("@conc", precioPendiente
+                ? $"Compra MP (precio pendiente) — Gasto #{idGasto}"
+                : $"Compra — Gasto #{idGasto}");
             cmdM.Parameters.AddWithValue("@cant", (double)cantidad);
             cmdM.Parameters.AddWithValue("@sa",   (double)stockAnt);
             cmdM.Parameters.AddWithValue("@ns",   (double)nuevoStock);
             cmdM.Parameters.AddWithValue("@ref",  $"Gasto#{idGasto}");
             cmdM.Parameters.AddWithValue("@usr",  usuario);
-            cmdM.Parameters.AddWithValue("@cu",   (double)precioUnitario);
+            cmdM.Parameters.AddWithValue("@cu",   (double)costoEntrada);
             cmdM.ExecuteNonQuery();
+        }
+
+        // ── Sincronizar Cuenta por Pagar desde un egreso (misma lógica que escritorio) ──
+        // Idempotente: una CxP por egreso, ligada por IdEgreso.
+        private static void SincronizarCxPDesdeEgreso(
+            SqliteConnection c, SqliteTransaction tx,
+            int idEgreso, string proveedor, string codigoProveedor,
+            string concepto, string numRef, decimal montoUSD, decimal pagadoUSD,
+            string emisionStr, string venceStr)
+        {
+            if (idEgreso <= 0) return;
+            decimal saldo = montoUSD - pagadoUSD;
+
+            // ¿Ya existe una CxP ligada a este egreso?
+            int idCxP = 0;
+            using (var q = c.CreateCommand())
+            {
+                q.Transaction = tx;
+                q.CommandText = "SELECT Id FROM CuentasPagar WHERE IdEgreso=@ie LIMIT 1";
+                q.Parameters.AddWithValue("@ie", idEgreso);
+                var o = q.ExecuteScalar();
+                if (o != null && o != DBNull.Value) idCxP = Convert.ToInt32(o);
+            }
+
+            if (saldo <= 0.01m)
+            {
+                // Pagado completo: si existía CxP, marcarla pagada.
+                if (idCxP > 0)
+                {
+                    using var up = c.CreateCommand();
+                    up.Transaction = tx;
+                    up.CommandText = "UPDATE CuentasPagar SET Monto=@mo, Pagado=@mo, Estado='Pagada' WHERE Id=@id";
+                    up.Parameters.AddWithValue("@mo", (double)montoUSD);
+                    up.Parameters.AddWithValue("@id", idCxP);
+                    up.ExecuteNonQuery();
+                }
+                return;
+            }
+
+            string estado = pagadoUSD > 0 ? "Parcial" : "Pendiente";
+            if (idCxP > 0)
+            {
+                using var up = c.CreateCommand();
+                up.Transaction = tx;
+                up.CommandText = @"UPDATE CuentasPagar SET
+                    CodigoProveedor=@cp, Proveedor=@pr, Concepto=@co, NumFactura=@nf,
+                    Monto=@mo, Pagado=@pa, FechaEmision=@fe, FechaVence=@fv, Estado=@es
+                    WHERE Id=@id";
+                up.Parameters.AddWithValue("@cp", codigoProveedor ?? "");
+                up.Parameters.AddWithValue("@pr", proveedor ?? "");
+                up.Parameters.AddWithValue("@co", concepto ?? "");
+                up.Parameters.AddWithValue("@nf", numRef ?? "");
+                up.Parameters.AddWithValue("@mo", (double)montoUSD);
+                up.Parameters.AddWithValue("@pa", (double)pagadoUSD);
+                up.Parameters.AddWithValue("@fe", emisionStr);
+                up.Parameters.AddWithValue("@fv", venceStr);
+                up.Parameters.AddWithValue("@es", estado);
+                up.Parameters.AddWithValue("@id", idCxP);
+                up.ExecuteNonQuery();
+            }
+            else
+            {
+                using var ins = c.CreateCommand();
+                ins.Transaction = tx;
+                ins.CommandText = @"INSERT INTO CuentasPagar
+                    (CodigoProveedor,Proveedor,Concepto,NumFactura,Monto,Pagado,
+                     FechaEmision,FechaVence,Estado,Observaciones,IdEgreso)
+                    VALUES(@cp,@pr,@co,@nf,@mo,@pa,@fe,@fv,@es,@ob,@ie)";
+                ins.Parameters.AddWithValue("@cp", codigoProveedor ?? "");
+                ins.Parameters.AddWithValue("@pr", proveedor ?? "");
+                ins.Parameters.AddWithValue("@co", concepto ?? "");
+                ins.Parameters.AddWithValue("@nf", numRef ?? "");
+                ins.Parameters.AddWithValue("@mo", (double)montoUSD);
+                ins.Parameters.AddWithValue("@pa", (double)pagadoUSD);
+                ins.Parameters.AddWithValue("@fe", emisionStr);
+                ins.Parameters.AddWithValue("@fv", venceStr);
+                ins.Parameters.AddWithValue("@es", estado);
+                ins.Parameters.AddWithValue("@ob", "Generada automáticamente desde el egreso #" + idEgreso);
+                ins.Parameters.AddWithValue("@ie", idEgreso);
+                ins.ExecuteNonQuery();
+            }
+        }
+
+        // ── Ajustar costo de una entrada MP registrada con costo provisional ────
+        // (misma lógica que escritorio: corrige el movimiento y carga la diferencia
+        //  de valor sobre el stock actual). Usa la referencia "Gasto#{id}".
+        private static void AjustarCostoEntradaKardex(
+            SqliteConnection c, SqliteTransaction tx,
+            string codigoInsumo, string referencia, decimal costoRealUnit)
+        {
+            if (string.IsNullOrEmpty(referencia)) return;
+
+            int idMov = 0; decimal cantidad = 0, costoProv = 0; string concepto = "";
+            using (var q = c.CreateCommand())
+            {
+                q.Transaction = tx;
+                q.CommandText = @"SELECT IdMovimiento, Cantidad, CostoUnitario, COALESCE(Concepto,'')
+                    FROM MovimientosInventario
+                    WHERE TipoKardex='MATERIA_PRIMA' AND TipoMovimiento='ENTRADA'
+                      AND CodigoProducto=@cod AND Referencia=@re
+                    ORDER BY IdMovimiento DESC LIMIT 1";
+                q.Parameters.AddWithValue("@cod", codigoInsumo);
+                q.Parameters.AddWithValue("@re", referencia);
+                using var r = q.ExecuteReader();
+                if (r.Read())
+                {
+                    idMov     = r.GetInt32(0);
+                    cantidad  = r.IsDBNull(1) ? 0 : (decimal)r.GetDouble(1);
+                    costoProv = r.IsDBNull(2) ? 0 : (decimal)r.GetDouble(2);
+                    concepto  = r.IsDBNull(3) ? "" : r.GetString(3);
+                }
+            }
+            if (idMov == 0) return;
+
+            decimal stock = 0, avg = 0;
+            using (var q = c.CreateCommand())
+            {
+                q.Transaction = tx;
+                q.CommandText = @"SELECT COALESCE(StockActual,0),
+                    COALESCE(NULLIF(PrecioPromedio,0), CostoPromedio, 0)
+                    FROM ProductosProveedor WHERE CodigoInterno=@cod";
+                q.Parameters.AddWithValue("@cod", codigoInsumo);
+                using var r = q.ExecuteReader();
+                if (r.Read()) { stock = (decimal)r.GetDouble(0); avg = (decimal)r.GetDouble(1); }
+            }
+
+            decimal delta  = cantidad * (costoRealUnit - costoProv);
+            decimal avgNew = stock > 0 ? Math.Round(avg + delta / stock, 4) : costoRealUnit;
+            if (avgNew < 0) avgNew = 0;
+
+            using (var up = c.CreateCommand())
+            {
+                up.Transaction = tx;
+                up.CommandText = "UPDATE MovimientosInventario SET CostoUnitario=@cu, Concepto=@co WHERE IdMovimiento=@id";
+                up.Parameters.AddWithValue("@cu", (double)costoRealUnit);
+                up.Parameters.AddWithValue("@co", concepto + " [precio completado]");
+                up.Parameters.AddWithValue("@id", idMov);
+                up.ExecuteNonQuery();
+            }
+            using (var up = c.CreateCommand())
+            {
+                up.Transaction = tx;
+                up.CommandText = "UPDATE ProductosProveedor SET PrecioPromedio=@pp, CostoPromedio=@pp, PrecioUltCompra=@pu WHERE CodigoInterno=@cod";
+                up.Parameters.AddWithValue("@pp", (double)avgNew);
+                up.Parameters.AddWithValue("@pu", (double)costoRealUnit);
+                up.Parameters.AddWithValue("@cod", codigoInsumo);
+                up.ExecuteNonQuery();
+            }
         }
     }
 
@@ -702,7 +1092,32 @@ namespace SistemaGestion.Api.Endpoints
         decimal TasaBCV,
         string? RutaComprobante,
         string? Notas,
-        List<DetalleLineaRequest> Detalles
+        List<DetalleLineaRequest> Detalles,
+        // Fase 3: pago a crédito / abono parcial y nota de entrega sin precios.
+        bool    ACredito        = false,
+        decimal PagadoUSD       = 0,
+        bool    PrecioPendiente = false,
+        string? CodigoProveedor = null,
+        string? FechaVencimiento = null
+    );
+
+    // Completar el precio de una nota de entrega registrada como precio pendiente.
+    record CompletarPrecioRequest(
+        decimal MontoUSD,
+        decimal MontoBs,
+        decimal TasaBCV,
+        bool    ACredito         = false,
+        decimal PagadoUSD        = 0,
+        string? FechaVencimiento = null,
+        List<CompletarDetalleRequest>? Detalles = null
+    );
+
+    record CompletarDetalleRequest(
+        int?    IdArticulo,
+        string? Descripcion,
+        decimal Cantidad,
+        decimal PrecioUnitario,
+        decimal Subtotal
     );
 
     record DetalleLineaRequest(

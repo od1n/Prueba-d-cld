@@ -138,6 +138,35 @@
         </div>
       </div>
 
+      <!-- Pago / crédito / precio pendiente -->
+      <div class="eg-card">
+        <h3>Pago</h3>
+        <div class="eg-field eg-field-full">
+          <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer">
+            <input type="checkbox" id="fPrecioPendiente" style="width:auto">
+            Precio pendiente (nota de entrega sin montos) — el administrador lo completa luego
+          </label>
+        </div>
+        <div id="zonaPago">
+          <div class="eg-field eg-field-full">
+            <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer">
+              <input type="checkbox" id="fACredito" style="width:auto">
+              A crédito (pago parcial o sin pagar) — genera Cuenta por Pagar
+            </label>
+          </div>
+          <div class="eg-form-grid" id="zonaCredito" style="display:none">
+            <div class="eg-field">
+              <label>Abonado (USD)</label>
+              <input type="number" id="fAbonado" min="0" step="0.01" value="0">
+            </div>
+            <div class="eg-field">
+              <label>Vence el</label>
+              <input type="date" id="fVence">
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div class="eg-actions">
         <button class="eg-btn-secondary" id="btnVolver1">← Volver</button>
         <button class="eg-btn-primary" id="btnIrPaso3">Continuar →</button>
