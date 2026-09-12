@@ -2692,6 +2692,63 @@ namespace SistemaGestion
             return list;
         }
 
+        /// <summary>
+        /// Busca un proveedor por nombre TOLERANDO diferencias de mayúsculas,
+        /// acentos, puntuación (comas/puntos) y sufijos de forma jurídica
+        /// (C.A, S.A, SRL, etc.). Así "INVERSIONES VALENKZO, C.A" empareja con
+        /// "inversiones valenkzo". Devuelve null si no hay coincidencia.
+        /// </summary>
+        public static Proveedor BuscarProveedorPorNombre(string nombre)
+        {
+            if (string.IsNullOrWhiteSpace(nombre)) return null;
+            string objetivo = NormalizarNombreProveedor(nombre);
+            if (objetivo.Length == 0) return null;
+
+            Proveedor contiene = null;
+            foreach (var p in ObtenerProveedores())
+            {
+                string n = NormalizarNombreProveedor(p.Descripcion);
+                if (n.Length == 0) continue;
+                if (n == objetivo) return p;                    // match fuerte
+                // match débil: uno contiene al otro (nombre parcial)
+                if (contiene == null && (n.Contains(objetivo) || objetivo.Contains(n)))
+                    contiene = p;
+            }
+            return contiene;
+        }
+
+        // Sufijos / ruido de forma jurídica que se ignoran al comparar nombres.
+        private static readonly System.Collections.Generic.HashSet<string> _ruidoProveedor =
+            new System.Collections.Generic.HashSet<string> {
+                "CA","SA","SRL","RL","EIRL","SAS","CXA","CVA","SC",
+                "COMPANIA","ANONIMA","SOCIEDAD","RESPONSABILIDAD","LIMITADA",
+                "DE","CV","INC","LLC","LTD","C","A","S"
+            };
+
+        /// <summary>Normaliza un nombre de proveedor para comparar (mayúsculas,
+        /// sin acentos, sin puntuación, sin sufijos de forma jurídica).</summary>
+        public static string NormalizarNombreProveedor(string s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return "";
+            // Quitar acentos
+            var formD = s.Normalize(System.Text.NormalizationForm.FormD);
+            var sb0 = new System.Text.StringBuilder(formD.Length);
+            foreach (var ch in formD)
+                if (System.Globalization.CharUnicodeInfo.GetUnicodeCategory(ch)
+                        != System.Globalization.UnicodeCategory.NonSpacingMark)
+                    sb0.Append(ch);
+            // Tokenizar en alfanumérico-mayúscula y descartar el ruido jurídico
+            var sb = new System.Text.StringBuilder();
+            foreach (var tok in System.Text.RegularExpressions.Regex.Split(
+                        sb0.ToString().ToUpperInvariant(), "[^A-Z0-9]+"))
+            {
+                if (tok.Length == 0) continue;
+                if (_ruidoProveedor.Contains(tok)) continue;
+                sb.Append(tok);
+            }
+            return sb.ToString();
+        }
+
         /// <summary>Próximo código numérico de proveedor (máximo + 1, con 3 dígitos).</summary>
         public static string ProximoCodigoProveedor()
         {

@@ -814,9 +814,10 @@ namespace SistemaGestion
                 _egreso.CodigoProveedor = "";
                 if (!string.IsNullOrEmpty(nomProv))
                 {
-                    var provs = DatabaseService.ObtenerProveedores();
-                    var existente = provs.FirstOrDefault(p =>
-                        string.Equals(p.Descripcion?.Trim(), nomProv, StringComparison.OrdinalIgnoreCase));
+                    // Match tolerante: ignora mayúsculas, acentos, puntuación y
+                    // sufijos jurídicos (C.A, S.A, SRL). Así "INVERSIONES VALENKZO, C.A"
+                    // empareja con "inversiones valenkzo" del directorio.
+                    var existente = DatabaseService.BuscarProveedorPorNombre(nomProv);
                     if (existente != null)
                     {
                         _egreso.CodigoProveedor = existente.Codigo;
