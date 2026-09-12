@@ -132,7 +132,12 @@ namespace SistemaGestion
             var pnlExt = new Panel { Dock = DockStyle.Fill, AutoScroll = true,
                 BackColor = UITheme.Fondo,
                 Padding = new Padding(28, 18, 28, 20) };
-            var pnl = new Panel { Dock = DockStyle.Fill, BackColor = UITheme.Fondo };
+            // El panel interno crece con su contenido (AutoSize) — así el
+            // AutoScroll del panel exterior muestra la barra y se puede
+            // desplazar para ver todos los campos. Con Dock.Fill se ajustaba
+            // al área visible y cortaba los campos de abajo (sin scroll).
+            var pnl = new Panel { Dock = DockStyle.Top, AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = UITheme.Fondo };
             pnlExt.Controls.Add(pnl);
             root.Controls.Add(pnlExt, 0, 1);
 
