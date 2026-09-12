@@ -439,6 +439,9 @@ namespace SistemaGestion
                 _numPagado.Enabled    = !pp && _chkPendiente.Checked;
                 _dtpVence.Enabled     = !pp && _chkPendiente.Checked;
                 if (pp) { _numMonto.Value = 0m; _numPrecioUnit.Value = 0m; }
+                // Precio pendiente → la columna de precio de la grilla es de solo lectura.
+                if (_gridLineas != null && _gridLineas.Columns.Count > 2)
+                    _gridLineas.Columns[2].ReadOnly = pp;
                 if (_gridLineas != null) RefrescarGridLineas();
             }
             _chkPrecioPendiente.CheckedChanged += (s, e) => AplicarPrecioPendiente();
@@ -623,7 +626,9 @@ namespace SistemaGestion
         private void GridLineas_CellEndEdit(object? sender, DataGridViewCellEventArgs e)
         {
             if (e.ColumnIndex != 2 || e.RowIndex < 0 || e.RowIndex >= _lineas.Count) return;
-            if (_chkPrecioPendiente != null && _chkPrecioPendiente.Checked) { RefrescarGridLineas(); return; }
+            // Con precio pendiente la columna es de solo lectura; no editar aquí.
+            // (No reconstruir la grilla dentro de CellEndEdit: causa reentrada.)
+            if (_chkPrecioPendiente != null && _chkPrecioPendiente.Checked) return;
 
             var val = _gridLineas.Rows[e.RowIndex].Cells[2].Value?.ToString() ?? "0";
             decimal.TryParse(val, System.Globalization.NumberStyles.Any,
