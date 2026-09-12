@@ -128,9 +128,7 @@ namespace SistemaGestion
             var btnOcr = new Button { Text = "↗ Importar OCR",
                 FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(21, 101, 192),
                 ForeColor = Color.White, Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
-                Cursor = Cursors.Hand, Size = new Size(150, 32),
-                Anchor = AnchorStyles.Top | AnchorStyles.Right };
-            btnOcr.Location = new Point(p.Width - 350, y - 2);
+                Cursor = Cursors.Hand, Size = new Size(150, 32) };
             btnOcr.FlatAppearance.BorderSize = 0;
             btnOcr.Click += (s, e) =>
             {
@@ -149,18 +147,25 @@ namespace SistemaGestion
                 }
             };
             p.Controls.Add(btnOcr);
-            p.Resize += (s, e) => btnOcr.Location = new Point(p.Width - 350, y - 2);
 
             // Botón nuevo gasto (manual)
             var btnNuevo = new Button { Text = "+ Nuevo egreso",
                 FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(15, 110, 86),
                 ForeColor = Color.White, Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
-                Cursor = Cursors.Hand, Size = new Size(160, 32),
-                Anchor = AnchorStyles.Top | AnchorStyles.Right };
-            btnNuevo.Location = new Point(p.Width - 180, y - 2);
+                Cursor = Cursors.Hand, Size = new Size(160, 32) };
             btnNuevo.FlatAppearance.BorderSize = 0;
             btnNuevo.Click += (s, e) => NuevoGasto();
             p.Controls.Add(btnNuevo);
+
+            // Los dos botones de la derecha se colocan juntos con un espacio fijo
+            // y se reubican al cambiar el tamaño, para que NUNCA se superpongan.
+            void PosicionarBotonesDerecha()
+            {
+                btnNuevo.Location = new Point(Math.Max(x, p.Width - btnNuevo.Width - 16), y - 2);
+                btnOcr.Location   = new Point(btnNuevo.Left - btnOcr.Width - 12,          y - 2);
+            }
+            PosicionarBotonesDerecha();
+            p.Resize += (s, e) => PosicionarBotonesDerecha();
 
             return p;
         }

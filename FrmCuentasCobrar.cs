@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
 using System.Windows.Forms;
@@ -9,6 +10,9 @@ namespace SistemaGestion
     {
         private DataGridView dgv;
         private Label lblResumen;
+        private List<CuentaCobrar> _cuentas = new List<CuentaCobrar>();
+        private string _sortCol = "Vence";   // orden inicial por vencimiento
+        private bool   _sortAsc = true;
 
         public FrmCuentasCobrar()
         {
@@ -60,6 +64,16 @@ namespace SistemaGestion
             dgv.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(235, 250, 250);
             dgv.EnableHeadersVisualStyles = false;
             dgv.DataBindingComplete += (s, e) => ColorearFilas();
+            // Ordenar al hacer clic en el encabezado de la columna
+            dgv.ColumnHeaderMouseClick += (s, e) =>
+            {
+                string col = dgv.Columns[e.ColumnIndex].Name;
+                if (col == _sortCol) _sortAsc = !_sortAsc;
+                else { _sortCol = col; _sortAsc = true; }
+                Rebind();
+            };
+            // Doble clic en una fila: abrir la factura asociada (solo lectura)
+            dgv.CellDoubleClick += (s, e) => { if (e.RowIndex >= 0) AbrirFactura(); };
 
             var footer = new Panel { Dock = DockStyle.Bottom, Height = 45, BackColor = Color.FromArgb(215, 240, 240) };
             lblResumen = new Label { AutoSize = true, Location = new Point(12, 12),
@@ -108,9 +122,35 @@ namespace SistemaGestion
             foreach (var cc in lista.Where(x => x.Estado == "Vigente" && x.FechaVence < DateTime.Today))
             { cc.Estado = "Vencida"; DatabaseService.ActualizarCuenta(cc); }
 
-            lista = DatabaseService.ObtenerCuentas();
+            _cuentas = DatabaseService.ObtenerCuentas();
+            Rebind();
+        }
+
+        // Reconstruye la grilla aplicando el orden actual (_sortCol / _sortAsc).
+        private void Rebind()
+        {
+            var orden = new List<CuentaCobrar>(_cuentas);
+            if (!string.IsNullOrEmpty(_sortCol))
+            {
+                Comparison<CuentaCobrar> cmp = _sortCol switch
+                {
+                    "Id"       => (a, b) => a.Id.CompareTo(b.Id),
+                    "Cliente"  => (a, b) => string.Compare(a.Cliente,  b.Cliente,  StringComparison.OrdinalIgnoreCase),
+                    "Concepto" => (a, b) => string.Compare(a.Concepto, b.Concepto, StringComparison.OrdinalIgnoreCase),
+                    "Monto"    => (a, b) => a.Monto.CompareTo(b.Monto),
+                    "Pagado"   => (a, b) => a.Pagado.CompareTo(b.Pagado),
+                    "Saldo"    => (a, b) => a.Saldo.CompareTo(b.Saldo),
+                    "Emision"  => (a, b) => a.FechaEmision.CompareTo(b.FechaEmision),
+                    "Vence"    => (a, b) => a.FechaVence.CompareTo(b.FechaVence),
+                    "Estado"   => (a, b) => string.Compare(a.Estado,   b.Estado,   StringComparison.OrdinalIgnoreCase),
+                    _          => (a, b) => a.Id.CompareTo(b.Id)
+                };
+                orden.Sort(cmp);
+                if (!_sortAsc) orden.Reverse();
+            }
+
             dgv.DataSource = null;
-            dgv.DataSource = lista.Select(cc => new {
+            dgv.DataSource = orden.Select(cc => new {
                 cc.Id, cc.Cliente, cc.Concepto,
                 Monto   = cc.Monto.ToString("C2"),
                 Pagado  = cc.Pagado.ToString("C2"),
@@ -120,9 +160,46 @@ namespace SistemaGestion
                 cc.Estado
             }).ToList();
 
-            decimal totalMonto = lista.Sum(x => x.Monto);
-            decimal totalSaldo = lista.Sum(x => x.Saldo);
-            lblResumen.Text = $"  Cuentas: {lista.Count}   |   Total cargado: {totalMonto:C2}   |   Saldo pendiente: {totalSaldo:C2}   |   Vencidas: {lista.Count(x => x.Estado == "Vencida")}";
+            // Orden manual: evita que el DataGridView intente ordenar por su cuenta
+            // (una List<> enlazada no soporta el ordenamiento automático).
+            foreach (DataGridViewColumn c in dgv.Columns)
+                c.SortMode = DataGridViewColumnSortMode.Programmatic;
+            if (dgv.Columns.Contains(_sortCol))
+                dgv.Columns[_sortCol].HeaderCell.SortGlyphDirection =
+                    _sortAsc ? SortOrder.Ascending : SortOrder.Descending;
+
+            decimal totalMonto = _cuentas.Sum(x => x.Monto);
+            decimal totalSaldo = _cuentas.Sum(x => x.Saldo);
+            lblResumen.Text = $"  Cuentas: {_cuentas.Count}   |   Total cargado: {totalMonto:C2}   |   Saldo pendiente: {totalSaldo:C2}   |   Vencidas: {_cuentas.Count(x => x.Estado == "Vencida")}";
+        }
+
+        // Abre la factura asociada a la cuenta seleccionada (el Concepto es "Factura <N°>").
+        private void AbrirFactura()
+        {
+            if (dgv.CurrentRow == null) return;
+            string concepto = dgv.CurrentRow.Cells["Concepto"].Value?.ToString() ?? "";
+            string num = concepto.StartsWith("Factura ", StringComparison.OrdinalIgnoreCase)
+                       ? concepto.Substring("Factura ".Length).Trim()
+                       : "";
+            if (string.IsNullOrWhiteSpace(num))
+            {
+                MessageBox.Show("Esta cuenta no está asociada a una factura.",
+                    "Sin factura", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var f = DatabaseService.ObtenerFacturas(true, true)
+                        .Find(x => string.Equals(x.NumeroF, num, StringComparison.OrdinalIgnoreCase));
+            if (f == null)
+            {
+                MessageBox.Show($"No se encontró la factura {num}.",
+                    "No encontrada", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            var lineas = DatabaseService.ObtenerDetallesFacturaPorNumero(f.NumeroF);
+            using var dlg = new DlgFactura(f, lineas, soloLectura: true);
+            dlg.ShowDialog();
         }
 
         private void ColorearFilas()

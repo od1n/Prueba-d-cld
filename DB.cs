@@ -1512,6 +1512,48 @@ namespace SistemaGestion
                     CREATE INDEX IF NOT EXISTS idx_tarprodventa ON TarifaProductoVenta(CodigoProducto, FechaDesde);";
                 cmdTarHist.ExecuteNonQuery();
 
+                // ── Defensivo/idempotente: tablas y columnas que pudieron FALTAR en
+                //    bases que alcanzaron una versión alta por otro camino (p. ej. Olimpo).
+                //    No dependen de user_version: AlterTableSafe ignora "columna duplicada"
+                //    y CREATE TABLE IF NOT EXISTS no hace nada si ya existe.
+                //    Cubre: Kardex (MovimientosInventario.TipoKardex/CostoUnitario, que
+                //    MigrarV14 solo agregaba si versión < 14) y Cuentas por Pagar
+                //    (CuentasPagar/PagosCxP, cuyo MigrarV8 no se llamaba desde ningún lado).
+                AlterTableSafe(conn, tx, "ALTER TABLE MovimientosInventario ADD COLUMN TipoKardex    TEXT DEFAULT 'PRODUCTO'");
+                AlterTableSafe(conn, tx, "ALTER TABLE MovimientosInventario ADD COLUMN CostoUnitario REAL DEFAULT 0");
+                AlterTableSafe(conn, tx, "ALTER TABLE ProductosProveedor  ADD COLUMN CostoPromedio REAL DEFAULT 0");
+                var cmdDefensivo = conn.CreateCommand(); cmdDefensivo.Transaction = tx;
+                cmdDefensivo.CommandText = @"
+                    CREATE INDEX IF NOT EXISTS idx_mov_tipokardex ON MovimientosInventario(TipoKardex);
+                    CREATE INDEX IF NOT EXISTS idx_mov_tipo_fecha ON MovimientosInventario(TipoKardex, FechaHora);
+                    UPDATE MovimientosInventario SET TipoKardex='PRODUCTO' WHERE TipoKardex IS NULL OR TipoKardex='';
+
+                    CREATE TABLE IF NOT EXISTS CuentasPagar (
+                        Id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                        CodigoProveedor TEXT,
+                        Proveedor       TEXT,
+                        Concepto        TEXT NOT NULL,
+                        NumFactura      TEXT,
+                        Monto           REAL DEFAULT 0,
+                        Pagado          REAL DEFAULT 0,
+                        FechaEmision    TEXT NOT NULL,
+                        FechaVence      TEXT NOT NULL,
+                        Estado          TEXT DEFAULT 'Pendiente',
+                        Observaciones   TEXT
+                    );
+                    CREATE TABLE IF NOT EXISTS PagosCxP (
+                        Id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                        IdCuenta      INTEGER NOT NULL,
+                        Fecha         TEXT NOT NULL,
+                        Monto         REAL DEFAULT 0,
+                        FormaPago     TEXT,
+                        Referencia    TEXT,
+                        Observaciones TEXT,
+                        FOREIGN KEY(IdCuenta) REFERENCES CuentasPagar(Id)
+                    );
+                    CREATE INDEX IF NOT EXISTS IX_CuentasPagar_FechaVence ON CuentasPagar(FechaVence);";
+                cmdDefensivo.ExecuteNonQuery();
+
                 if (versionActual < 8)
                     EjecutarMigracion(conn, tx, 8, @"
                         CREATE TABLE IF NOT EXISTS ProduccionDiaria (
@@ -4241,6 +4283,35 @@ namespace SistemaGestion
                 LEFT JOIN Inventario i ON i.Codigo = df.Codigo
                 WHERE df.IdFactura = $id";
             cmd.Parameters.AddWithValue("$id", idFactura);
+            using var r = cmd.ExecuteReader();
+            while (r.Read())
+                list.Add(new LineaFactura
+                {
+                    IdFactura   = r.GetInt32(0),
+                    CodigoItem  = S(r, 1),
+                    Descripcion = S(r, 2),
+                    Cantidad    = D(r, 3),
+                    PrecioUnit  = D(r, 4),
+                    Descuento   = D(r, 5)
+                });
+            return list;
+        }
+
+        /// <summary>Detalle de una factura por su NÚMERO (une por rowid; robusto ante huecos de rowid).</summary>
+        public static List<LineaFactura> ObtenerDetallesFacturaPorNumero(string numeroF)
+        {
+            var list = new List<LineaFactura>();
+            if (string.IsNullOrWhiteSpace(numeroF)) return list;
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = @"
+                SELECT df.IdFactura, df.Codigo, COALESCE(i.Descripcion,''), df.Cantidad,
+                       CASE WHEN COALESCE(df.PrecioUnit,0) > 0 THEN df.PrecioUnit ELSE COALESCE(i.Precio,0) END, 0
+                FROM DetallesFactura df
+                JOIN Facturas f ON f.rowid = df.IdFactura
+                LEFT JOIN Inventario i ON i.Codigo = df.Codigo
+                WHERE f.NumeroF = $nf";
+            cmd.Parameters.AddWithValue("$nf", numeroF);
             using var r = cmd.ExecuteReader();
             while (r.Read())
                 list.Add(new LineaFactura
