@@ -2704,17 +2704,44 @@ namespace SistemaGestion
             string objetivo = NormalizarNombreProveedor(nombre);
             if (objetivo.Length == 0) return null;
 
-            Proveedor contiene = null;
+            Proveedor contiene = null, fuzzy = null;
+            int mejorDist = int.MaxValue;
             foreach (var p in ObtenerProveedores())
             {
                 string n = NormalizarNombreProveedor(p.Descripcion);
                 if (n.Length == 0) continue;
-                if (n == objetivo) return p;                    // match fuerte
-                // match débil: uno contiene al otro (nombre parcial)
+                if (n == objetivo) return p;                    // match exacto (normalizado)
+                // match por contención (nombre parcial)
                 if (contiene == null && (n.Contains(objetivo) || objetivo.Contains(n)))
                     contiene = p;
+                // match por similitud: tolera errores de tipeo / OCR (VALENKZNO vs VALENKZO)
+                int d = DistanciaLevenshtein(n, objetivo);
+                int umbral = Math.Max(2, Math.Max(n.Length, objetivo.Length) / 5); // ~20%
+                if (d <= umbral && d < mejorDist) { mejorDist = d; fuzzy = p; }
             }
-            return contiene;
+            return contiene ?? fuzzy;
+        }
+
+        /// <summary>Distancia de edición (Levenshtein) entre dos cadenas.</summary>
+        private static int DistanciaLevenshtein(string a, string b)
+        {
+            int n = a.Length, m = b.Length;
+            if (n == 0) return m;
+            if (m == 0) return n;
+            var prev = new int[m + 1];
+            var cur  = new int[m + 1];
+            for (int j = 0; j <= m; j++) prev[j] = j;
+            for (int i = 1; i <= n; i++)
+            {
+                cur[0] = i;
+                for (int j = 1; j <= m; j++)
+                {
+                    int costo = a[i - 1] == b[j - 1] ? 0 : 1;
+                    cur[j] = Math.Min(Math.Min(cur[j - 1] + 1, prev[j] + 1), prev[j - 1] + costo);
+                }
+                var tmp = prev; prev = cur; cur = tmp;
+            }
+            return prev[m];
         }
 
         // Sufijos / ruido de forma jurídica que se ignoran al comparar nombres.

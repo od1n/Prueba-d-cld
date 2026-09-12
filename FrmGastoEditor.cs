@@ -266,19 +266,23 @@ namespace SistemaGestion
             _gridLineas = new DataGridView
             {
                 Location = new Point(10, my), Size = new Size(620, 120),
-                ReadOnly = true, AllowUserToAddRows = false, AllowUserToResizeRows = false,
+                AllowUserToAddRows = false, AllowUserToResizeRows = false,
                 RowHeadersVisible = false, BackgroundColor = Color.White,
                 BorderStyle = BorderStyle.FixedSingle, MultiSelect = false,
                 SelectionMode = DataGridViewSelectionMode.FullRowSelect,
-                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill, Font = UITheme.Body
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill, Font = UITheme.Body,
+                EditMode = DataGridViewEditMode.EditOnEnter
             };
-            _gridLineas.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Insumo",   FillWeight = 50 });
-            _gridLineas.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Cantidad", FillWeight = 15,
+            // Solo la columna "P. Unit." es editable (para que el admin pueda
+            // teclear precios línea por línea aunque el egreso venga de OCR).
+            _gridLineas.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Insumo",   FillWeight = 50, ReadOnly = true });
+            _gridLineas.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Cantidad", FillWeight = 15, ReadOnly = true,
                 DefaultCellStyle = new DataGridViewCellStyle { Alignment = DataGridViewContentAlignment.MiddleRight } });
             _gridLineas.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "P. Unit.", FillWeight = 17,
                 DefaultCellStyle = new DataGridViewCellStyle { Alignment = DataGridViewContentAlignment.MiddleRight } });
-            _gridLineas.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Subtotal", FillWeight = 18,
+            _gridLineas.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Subtotal", FillWeight = 18, ReadOnly = true,
                 DefaultCellStyle = new DataGridViewCellStyle { Alignment = DataGridViewContentAlignment.MiddleRight } });
+            _gridLineas.CellEndEdit += GridLineas_CellEndEdit;
             _pnlMP.Controls.Add(_gridLineas);
             my += 126;
 
@@ -613,6 +617,25 @@ namespace SistemaGestion
             _numCantidad.Value = 0;
             _numPrecioUnit.Value = 0;
             RefrescarGridLineas();
+        }
+
+        // El admin edita el precio unitario directo en la grilla (columna 2).
+        private void GridLineas_CellEndEdit(object? sender, DataGridViewCellEventArgs e)
+        {
+            if (e.ColumnIndex != 2 || e.RowIndex < 0 || e.RowIndex >= _lineas.Count) return;
+            if (_chkPrecioPendiente != null && _chkPrecioPendiente.Checked) { RefrescarGridLineas(); return; }
+
+            var val = _gridLineas.Rows[e.RowIndex].Cells[2].Value?.ToString() ?? "0";
+            decimal.TryParse(val, System.Globalization.NumberStyles.Any,
+                System.Globalization.CultureInfo.CurrentCulture, out decimal pu);
+            if (pu < 0) pu = 0;
+            _lineas[e.RowIndex].PrecioUnitario = pu;
+            _gridLineas.Rows[e.RowIndex].Cells[3].Value = "$ " + _lineas[e.RowIndex].Subtotal.ToString("N2");
+
+            decimal total = 0m;
+            foreach (var l in _lineas) total += l.Subtotal;
+            _lblMontoCalc.Text = _lineas.Count + " línea(s) · Total $ " + total.ToString("N2");
+            if (_numMonto != null) _numMonto.Value = Math.Min(_numMonto.Maximum, total);
         }
 
         private void QuitarLineaSeleccionada()

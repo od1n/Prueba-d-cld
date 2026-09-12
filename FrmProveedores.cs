@@ -254,8 +254,10 @@ namespace SistemaGestion
         private DateTimePicker dtpFecha;
 
         private readonly Proveedor _original;
+        // Permite letras, números, espacios y la puntuación común de razones
+        // sociales: punto, coma, guion, &, /, apóstrofo y paréntesis (p. ej. "C.A.").
         private static readonly Regex _rxNombre =
-            new Regex(@"^[a-zA-ZáéíóúÁÉÍÓÚüÜñÑ0-9\s]+$");
+            new Regex(@"^[a-zA-ZáéíóúÁÉÍÓÚüÜñÑ0-9\s\.\,\-\&\/'()]+$");
 
         public DlgProveedor(Proveedor p, string codigoSugerido)
         {
@@ -345,7 +347,7 @@ namespace SistemaGestion
             if (string.IsNullOrWhiteSpace(nombre))
             { Warn("El nombre es obligatorio."); return; }
             if (!_rxNombre.IsMatch(nombre))
-            { Warn("El nombre solo puede contener letras, números y espacios."); return; }
+            { Warn("El nombre contiene caracteres no permitidos. Se aceptan letras, números, espacios y . , - & / ' ( )."); return; }
 
             string ciRif = txtCiRif.Text.Trim();
             if (!string.IsNullOrWhiteSpace(ciRif))
