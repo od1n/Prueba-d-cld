@@ -180,6 +180,18 @@ namespace SistemaGestion
             y += 22;
             _txtProveedor = new TextBox { Location = new Point(0, y), Size = new Size(640, 28),
                 Font = UITheme.Body, Text = _egreso.Proveedor, MaxLength = 100 };
+            // Autocompletar desde el directorio de Proveedores (si ya existe, se enlaza
+            // al guardar; si es nuevo, se pregunta si registrarlo).
+            try
+            {
+                var acProv = new AutoCompleteStringCollection();
+                acProv.AddRange(DatabaseService.ObtenerProveedores()
+                    .Select(p => p.Descripcion).Where(d => !string.IsNullOrWhiteSpace(d)).ToArray());
+                _txtProveedor.AutoCompleteMode   = AutoCompleteMode.SuggestAppend;
+                _txtProveedor.AutoCompleteSource = AutoCompleteSource.CustomSource;
+                _txtProveedor.AutoCompleteCustomSource = acProv;
+            }
+            catch { /* si falla el autocompletar, el campo sigue siendo texto libre */ }
             pnl.Controls.Add(_txtProveedor);
             y += 50;
 
@@ -653,7 +665,42 @@ namespace SistemaGestion
                 _egreso.Fecha          = _dtpFecha.Value.Date;
                 _egreso.IdCategoria    = cat!.Id;
                 _egreso.Concepto       = _txtConcepto.Text.Trim();
-                _egreso.Proveedor      = _txtProveedor.Text.Trim();
+                // ── Proveedor: enlazar al directorio o registrar si es nuevo ──────
+                string nomProv = _txtProveedor.Text.Trim();
+                _egreso.Proveedor       = nomProv;
+                _egreso.CodigoProveedor = "";
+                if (!string.IsNullOrEmpty(nomProv))
+                {
+                    var provs = DatabaseService.ObtenerProveedores();
+                    var existente = provs.FirstOrDefault(p =>
+                        string.Equals(p.Descripcion?.Trim(), nomProv, StringComparison.OrdinalIgnoreCase));
+                    if (existente != null)
+                    {
+                        _egreso.CodigoProveedor = existente.Codigo;
+                        _egreso.Proveedor       = existente.Descripcion;   // normaliza el nombre
+                    }
+                    else
+                    {
+                        var resp = MessageBox.Show(this,
+                            "El proveedor \"" + nomProv + "\" no está registrado en el directorio.\n\n" +
+                            "¿Deseas registrarlo ahora? (podrás completar sus datos luego en Proveedores)",
+                            "Proveedor nuevo", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+                        if (resp == DialogResult.Cancel) return;   // volver al formulario
+                        if (resp == DialogResult.Yes)
+                        {
+                            var nuevo = new Proveedor
+                            {
+                                Codigo = DatabaseService.ProximoCodigoProveedor(),
+                                Descripcion = nomProv, FechaInicio = DateTime.Today,
+                                Representante = "", Direccion = "", Telefono1 = "", Telefono2 = "",
+                                Fax1 = "", Fax2 = "", CiRif = "", Nit = "", Tipo = "", Observaciones = ""
+                            };
+                            DatabaseService.InsertarProveedor(nuevo);
+                            _egreso.CodigoProveedor = nuevo.Codigo;
+                        }
+                        // Si respondió No: se guarda el nombre como texto libre, sin enlazar.
+                    }
+                }
                 _egreso.MonedaOriginal = _cmbMoneda.SelectedIndex == 1 ? "BS" : "USD";
                 _egreso.TipoTasa       = TipoTasaSeleccionado();
                 _egreso.TasaUsada      = _numTasa.Value;

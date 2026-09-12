@@ -37,6 +37,7 @@ namespace SistemaGestion
         public string   NombreCategoria { get; set; } = "";  // join
         public string   Concepto        { get; set; } = "";
         public string   Proveedor       { get; set; } = "";
+        public string   CodigoProveedor { get; set; } = "";  // enlace al directorio de Proveedores
         // Materia prima (opcional)
         public int?     IdInsumo        { get; set; }
         public decimal  Cantidad        { get; set; }
@@ -185,13 +186,13 @@ namespace SistemaGestion
             if (esNuevo)
             {
                 cmd.CommandText = @"INSERT INTO Gastos
-                    (Fecha, IdCategoria, Concepto, Proveedor, IdInsumo, Cantidad,
+                    (Fecha, IdCategoria, Concepto, Proveedor, CodigoProveedor, IdInsumo, Cantidad,
                      MonedaOriginal, TipoTasa, TasaUsada, IdTasaCambio,
                      MontoOriginal, MontoUSD, MontoBs, PagadoUSD,
                      Estado, FechaVencimiento, FechaPago, RutaComprobante,
                      Usuario, FechaRegistro, Observaciones)
                     VALUES
-                    ($f, $cat, $con, $prov, $iins, $cant,
+                    ($f, $cat, $con, $prov, $cprov, $iins, $cant,
                      $mon, $tt, $tu, $idt,
                      $mo, $musd, $mbs, $pag,
                      $es, $fv, $fp, $rc,
@@ -201,7 +202,7 @@ namespace SistemaGestion
             else
             {
                 cmd.CommandText = @"UPDATE Gastos SET
-                    Fecha=$f, IdCategoria=$cat, Concepto=$con, Proveedor=$prov,
+                    Fecha=$f, IdCategoria=$cat, Concepto=$con, Proveedor=$prov, CodigoProveedor=$cprov,
                     IdInsumo=$iins, Cantidad=$cant,
                     MonedaOriginal=$mon, TipoTasa=$tt, TasaUsada=$tu, IdTasaCambio=$idt,
                     MontoOriginal=$mo, MontoUSD=$musd, MontoBs=$mbs, PagadoUSD=$pag,
@@ -215,6 +216,7 @@ namespace SistemaGestion
             cmd.Parameters.AddWithValue("$cat", g.IdCategoria);
             cmd.Parameters.AddWithValue("$con", g.Concepto);
             cmd.Parameters.AddWithValue("$prov",g.Proveedor ?? "");
+            cmd.Parameters.AddWithValue("$cprov",g.CodigoProveedor ?? "");
             cmd.Parameters.AddWithValue("$iins",(object?)g.IdInsumo ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$cant",(double)g.Cantidad);
             cmd.Parameters.AddWithValue("$mon", g.MonedaOriginal);
@@ -287,6 +289,7 @@ namespace SistemaGestion
                 SincronizarCxPDesdeEgreso(
                     idEgreso: idResultante,
                     proveedor: g.Proveedor ?? "",
+                    codigoProveedor: g.CodigoProveedor ?? "",
                     concepto:  g.Concepto,
                     numRef:    "Egreso #" + idResultante,
                     montoUSD:  g.MontoUSD,
@@ -393,7 +396,7 @@ namespace SistemaGestion
                        g.Estado, g.FechaVencimiento, g.FechaPago,
                        COALESCE(g.RutaComprobante,''),
                        g.Usuario, g.FechaRegistro, COALESCE(g.Observaciones,''),
-                       COALESCE(g.PagadoUSD,0)
+                       COALESCE(g.PagadoUSD,0), COALESCE(g.CodigoProveedor,'')
                 FROM Gastos g
                 LEFT JOIN CategoriasGasto c ON c.Id = g.IdCategoria
                 WHERE g.Fecha >= $d AND g.Fecha <= $h ");
@@ -433,7 +436,7 @@ namespace SistemaGestion
                        g.Estado, g.FechaVencimiento, g.FechaPago,
                        COALESCE(g.RutaComprobante,''),
                        g.Usuario, g.FechaRegistro, COALESCE(g.Observaciones,''),
-                       COALESCE(g.PagadoUSD,0)
+                       COALESCE(g.PagadoUSD,0), COALESCE(g.CodigoProveedor,'')
                 FROM Gastos g
                 LEFT JOIN CategoriasGasto c ON c.Id = g.IdCategoria
                 WHERE g.Estado = 'Pendiente'
@@ -604,7 +607,8 @@ namespace SistemaGestion
             Usuario         = r.GetString(19),
             FechaRegistro   = DateTime.TryParse(r.GetString(20), out var fr) ? fr : DateTime.MinValue,
             Observaciones   = r.GetString(21),
-            PagadoUSD       = r.FieldCount > 22 && !r.IsDBNull(22) ? (decimal)r.GetDouble(22) : 0m
+            PagadoUSD       = r.FieldCount > 22 && !r.IsDBNull(22) ? (decimal)r.GetDouble(22) : 0m,
+            CodigoProveedor = r.FieldCount > 23 && !r.IsDBNull(23) ? r.GetString(23) : ""
         };
     }
 }

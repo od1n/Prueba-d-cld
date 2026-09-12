@@ -1118,7 +1118,9 @@ namespace SistemaGestion
                 "ALTER TABLE ProductosProveedor  ADD COLUMN CostoPromedio REAL DEFAULT 0",
                 // Egreso a crédito (pago parcial → Cuenta por Pagar por el saldo)
                 "ALTER TABLE Gastos       ADD COLUMN PagadoUSD REAL DEFAULT 0",
-                "ALTER TABLE CuentasPagar ADD COLUMN IdEgreso  INTEGER" })
+                "ALTER TABLE CuentasPagar ADD COLUMN IdEgreso  INTEGER",
+                // Enlace del egreso al directorio de Proveedores
+                "ALTER TABLE Gastos       ADD COLUMN CodigoProveedor TEXT" })
             {
                 try { using var fix = c.CreateCommand(); fix.CommandText = sqlFix; fix.ExecuteNonQuery(); }
                 catch (Exception exFix)
@@ -2662,6 +2664,19 @@ namespace SistemaGestion
                     FechaInicio = r.IsDBNull(10) ? DateTime.Today : DateTime.Parse(r.GetString(10)),
                     CiRif = S(r,11), Nit = S(r,12), Tipo = S(r,13), Observaciones = S(r,14) });
             return list;
+        }
+
+        /// <summary>Próximo código numérico de proveedor (máximo + 1, con 3 dígitos).</summary>
+        public static string ProximoCodigoProveedor()
+        {
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = "SELECT Codigo FROM Proveedores";
+            int max = 0;
+            using (var r = cmd.ExecuteReader())
+                while (r.Read())
+                    if (int.TryParse(r.GetString(0), out int n) && n > max) max = n;
+            return (max + 1).ToString("D3");
         }
 
         public static void InsertarProveedor(Proveedor p)

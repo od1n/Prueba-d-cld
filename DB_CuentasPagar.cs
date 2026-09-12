@@ -133,7 +133,8 @@ namespace SistemaGestion
         /// </summary>
         public static void SincronizarCxPDesdeEgreso(
             int idEgreso, string proveedor, string concepto, string numRef,
-            decimal montoUSD, decimal pagadoUSD, DateTime emision, DateTime vence)
+            decimal montoUSD, decimal pagadoUSD, DateTime emision, DateTime vence,
+            string codigoProveedor = "")
         {
             if (idEgreso <= 0) return;
             decimal saldo = montoUSD - pagadoUSD;
@@ -164,9 +165,10 @@ namespace SistemaGestion
             {
                 var up = conn.CreateCommand();
                 up.CommandText = @"UPDATE CuentasPagar SET
-                    Proveedor=$pr, Concepto=$co, NumFactura=$nf,
+                    CodigoProveedor=$cp, Proveedor=$pr, Concepto=$co, NumFactura=$nf,
                     Monto=$mo, Pagado=$pa, FechaEmision=$fe, FechaVence=$fv, Estado=$es
                     WHERE Id=$id";
+                up.Parameters.AddWithValue("$cp", codigoProveedor ?? "");
                 up.Parameters.AddWithValue("$pr", proveedor ?? "");
                 up.Parameters.AddWithValue("$co", concepto ?? "");
                 up.Parameters.AddWithValue("$nf", numRef ?? "");
@@ -184,7 +186,8 @@ namespace SistemaGestion
                 ins.CommandText = @"INSERT INTO CuentasPagar
                     (CodigoProveedor,Proveedor,Concepto,NumFactura,Monto,Pagado,
                      FechaEmision,FechaVence,Estado,Observaciones,IdEgreso)
-                    VALUES('',$pr,$co,$nf,$mo,$pa,$fe,$fv,$es,$ob,$ie)";
+                    VALUES($cp,$pr,$co,$nf,$mo,$pa,$fe,$fv,$es,$ob,$ie)";
+                ins.Parameters.AddWithValue("$cp", codigoProveedor ?? "");
                 ins.Parameters.AddWithValue("$pr", proveedor ?? "");
                 ins.Parameters.AddWithValue("$co", concepto ?? "");
                 ins.Parameters.AddWithValue("$nf", numRef ?? "");
