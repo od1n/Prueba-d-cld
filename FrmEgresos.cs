@@ -589,6 +589,33 @@ namespace SistemaGestion
                 }
 
                 var eg = ConstruirEgresoDesdeOcr(r, ruta);
+
+                // Emparejar las líneas del OCR con insumos del catálogo (6200B, 2706, …).
+                var matches = new List<(OcrLinea Linea, ProductoProveedor Insumo)>();
+                foreach (var it in r.Items)
+                {
+                    var ins = DatabaseService.BuscarInsumoOcr(it.Descripcion);
+                    if (ins != null) matches.Add((it, ins));
+                }
+                if (matches.Count > 0)
+                {
+                    // El egreso de escritorio maneja UN insumo: se enlaza el primero
+                    // y se selecciona una categoría de materia prima para mostrar el panel.
+                    var catMP = DatabaseService.ObtenerCategoriasGasto().FirstOrDefault(c => c.EsMateriaPrima);
+                    if (catMP != null) eg.IdCategoria = catMP.Id;
+                    eg.IdInsumo = matches[0].Insumo.Id;
+                    eg.Cantidad = matches[0].Linea.Cantidad;
+
+                    if (matches.Count > 1)
+                        MessageBox.Show(this,
+                            "La nota trae " + matches.Count + " insumos reconocidos:\n" +
+                            string.Join("\n", matches.Select(m =>
+                                " • " + m.Insumo.Descripcion + "  x" + m.Linea.Cantidad.ToString("0.##"))) +
+                            "\n\nEl egreso de escritorio maneja un insumo, así que se enlazó el primero. " +
+                            "Para cargar los demás, registra otro egreso o usa el portal web (admite varias líneas).",
+                            "Varios insumos detectados", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+
                 using var f = new FrmGastoEditor(eg);
                 if (f.ShowDialog(this) == DialogResult.OK) RecargarTab();
             }

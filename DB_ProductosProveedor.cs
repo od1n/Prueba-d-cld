@@ -71,6 +71,69 @@ namespace SistemaGestion
             return list;
         }
 
+        /// <summary>
+        /// Empareja una descripción de OCR (p. ej. "POLIETILENO DE ALTA DENSIDAD
+        /// (2706) MARCA SNETOR HD-4454") contra el catálogo de insumos, buscando
+        /// que el CÓDIGO o un token distintivo del insumo (6200B, 2706, …) aparezca
+        /// dentro del texto. Devuelve el insumo con la coincidencia más larga
+        /// (la más específica) o null si no hay match.
+        /// </summary>
+        public static ProductoProveedor BuscarInsumoOcr(string descripcionOcr)
+        {
+            if (string.IsNullOrWhiteSpace(descripcionOcr)) return null;
+            string objetivo = SoloAlnumMayus(descripcionOcr);
+            if (objetivo.Length == 0) return null;
+
+            ProductoProveedor mejor = null;
+            int mejorLen = 0;
+            foreach (var pp in ObtenerProductosProveedor(soloActivos: true))
+            {
+                foreach (var clave in ClavesInsumo(pp))
+                {
+                    if (clave.Length >= 4 && clave.Length > mejorLen && objetivo.Contains(clave))
+                    {
+                        mejor = pp; mejorLen = clave.Length;
+                    }
+                }
+            }
+            return mejor;
+        }
+
+        // Claves distintivas de un insumo para el match de OCR: su código interno,
+        // su código de proveedor y los tokens de la descripción que contengan al
+        // menos un dígito (los códigos de resina tipo 6200B / 2706).
+        private static IEnumerable<string> ClavesInsumo(ProductoProveedor pp)
+        {
+            var claves = new List<string>();
+            void AddCodigo(string s)
+            {
+                var k = SoloAlnumMayus(s);
+                if (k.Length >= 4) claves.Add(k);
+            }
+            AddCodigo(pp.CodigoInterno);
+            AddCodigo(pp.CodigoProveedor);
+            if (!string.IsNullOrEmpty(pp.Descripcion))
+            {
+                foreach (var tok in System.Text.RegularExpressions.Regex.Split(pp.Descripcion, "[^A-Za-z0-9]+"))
+                {
+                    var k = tok.ToUpperInvariant();
+                    bool tieneDigito = false;
+                    foreach (var ch in k) if (char.IsDigit(ch)) { tieneDigito = true; break; }
+                    if (k.Length >= 4 && tieneDigito) claves.Add(k);
+                }
+            }
+            return claves;
+        }
+
+        private static string SoloAlnumMayus(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return "";
+            var sb = new System.Text.StringBuilder(s.Length);
+            foreach (var c in s)
+                if (char.IsLetterOrDigit(c)) sb.Append(char.ToUpperInvariant(c));
+            return sb.ToString();
+        }
+
         public static ProductoProveedor ObtenerProductoProveedorPorId(int id)
         {
             using var c = Conn();

@@ -114,7 +114,9 @@ builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
 // HttpClient para proxy hacia el digitalizador Python (:8080)
 builder.Services.AddHttpClient("digitalizador", c =>
 {
-    c.Timeout = TimeSpan.FromSeconds(120); // extracción IA puede tardar
+    // La extracción IA puede tardar: modelo de visión + (si es PDF) rasterizado.
+    // El modelo cloud (gemma) sobre un PDF puede pasar de 2 min, por eso 5 min.
+    c.Timeout = TimeSpan.FromSeconds(300);
 });
 
 // HttpClient para proxy hacia Anthropic (asistente de ayuda)
