@@ -178,19 +178,30 @@ function renderChipVision() {
 }
 
 // ── Paso 1: carga y OCR ──────────────────────────────────────────────────────
+// Ícono PDF (data-URI) para previsualizar documentos PDF, que no se pueden
+// mostrar en una etiqueta <img> como las imágenes.
+const ICONO_PDF = 'data:image/svg+xml;utf8,' + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="150" viewBox="0 0 120 150">' +
+    '<rect x="4" y="4" width="112" height="142" rx="8" fill="#f4f4f5" stroke="#c0392b" stroke-width="3"/>' +
+    '<text x="60" y="88" font-family="Segoe UI, Arial" font-size="30" font-weight="bold" fill="#c0392b" text-anchor="middle">PDF</text>' +
+    '</svg>');
+
 function seleccionarImagen(file) {
-    if (!file || !file.type.startsWith('image/')) {
-        mostrarError(error1, 'El archivo debe ser una imagen (JPG, PNG, WEBP).');
+    const esPdf = file && (file.type === 'application/pdf' || /\.pdf$/i.test(file.name || ''));
+    const esImg = file && file.type.startsWith('image/');
+    if (!file || (!esImg && !esPdf)) {
+        mostrarError(error1, 'El archivo debe ser una imagen (JPG, PNG, WEBP) o un PDF.');
         return;
     }
-    if (file.size > 5 * 1024 * 1024) {
-        mostrarError(error1, 'La imagen supera el límite de 5 MB.');
+    if (file.size > 20 * 1024 * 1024) {
+        mostrarError(error1, 'El archivo supera el límite de 20 MB.');
         return;
     }
     ocultarError(error1);
     imagenFile = file;
-    const url = URL.createObjectURL(file);
-    previewImg.src = url;
+    // Los PDF no se pueden mostrar en <img>: usamos un ícono.
+    previewImg.src = esPdf ? ICONO_PDF : URL.createObjectURL(file);
+    previewImg.alt = esPdf ? (file.name || 'Documento PDF') : 'Vista previa';
     dropContent.style.display = 'none';
     previewWrap.style.display = 'block';
     btnExtraer.disabled = false;

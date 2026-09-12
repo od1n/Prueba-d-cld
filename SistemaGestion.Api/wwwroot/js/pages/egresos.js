@@ -32,6 +32,12 @@ async function init() {
         if (e.target === document.getElementById('modalOverlay')) cerrarModal();
     });
     document.getElementById('btnCerrarModal').addEventListener('click', cerrarModal);
+
+    // Cerrar modal completar precio
+    document.getElementById('cpOverlay').addEventListener('click', e => {
+        if (e.target === document.getElementById('cpOverlay')) cerrarCompletar();
+    });
+    document.getElementById('cpCerrar').addEventListener('click', cerrarCompletar);
 }
 
 // ── HTML base ─────────────────────────────────────────────────────────────────
@@ -74,6 +80,9 @@ function buildShell() {
         <div class="el-kpi"><div class="el-kpi-label">Total Bs</div><div class="el-kpi-val" id="kpiBs">—</div></div>
       </div>
 
+      <!-- Egresos con precio pendiente (nota de entrega sin montos) -->
+      <div id="pendientesWrap" style="margin-bottom:1rem"></div>
+
       <!-- Análisis por categoría -->
       <div class="el-tabla-wrap" style="margin-bottom:1rem;padding:1rem" id="analisisWrap">
         <div class="el-kpi-label" style="margin-bottom:.8rem">Gasto por categoría</div>
@@ -99,6 +108,17 @@ function buildShell() {
         <div class="el-modal-body" id="modalBody">
           <div class="el-empty"><div class="spinner" style="margin:0 auto 8px"></div>Cargando…</div>
         </div>
+      </div>
+    </div>
+
+    <!-- Modal completar precio -->
+    <div class="el-modal-overlay" id="cpOverlay" style="display:none">
+      <div class="el-modal">
+        <div class="el-modal-header">
+          <h3 id="cpTitulo">Completar precio</h3>
+          <button class="el-modal-close" id="cpCerrar">✕</button>
+        </div>
+        <div class="el-modal-body" id="cpBody"></div>
       </div>
     </div>`;
 }
@@ -137,7 +157,8 @@ async function cargar() {
     try {
         const [lista] = await Promise.all([
             apiGet(`/api/egresos?${params}`),
-            cargarAnalisis(desde, hasta)
+            cargarAnalisis(desde, hasta),
+            cargarPendientes()
         ]);
         listaEgresos = lista;
         renderTabla();
@@ -304,6 +325,182 @@ function buildDetalle(d) {
 
 function cerrarModal() {
     document.getElementById('modalOverlay').style.display = 'none';
+}
+
+// ── Precio pendiente (nota de entrega sin montos) ──────────────────────────────
+async function cargarPendientes() {
+    const wrap = document.getElementById('pendientesWrap');
+    if (!wrap) return;
+    try {
+        const lista = await apiGet('/api/egresos/precio-pendiente');
+        if (!lista || lista.length === 0) { wrap.innerHTML = ''; return; }
+        const filas = lista.map(e => `
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:.6rem;
+                        padding:.5rem .7rem;border-top:1px solid rgba(0,0,0,.06)">
+              <div style="min-width:0">
+                <div style="font-weight:600">${esc(e.concepto)}</div>
+                <div style="font-size:.8rem;color:var(--texto-dim)">
+                  ${e.fecha} · ${esc(e.proveedor || 'sin proveedor')}${e.cantidad > 0 ? ' · Cant: ' + fmt2(e.cantidad) : ''}
+                </div>
+              </div>
+              <button class="btn btn-ghost cp-btn" data-id="${e.id}">Completar precio →</button>
+            </div>`).join('');
+        wrap.innerHTML = `
+          <div class="el-tabla-wrap" style="padding:.7rem .9rem;border-left:4px solid #d29922">
+            <div style="font-weight:700;color:#d29922">⏳ ${lista.length} egreso(s) con precio pendiente</div>
+            <div style="font-size:.82rem;color:var(--texto-dim);margin-bottom:.3rem">
+              Notas de entrega registradas sin montos. Completá el precio cuando llegue la factura.
+            </div>
+            ${filas}
+          </div>`;
+        wrap.querySelectorAll('.cp-btn').forEach(b =>
+            b.addEventListener('click', () => abrirCompletar(parseInt(b.dataset.id))));
+    } catch { wrap.innerHTML = ''; }
+}
+
+async function abrirCompletar(id) {
+    const ov = document.getElementById('cpOverlay');
+    const body = document.getElementById('cpBody');
+    document.getElementById('cpTitulo').textContent = `Completar precio — Egreso #${id}`;
+    ov.style.display = 'flex';
+    body.innerHTML = '<div class="el-empty"><div class="spinner" style="margin:0 auto 8px"></div>Cargando…</div>';
+
+    let d;
+    try { d = await apiGet(`/api/egresos/${id}`); }
+    catch (ex) { body.innerHTML = `<div class="el-empty" style="color:var(--rojo)">⚠ ${esc(ex.message)}</div>`; return; }
+
+    const lineas = (d.detalles || []).map((l, i) => `
+        <tr>
+          <td>${esc(l.descripcion)}</td>
+          <td style="text-align:right">${fmt2(l.cantidad)}</td>
+          <td style="text-align:right">
+            <input type="number" min="0" step="0.0001" class="cp-pu" data-i="${i}"
+                   data-art="${l.idArticulo || ''}" data-desc="${esc(l.descripcion)}"
+                   data-cant="${l.cantidad}" value="${l.precioUnitario || 0}"
+                   style="width:110px;text-align:right">
+          </td>
+          <td style="text-align:right" class="cp-sub" data-i="${i}">$0.00</td>
+        </tr>`).join('');
+
+    body.innerHTML = `
+      <p style="font-size:.85rem;color:var(--texto-dim)">
+        Ingresá el precio unitario en USD de cada línea. El costo del Kardex se ajusta con estos valores.
+      </p>
+      <table class="el-det-lineas">
+        <thead><tr>
+          <th>Descripción</th><th style="text-align:right">Cant.</th>
+          <th style="text-align:right">P. Unit (USD)</th><th style="text-align:right">Subtotal</th>
+        </tr></thead>
+        <tbody>${lineas || '<tr><td colspan="4" style="color:var(--texto-dim)">Sin líneas de detalle.</td></tr>'}</tbody>
+      </table>
+
+      <div class="el-det-grid" style="margin-top:.8rem">
+        <div class="el-det-field"><label>Base (USD)</label><span id="cpBase">$0.00</span></div>
+        <div class="el-det-field"><label>IVA %</label><input type="number" id="cpIva" min="0" step="0.01" value="16"></div>
+        <div class="el-det-field"><label>Total (USD)</label><span id="cpTotal" style="color:var(--cyan);font-weight:700">$0.00</span></div>
+        <div class="el-det-field"><label>Tasa BCV (opcional)</label><input type="number" id="cpTasa" min="0" step="0.01" value="${d.tasaBCV || 0}"></div>
+      </div>
+
+      <div class="el-det-field" style="margin-top:.4rem">
+        <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer">
+          <input type="checkbox" id="cpCredito" style="width:auto"> A crédito (abono parcial)
+        </label>
+      </div>
+      <div class="el-det-grid" id="cpZonaCredito" style="display:none">
+        <div class="el-det-field"><label>Abonado (USD)</label><input type="number" id="cpAbonado" min="0" step="0.01" value="0"></div>
+        <div class="el-det-field"><label>Vence</label><input type="date" id="cpVence"></div>
+      </div>
+
+      <div id="cpError" style="color:var(--rojo);font-size:.85rem;margin-top:.5rem;display:none"></div>
+      <div style="display:flex;gap:.6rem;justify-content:flex-end;margin-top:1rem">
+        <button class="btn btn-ghost" id="cpCancelar">Cancelar</button>
+        <button class="btn" id="cpGuardar" data-id="${id}">Completar</button>
+      </div>`;
+
+    const recalc = () => {
+        let base = 0;
+        body.querySelectorAll('.cp-pu').forEach(inp => {
+            const cant = parseFloat(inp.dataset.cant) || 0;
+            const pu = parseFloat(inp.value) || 0;
+            const sub = cant * pu;
+            base += sub;
+            body.querySelector(`.cp-sub[data-i="${inp.dataset.i}"]`).textContent = '$' + fmt2(sub);
+        });
+        const iva = parseFloat(document.getElementById('cpIva').value) || 0;
+        const total = base * (1 + iva / 100);
+        document.getElementById('cpBase').textContent = '$' + fmt2(base);
+        document.getElementById('cpTotal').textContent = '$' + fmt2(total);
+    };
+    body.querySelectorAll('.cp-pu').forEach(inp => inp.addEventListener('input', recalc));
+    document.getElementById('cpIva').addEventListener('input', recalc);
+    document.getElementById('cpCredito').addEventListener('change', e =>
+        document.getElementById('cpZonaCredito').style.display = e.target.checked ? 'grid' : 'none');
+    document.getElementById('cpCancelar').addEventListener('click', cerrarCompletar);
+    document.getElementById('cpGuardar').addEventListener('click', () => guardarCompletar(id, body));
+    recalc();
+}
+
+async function guardarCompletar(id, body) {
+    const err = document.getElementById('cpError');
+    err.style.display = 'none';
+
+    const detalles = [];
+    let base = 0;
+    body.querySelectorAll('.cp-pu').forEach(inp => {
+        const cant = parseFloat(inp.dataset.cant) || 0;
+        const pu = parseFloat(inp.value) || 0;
+        base += cant * pu;
+        detalles.push({
+            idArticulo: inp.dataset.art ? parseInt(inp.dataset.art) : null,
+            descripcion: inp.dataset.desc,
+            cantidad: cant,
+            precioUnitario: pu,
+            subtotal: cant * pu
+        });
+    });
+
+    if (base <= 0) { err.textContent = 'Ingresá el precio de al menos una línea.'; err.style.display = 'block'; return; }
+
+    const iva = parseFloat(document.getElementById('cpIva').value) || 0;
+    const totalUSD = base * (1 + iva / 100);
+    const tasa = parseFloat(document.getElementById('cpTasa').value) || 0;
+    const aCredito = document.getElementById('cpCredito').checked;
+    const abonado = aCredito ? (parseFloat(document.getElementById('cpAbonado').value) || 0) : 0;
+    const vence = document.getElementById('cpVence') ? document.getElementById('cpVence').value : '';
+
+    const payload = {
+        montoUSD: totalUSD,
+        montoBs: tasa > 0 ? totalUSD * tasa : 0,
+        tasaBCV: tasa,
+        aCredito: aCredito,
+        pagadoUSD: abonado,
+        fechaVencimiento: aCredito && vence ? vence : null,
+        detalles: detalles
+    };
+
+    const btn = document.getElementById('cpGuardar');
+    btn.disabled = true; btn.textContent = 'Guardando…';
+    try {
+        const resp = await fetch(`/api/egresos/${id}/completar-precio`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify(payload)
+        });
+        if (!resp.ok) {
+            const e = await resp.json().catch(() => ({}));
+            throw new Error(e.error || e.detail || `Error ${resp.status}`);
+        }
+        cerrarCompletar();
+        cargar();
+    } catch (ex) {
+        err.textContent = ex.message; err.style.display = 'block';
+        btn.disabled = false; btn.textContent = 'Completar';
+    }
+}
+
+function cerrarCompletar() {
+    document.getElementById('cpOverlay').style.display = 'none';
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

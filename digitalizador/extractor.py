@@ -170,6 +170,55 @@ Responde ÚNICAMENTE con el JSON, sin explicaciones ni bloques de código:
 def _a_base64(imagen_bytes: bytes) -> str:
     return base64.b64encode(imagen_bytes).decode("utf-8")
 
+
+def _pdf_a_png(pdf_bytes: bytes, max_paginas: int = 4, dpi: int = 170) -> bytes:
+    """Rasteriza un PDF a una sola imagen PNG. Si tiene varias páginas las apila
+    verticalmente (hasta max_paginas) para que el modelo de visión vea todas las
+    líneas. Requiere PyMuPDF (fitz) y Pillow."""
+    import io
+    import fitz  # PyMuPDF
+    from PIL import Image
+
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    zoom = dpi / 72.0
+    mat = fitz.Matrix(zoom, zoom)
+    imgs = []
+    try:
+        for i, page in enumerate(doc):
+            if i >= max_paginas:
+                break
+            pix = page.get_pixmap(matrix=mat)
+            imgs.append(Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGB"))
+    finally:
+        doc.close()
+
+    if not imgs:
+        raise ValueError("El PDF no contiene páginas legibles.")
+
+    if len(imgs) == 1:
+        salida = io.BytesIO()
+        imgs[0].save(salida, format="PNG")
+        return salida.getvalue()
+
+    ancho = max(im.width for im in imgs)
+    alto = sum(im.height for im in imgs)
+    lienzo = Image.new("RGB", (ancho, alto), "white")
+    y = 0
+    for im in imgs:
+        lienzo.paste(im, (0, y))
+        y += im.height
+    salida = io.BytesIO()
+    lienzo.save(salida, format="PNG")
+    return salida.getvalue()
+
+
+def _normalizar_a_imagen(datos: bytes) -> bytes:
+    """Convierte PDF → PNG (rasterizado). Las imágenes se devuelven sin cambios.
+    Así el resto del pipeline (Ollama/Groq/Anthropic) siempre recibe una imagen."""
+    if datos[:4] == b"%PDF":
+        return _pdf_a_png(datos)
+    return datos
+
 def _limpiar_json(texto: str) -> str:
     """Extrae el primer objeto JSON de la respuesta del modelo."""
     texto = re.sub(r"```(?:json)?", "", texto).strip()
@@ -274,6 +323,8 @@ def _extraer_anthropic(imagen_bytes: bytes, prompt: str) -> dict:
 
 def _extraer(imagen_bytes: bytes, prompt: str, backend_override: str = "") -> dict:
     """Extrae datos usando el backend configurado o el indicado en backend_override."""
+    # Acepta imagen o PDF: si es PDF se rasteriza a PNG antes de enviarlo al modelo.
+    imagen_bytes = _normalizar_a_imagen(imagen_bytes)
     backend = (backend_override.lower().strip() or BACKEND)
     if backend == "groq":
         return _extraer_groq(imagen_bytes, prompt)
