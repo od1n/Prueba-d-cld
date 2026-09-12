@@ -460,23 +460,123 @@ namespace SistemaGestion
             }
         }
 
-        public static void AnularEgreso(int id, string motivo)
+        // Anula un egreso y REVIERTE sus efectos colaterales:
+        //   1) Revierte cada entrada de materia prima al Kardex (salida de reversa),
+        //      usando los movimientos reales (Referencia = "Gasto#<id>"). Si un
+        //      insumo ya no tiene stock suficiente (ya se consumió), se omite esa
+        //      reversa y se avisa, pero la anulación sí se completa.
+        //   2) Elimina la Cuenta por Pagar ligada al egreso (si existe).
+        //   3) Marca el egreso como 'Anulado'.
+        // Devuelve un texto con las advertencias (vacío si todo salió limpio).
+        public static string AnularEgreso(int id, string motivo)
         {
             string rol = Sesion.RolesEfectivos;
             if (!Sesion.EsAdmin && !PermisosRol.Permite(rol, "EgresosAnular"))
                 throw new UnauthorizedAccessException(
                     "Tu rol no tiene permiso para anular egresos.");
 
-            using var c = Conn();
-            var cmd = c.CreateCommand();
-            cmd.CommandText = "UPDATE Gastos SET Estado='Anulado', " +
-                              "Observaciones=COALESCE(Observaciones,'') || ' | ANULADO: ' || $m " +
-                              "WHERE Id=$id";
-            cmd.Parameters.AddWithValue("$id", id);
-            cmd.Parameters.AddWithValue("$m",  motivo ?? "");
-            cmd.ExecuteNonQuery();
+            // ── Validar estado actual ───────────────────────────────────────
+            string? estadoActual = null;
+            using (var cc = Conn())
+            {
+                var q = cc.CreateCommand();
+                q.CommandText = "SELECT Estado FROM Gastos WHERE Id=$id";
+                q.Parameters.AddWithValue("$id", id);
+                var val = q.ExecuteScalar();
+                if (val == null) throw new Exception("El egreso #" + id + " no existe.");
+                estadoActual = val?.ToString();
+            }
+            if (string.Equals(estadoActual, "Anulado", StringComparison.OrdinalIgnoreCase))
+                throw new Exception("El egreso #" + id + " ya está anulado.");
+
+            var avisos = new List<string>();
+
+            // ── 1) Reversa de Kardex (materia prima) ────────────────────────
+            //    Se leen las ENTRADAS reales de este egreso y se genera una
+            //    SALIDA de reversa por cada una. Si no hay entradas (p. ej. un
+            //    egreso viejo cuyo Kardex nunca se creó), no hace nada.
+            var entradas = new List<(string codigo, decimal cantidad)>();
+            try
+            {
+                using var cc = Conn();
+                var q = cc.CreateCommand();
+                q.CommandText =
+                    "SELECT CodigoProducto, Cantidad FROM MovimientosInventario " +
+                    "WHERE Referencia=$ref AND TipoKardex='MATERIA_PRIMA' " +
+                    "AND TipoMovimiento='ENTRADA'";
+                q.Parameters.AddWithValue("$ref", "Gasto#" + id);
+                using var r = q.ExecuteReader();
+                while (r.Read())
+                {
+                    string cod = r.IsDBNull(0) ? "" : r.GetString(0);
+                    decimal cant = r.IsDBNull(1) ? 0m : (decimal)r.GetDouble(1);
+                    if (!string.IsNullOrWhiteSpace(cod) && cant > 0)
+                        entradas.Add((cod, cant));
+                }
+            }
+            catch (Exception ex)
+            {
+                avisos.Add("No se pudieron leer los movimientos de Kardex: " + ex.Message);
+            }
+
+            foreach (var (codigo, cantidad) in entradas)
+            {
+                try
+                {
+                    RegistrarSalidaInsumo(
+                        codigoInsumo: codigo,
+                        cantidad:     cantidad,
+                        concepto:     "Reversa por anulación de egreso #" + id,
+                        referencia:   "Anul-Gasto#" + id,
+                        usuario:      Sesion.NombreUsuario ?? "Sistema");
+                }
+                catch (Exception ex)
+                {
+                    // Típicamente stock insuficiente (ya se consumió el insumo).
+                    avisos.Add("Insumo " + codigo + ": no se pudo revertir del Kardex (" +
+                               ex.Message + "). Ajústalo manualmente si corresponde.");
+                }
+            }
+
+            // ── 2) Eliminar la CxP ligada (si existe) ───────────────────────
+            try
+            {
+                int idCxP = 0;
+                using (var cc = Conn())
+                {
+                    var q = cc.CreateCommand();
+                    q.CommandText = "SELECT Id FROM CuentasPagar WHERE IdEgreso=$ie LIMIT 1";
+                    q.Parameters.AddWithValue("$ie", id);
+                    var val = q.ExecuteScalar();
+                    if (val != null && val != DBNull.Value)
+                        idCxP = Convert.ToInt32(val);
+                }
+                if (idCxP > 0)
+                {
+                    EliminarCuentaPagar(idCxP);
+                    avisos.Add("Se eliminó la cuenta por pagar #" + idCxP +
+                               " ligada a este egreso (junto con sus pagos registrados).");
+                }
+            }
+            catch (Exception ex)
+            {
+                avisos.Add("No se pudo eliminar la cuenta por pagar ligada: " + ex.Message);
+            }
+
+            // ── 3) Marcar el egreso como anulado ────────────────────────────
+            using (var c = Conn())
+            {
+                var cmd = c.CreateCommand();
+                cmd.CommandText = "UPDATE Gastos SET Estado='Anulado', " +
+                                  "Observaciones=COALESCE(Observaciones,'') || ' | ANULADO: ' || $m " +
+                                  "WHERE Id=$id";
+                cmd.Parameters.AddWithValue("$id", id);
+                cmd.Parameters.AddWithValue("$m",  motivo ?? "");
+                cmd.ExecuteNonQuery();
+            }
 
             RegistrarAuditoria("GASTO_ANULADO", "Gastos", "#" + id + " — " + motivo);
+            return string.Join("\n", avisos);
         }
 
         public static void MarcarEgresoPagado(int id, DateTime fechaPago)

@@ -402,6 +402,43 @@ namespace SistemaGestion
                 if (g != null && g.PrecioPendiente) CompletarPrecio(g);
                 else EditarGasto(id);
             };
+
+            // ── Menú de clic derecho: Anular / Editar ───────────────────────
+            var menu = new ContextMenuStrip();
+            var miEditar = new ToolStripMenuItem("✏️  Editar / completar");
+            var miAnular = new ToolStripMenuItem("🚫  Anular egreso");
+            menu.Items.AddRange(new ToolStripItem[] { miEditar, new ToolStripSeparator(), miAnular });
+
+            // Al abrir el menú, deshabilitar "Anular" si la fila ya está anulada.
+            menu.Opening += (s, e) =>
+            {
+                var g = FilaSeleccionada(dgv, lista);
+                if (g == null) { e.Cancel = true; return; }
+                miAnular.Enabled = !string.Equals(g.Estado, "Anulado",
+                    StringComparison.OrdinalIgnoreCase);
+            };
+            miEditar.Click += (s, e) =>
+            {
+                var g = FilaSeleccionada(dgv, lista);
+                if (g == null) return;
+                if (g.PrecioPendiente) CompletarPrecio(g);
+                else EditarGasto(g.Id);
+            };
+            miAnular.Click += (s, e) =>
+            {
+                var g = FilaSeleccionada(dgv, lista);
+                if (g != null) AnularEgresoConConfirmacion(g);
+            };
+            dgv.ContextMenuStrip = menu;
+
+            // Seleccionar la fila bajo el cursor al hacer clic derecho, para que
+            // el menú actúe sobre la fila correcta.
+            dgv.CellMouseDown += (s, e) =>
+            {
+                if (e.Button == MouseButtons.Right && e.RowIndex >= 0)
+                    dgv.Rows[e.RowIndex].Selected = true;
+            };
+
             tab.Controls.Add(dgv);
 
             decimal totalUSD = lista.Sum(g => g.MontoUSD);
@@ -742,6 +779,95 @@ namespace SistemaGestion
                 MessageBox.Show(this, ex.Message, "Error",
                     MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
+        }
+
+        // ── Anular egreso (con reversa de Kardex y CxP) ─────────────────────
+        private static Egreso? FilaSeleccionada(DataGridView dgv, List<Egreso> lista)
+        {
+            DataGridViewRow? row = null;
+            if (dgv.SelectedRows.Count > 0) row = dgv.SelectedRows[0];
+            else if (dgv.CurrentRow != null) row = dgv.CurrentRow;
+            if (row == null) return null;
+            var val = row.Cells["Id"].Value;
+            if (val == null) return null;
+            int id = Convert.ToInt32(val);
+            return lista.FirstOrDefault(x => x.Id == id);
+        }
+
+        private void AnularEgresoConConfirmacion(Egreso g)
+        {
+            if (string.Equals(g.Estado, "Anulado", StringComparison.OrdinalIgnoreCase))
+            {
+                MessageBox.Show(this, "El egreso #" + g.Id + " ya está anulado.",
+                    "Sin cambios", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var confirm = MessageBox.Show(this,
+                "¿Anular el egreso #" + g.Id + " — " + g.Concepto + "?\n\n" +
+                "Esto hará lo siguiente:\n" +
+                "  • Revierte del Kardex la materia prima que este egreso ingresó.\n" +
+                "  • Elimina la cuenta por pagar ligada (y sus pagos), si existe.\n" +
+                "  • Marca el egreso como ANULADO.\n\n" +
+                "El registro no se borra: queda con estado Anulado. ¿Continuar?",
+                "Confirmar anulación", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+            if (confirm != DialogResult.Yes) return;
+
+            string? motivo = PedirMotivo();
+            if (motivo == null) return;                    // el usuario canceló
+            if (string.IsNullOrWhiteSpace(motivo)) motivo = "(sin motivo indicado)";
+
+            try
+            {
+                string avisos = DatabaseService.AnularEgreso(g.Id, motivo);
+                if (!string.IsNullOrWhiteSpace(avisos))
+                    MessageBox.Show(this,
+                        "El egreso #" + g.Id + " quedó anulado, con estas observaciones:\n\n" + avisos,
+                        "Anulado con avisos", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                else
+                    MessageBox.Show(this,
+                        "El egreso #" + g.Id + " quedó anulado. Se revirtió el Kardex y la " +
+                        "cuenta por pagar ligada (si tenía).",
+                        "Anulado", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                RecargarTab();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, ex.Message, "Error al anular",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        // Pide el motivo de la anulación. Devuelve null si el usuario cancela.
+        private string? PedirMotivo()
+        {
+            using var f = new Form
+            {
+                Text = "Motivo de la anulación",
+                ClientSize = new Size(420, 150),
+                StartPosition = FormStartPosition.CenterParent,
+                FormBorderStyle = FormBorderStyle.FixedDialog,
+                MaximizeBox = false, MinimizeBox = false,
+                BackColor = UITheme.Fondo
+            };
+            var lbl = new Label { Text = "Indica el motivo (opcional):",
+                Location = new Point(16, 14), AutoSize = true, Font = UITheme.Body };
+            var txt = new TextBox { Location = new Point(16, 40),
+                Size = new Size(388, 28), Font = UITheme.Body };
+            var btnOk = new Button { Text = "Anular", DialogResult = DialogResult.OK,
+                Location = new Point(214, 100), Size = new Size(90, 32),
+                FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(192, 57, 43),
+                ForeColor = Color.White, Font = UITheme.BodyBold };
+            btnOk.FlatAppearance.BorderSize = 0;
+            var btnCancel = new Button { Text = "Cancelar", DialogResult = DialogResult.Cancel,
+                Location = new Point(314, 100), Size = new Size(90, 32),
+                FlatStyle = FlatStyle.Flat, BackColor = UITheme.FondoCard, ForeColor = UITheme.Texto,
+                Font = UITheme.Body };
+            btnCancel.FlatAppearance.BorderSize = 1;
+            btnCancel.FlatAppearance.BorderColor = UITheme.Borde;
+            f.Controls.AddRange(new Control[] { lbl, txt, btnOk, btnCancel });
+            f.AcceptButton = btnOk; f.CancelButton = btnCancel;
+            return f.ShowDialog(this) == DialogResult.OK ? txt.Text.Trim() : null;
         }
 
         // ── Helpers ─────────────────────────────────────────────────────────
