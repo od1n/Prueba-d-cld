@@ -803,10 +803,10 @@ namespace SistemaGestion
             EsMultilinea = _lineas.Count > 0;
 
             Text = "Completar precio — " + g.Concepto;
-            ClientSize = EsMultilinea ? new Size(560, 560) : new Size(460, 430);
+            ClientSize = EsMultilinea ? new Size(560, 520) : new Size(460, 430);
             StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.Sizable;
-            MinimumSize = EsMultilinea ? new Size(576, 599) : new Size(476, 469);
+            MinimumSize = EsMultilinea ? new Size(576, 559) : new Size(476, 469);
             MaximizeBox = false; MinimizeBox = false;
             BackColor = Color.FromArgb(245, 247, 250);
             Font = new Font("Segoe UI", 9.5f);
@@ -828,7 +828,7 @@ namespace SistemaGestion
             Controls.Add(hdr);
 
             int panelW = EsMultilinea ? 520 : 420;
-            var pnl = new Panel { Location = new Point(20, 64), Size = new Size(panelW, 460) };
+            var pnl = new Panel { Location = new Point(20, 64), Size = new Size(panelW, EsMultilinea ? 392 : 300) };
             int y = 0;
             Label L(string t) { var l = new Label { Text = t, Location = new Point(0, y + 4), AutoSize = true, ForeColor = Color.FromArgb(44, 62, 80) }; return l; }
 
@@ -846,7 +846,7 @@ namespace SistemaGestion
                 y += 22;
                 _grid = new DataGridView
                 {
-                    Location = new Point(0, y), Size = new Size(panelW, 160),
+                    Location = new Point(0, y), Size = new Size(panelW, 120),
                     AllowUserToAddRows = false, AllowUserToResizeRows = false, RowHeadersVisible = false,
                     BackgroundColor = Color.White, BorderStyle = BorderStyle.FixedSingle, MultiSelect = false,
                     AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill, Font = new Font("Segoe UI", 9f),
@@ -865,7 +865,7 @@ namespace SistemaGestion
                         l.PrecioUnitario > 0 ? l.PrecioUnitario.ToString("0.####") : "0",
                         "$ " + l.Subtotal.ToString("N2"));
                 pnl.Controls.Add(_grid);
-                y += 168;
+                y += 128;
             }
             else
             {
@@ -919,7 +919,7 @@ namespace SistemaGestion
 
             Controls.Add(pnl);
 
-            int btnY = (EsMultilinea ? 560 : 430) - 50;
+            int btnY = (EsMultilinea ? 520 : 430) - 44;
             var btnCancelar = new Button { Text = "Cancelar", Size = new Size(95, 32), Location = new Point((EsMultilinea ? 560 : 460) - 210, btnY),
                 Anchor = AnchorStyles.Bottom | AnchorStyles.Right,
                 FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(149, 165, 166), ForeColor = Color.White,
@@ -929,6 +929,8 @@ namespace SistemaGestion
                 FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(39, 174, 96), ForeColor = Color.White,
                 FlatAppearance = { BorderSize = 0 } };
             Controls.AddRange(new Control[] { btnCancelar, btnOk });
+            // Asegurar que los botones queden por encima del panel de campos.
+            btnCancelar.BringToFront(); btnOk.BringToFront();
             AcceptButton = btnOk; CancelButton = btnCancelar;
 
             decimal BaseActual()
