@@ -130,10 +130,6 @@ namespace SistemaGestion
                     Color.FromArgb(60, 100, 140),     () => new FrmRespaldos().ShowDialog(),          true,
                     "Copias de seguridad de la base de datos (solo Admin)"),
 
-                ("▤", "Tarifas Bono",    "Producción y ventas",
-                    Color.FromArgb(160, 50, 110),     () => new FrmTarifasBonoProduccion().ShowDialog(), true,
-                    "Configurar tarifas de producción y bonos (solo Admin)"),
-
                 ("◎", "Usuarios",        "Gestión de accesos",
                     UITheme.Rojo,                     () => new FrmUsuarios().ShowDialog(),           true,
                     "Gestión de usuarios y permisos del sistema (solo Admin)"),

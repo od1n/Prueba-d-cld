@@ -1073,6 +1073,68 @@ namespace SistemaGestion
                 }
             }
 
+            // ── Fix defensivo: tablas/columnas que pueden FALTAR en BDs que YA están
+            //    en la versión tope del esquema. MigrarEsquema hace "return" temprano
+            //    cuando user_version >= SCHEMA_VERSION (caso de Olimpo), así que estas
+            //    correcciones DEBEN ir aquí, fuera de MigrarEsquema, para correr SIEMPRE.
+            //    Todo en autocommit, try/catch individual, 100% idempotente.
+            //      - Cuentas por Pagar: CuentasPagar/PagosCxP (su MigrarV8 no se llamaba).
+            //      - Kardex: MovimientosInventario.TipoKardex/CostoUnitario (MigrarV14 solo <14).
+            try
+            {
+                using var creaTb = c.CreateCommand();
+                creaTb.CommandText = @"
+                    CREATE TABLE IF NOT EXISTS CuentasPagar (
+                        Id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                        CodigoProveedor TEXT,
+                        Proveedor       TEXT,
+                        Concepto        TEXT NOT NULL,
+                        NumFactura      TEXT,
+                        Monto           REAL DEFAULT 0,
+                        Pagado          REAL DEFAULT 0,
+                        FechaEmision    TEXT NOT NULL,
+                        FechaVence      TEXT NOT NULL,
+                        Estado          TEXT DEFAULT 'Pendiente',
+                        Observaciones   TEXT
+                    );
+                    CREATE TABLE IF NOT EXISTS PagosCxP (
+                        Id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                        IdCuenta      INTEGER NOT NULL,
+                        Fecha         TEXT NOT NULL,
+                        Monto         REAL DEFAULT 0,
+                        FormaPago     TEXT,
+                        Referencia    TEXT,
+                        Observaciones TEXT,
+                        FOREIGN KEY(IdCuenta) REFERENCES CuentasPagar(Id)
+                    );
+                    CREATE INDEX IF NOT EXISTS IX_CuentasPagar_FechaVence ON CuentasPagar(FechaVence);";
+                creaTb.ExecuteNonQuery();
+            }
+            catch (Exception exFix) { Console.WriteLine($"[DB] WARN fix CuentasPagar: {exFix.Message}"); }
+
+            foreach (var sqlFix in new[] {
+                "ALTER TABLE MovimientosInventario ADD COLUMN TipoKardex    TEXT DEFAULT 'PRODUCTO'",
+                "ALTER TABLE MovimientosInventario ADD COLUMN CostoUnitario REAL DEFAULT 0",
+                "ALTER TABLE ProductosProveedor  ADD COLUMN CostoPromedio REAL DEFAULT 0" })
+            {
+                try { using var fix = c.CreateCommand(); fix.CommandText = sqlFix; fix.ExecuteNonQuery(); }
+                catch (Exception exFix)
+                {
+                    if (!exFix.Message.Contains("duplicate column", StringComparison.OrdinalIgnoreCase))
+                        Console.WriteLine($"[DB] WARN fix Kardex: {exFix.Message}");
+                }
+            }
+            try
+            {
+                using var idxK = c.CreateCommand();
+                idxK.CommandText = @"
+                    CREATE INDEX IF NOT EXISTS idx_mov_tipokardex ON MovimientosInventario(TipoKardex);
+                    CREATE INDEX IF NOT EXISTS idx_mov_tipo_fecha ON MovimientosInventario(TipoKardex, FechaHora);
+                    UPDATE MovimientosInventario SET TipoKardex='PRODUCTO' WHERE TipoKardex IS NULL OR TipoKardex='';";
+                idxK.ExecuteNonQuery();
+            }
+            catch (Exception exFix) { Console.WriteLine($"[DB] WARN fix Kardex idx: {exFix.Message}"); }
+
             // Aplicar migraciones incrementales al esquema existente
             MigrarEsquema(c);
 
@@ -1511,48 +1573,6 @@ namespace SistemaGestion
                     );
                     CREATE INDEX IF NOT EXISTS idx_tarprodventa ON TarifaProductoVenta(CodigoProducto, FechaDesde);";
                 cmdTarHist.ExecuteNonQuery();
-
-                // ── Defensivo/idempotente: tablas y columnas que pudieron FALTAR en
-                //    bases que alcanzaron una versión alta por otro camino (p. ej. Olimpo).
-                //    No dependen de user_version: AlterTableSafe ignora "columna duplicada"
-                //    y CREATE TABLE IF NOT EXISTS no hace nada si ya existe.
-                //    Cubre: Kardex (MovimientosInventario.TipoKardex/CostoUnitario, que
-                //    MigrarV14 solo agregaba si versión < 14) y Cuentas por Pagar
-                //    (CuentasPagar/PagosCxP, cuyo MigrarV8 no se llamaba desde ningún lado).
-                AlterTableSafe(conn, tx, "ALTER TABLE MovimientosInventario ADD COLUMN TipoKardex    TEXT DEFAULT 'PRODUCTO'");
-                AlterTableSafe(conn, tx, "ALTER TABLE MovimientosInventario ADD COLUMN CostoUnitario REAL DEFAULT 0");
-                AlterTableSafe(conn, tx, "ALTER TABLE ProductosProveedor  ADD COLUMN CostoPromedio REAL DEFAULT 0");
-                var cmdDefensivo = conn.CreateCommand(); cmdDefensivo.Transaction = tx;
-                cmdDefensivo.CommandText = @"
-                    CREATE INDEX IF NOT EXISTS idx_mov_tipokardex ON MovimientosInventario(TipoKardex);
-                    CREATE INDEX IF NOT EXISTS idx_mov_tipo_fecha ON MovimientosInventario(TipoKardex, FechaHora);
-                    UPDATE MovimientosInventario SET TipoKardex='PRODUCTO' WHERE TipoKardex IS NULL OR TipoKardex='';
-
-                    CREATE TABLE IF NOT EXISTS CuentasPagar (
-                        Id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                        CodigoProveedor TEXT,
-                        Proveedor       TEXT,
-                        Concepto        TEXT NOT NULL,
-                        NumFactura      TEXT,
-                        Monto           REAL DEFAULT 0,
-                        Pagado          REAL DEFAULT 0,
-                        FechaEmision    TEXT NOT NULL,
-                        FechaVence      TEXT NOT NULL,
-                        Estado          TEXT DEFAULT 'Pendiente',
-                        Observaciones   TEXT
-                    );
-                    CREATE TABLE IF NOT EXISTS PagosCxP (
-                        Id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                        IdCuenta      INTEGER NOT NULL,
-                        Fecha         TEXT NOT NULL,
-                        Monto         REAL DEFAULT 0,
-                        FormaPago     TEXT,
-                        Referencia    TEXT,
-                        Observaciones TEXT,
-                        FOREIGN KEY(IdCuenta) REFERENCES CuentasPagar(Id)
-                    );
-                    CREATE INDEX IF NOT EXISTS IX_CuentasPagar_FechaVence ON CuentasPagar(FechaVence);";
-                cmdDefensivo.ExecuteNonQuery();
 
                 if (versionActual < 8)
                     EjecutarMigracion(conn, tx, 8, @"
