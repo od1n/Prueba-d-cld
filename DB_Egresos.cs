@@ -67,6 +67,23 @@ namespace SistemaGestion
         public string   Usuario         { get; set; } = "";
         public DateTime FechaRegistro   { get; set; }
         public string   Observaciones   { get; set; } = "";
+        // Líneas de detalle: una factura puede traer varios productos. Cuando hay
+        // líneas, el egreso se guarda multilínea (DetallesGasto) y cada línea de
+        // materia prima entra al Kardex por separado.
+        public List<DetalleEgreso> Detalles { get; set; } = new();
+    }
+
+    /// <summary>Una línea de la factura/nota dentro de un egreso.</summary>
+    public class DetalleEgreso
+    {
+        public int      IdArticulo     { get; set; }   // 0 = sin catálogo (texto libre)
+        public string   CodigoInterno  { get; set; } = "";
+        public string   Descripcion    { get; set; } = "";
+        public string   TipoInsumo     { get; set; } = "";
+        public bool     EsMateriaPrima { get; set; }
+        public decimal  Cantidad       { get; set; }
+        public decimal  PrecioUnitario { get; set; }
+        public decimal  Subtotal       => Math.Round(Cantidad * PrecioUnitario, 2);
     }
 
     public static partial class DatabaseService
@@ -138,12 +155,29 @@ namespace SistemaGestion
             if (g == null) throw new ArgumentNullException(nameof(g));
             if (g.IdCategoria == 0) throw new Exception("Categoría requerida.");
             if (string.IsNullOrWhiteSpace(g.Concepto)) throw new Exception("Concepto requerido.");
+
+            // Una factura puede tener 1 o más líneas. Cuando el egreso trae líneas
+            // (Detalles), el monto se calcula sumándolas y cada línea de materia
+            // prima entra al Kardex por separado.
+            bool tieneLineas = g.Detalles != null && g.Detalles.Count > 0;
+            if (tieneLineas)
+            {
+                if (g.Detalles.Any(d => d.Cantidad <= 0))
+                    throw new Exception("Cada línea debe tener una cantidad mayor que cero.");
+                // El header conserva, como referencia, la primera línea de MP.
+                var primeraMP = g.Detalles.FirstOrDefault(d => d.EsMateriaPrima && d.IdArticulo > 0);
+                g.IdInsumo = primeraMP != null ? primeraMP.IdArticulo : (int?)null;
+                g.Cantidad = primeraMP != null ? primeraMP.Cantidad : 0m;
+                if (!g.PrecioPendiente)
+                    g.MontoOriginal = g.Detalles.Sum(d => d.Subtotal);
+            }
+
             // Con precio pendiente el monto llega en 0 (nota de entrega sin montos);
             // en ese caso exigimos cantidad para poder registrar la mercancía.
             if (g.PrecioPendiente)
             {
                 // Si es materia prima, la mercancía entra al Kardex y necesita cantidad.
-                if (g.IdInsumo.HasValue && g.IdInsumo.Value > 0 && g.Cantidad <= 0)
+                if (!tieneLineas && g.IdInsumo.HasValue && g.IdInsumo.Value > 0 && g.Cantidad <= 0)
                     throw new Exception("Con precio pendiente de materia prima debe indicar la cantidad recibida.");
             }
             else if (g.MontoOriginal <= 0)
@@ -275,23 +309,76 @@ namespace SistemaGestion
                 $"#{idResultante} {g.Fecha:dd/MM/yyyy} cat={g.IdCategoria} " +
                 $"USD={g.MontoUSD:N2} ({g.TipoTasa}) {g.Concepto}");
 
-            // ── Integración Materia Prima → Kardex + Stock ──────────────────
-            // Si el egreso es nuevo, tiene IdInsumo y Cantidad > 0, registramos
-            // automáticamente la entrada en el Kardex A (insumos), lo que
-            // actualiza el StockActual y recalcula el CPP del insumo.
-            // Esto evita doble entrada (gasto + compra) — un solo registro
-            // dispara ambos lados.
-            if (esNuevo && g.IdInsumo.HasValue && g.IdInsumo.Value > 0 && g.Cantidad > 0)
+            // ── Líneas de detalle (DetallesGasto) ───────────────────────────────
+            // Solo en egresos NUEVOS: guardamos las líneas y, por cada línea de
+            // materia prima, registramos la entrada al Kardex. (En edición no se
+            // tocan las líneas ni el Kardex, igual que antes.)
+            if (esNuevo && tieneLineas)
+            {
+                foreach (var d in g.Detalles)
+                {
+                    try
+                    {
+                        using var cmdD = c.CreateCommand();
+                        cmdD.CommandText = @"INSERT INTO DetallesGasto
+                            (IdGasto, Descripcion, IdArticulo, CodigoInterno, TipoInsumo,
+                             EsInventariable, Cantidad, PrecioUnitario, Subtotal)
+                            VALUES ($ig,$de,$ia,$ci,$ti,$ei,$ca,$pu,$sub)";
+                        cmdD.Parameters.AddWithValue("$ig", idResultante);
+                        cmdD.Parameters.AddWithValue("$de", d.Descripcion ?? "");
+                        cmdD.Parameters.AddWithValue("$ia", d.IdArticulo > 0 ? (object)d.IdArticulo : DBNull.Value);
+                        cmdD.Parameters.AddWithValue("$ci", d.CodigoInterno ?? "");
+                        cmdD.Parameters.AddWithValue("$ti", d.TipoInsumo ?? "");
+                        cmdD.Parameters.AddWithValue("$ei", d.EsMateriaPrima ? 1 : 0);
+                        cmdD.Parameters.AddWithValue("$ca", (double)d.Cantidad);
+                        cmdD.Parameters.AddWithValue("$pu", (double)d.PrecioUnitario);
+                        cmdD.Parameters.AddWithValue("$sub",(double)d.Subtotal);
+                        cmdD.ExecuteNonQuery();
+                    }
+                    catch (Exception ex)
+                    {
+                        RegistrarAuditoria("GASTO_DETALLE_FALLO", "Gastos",
+                            "Egreso#" + idResultante + " no guardó una línea: " + ex.Message);
+                    }
+
+                    // Kardex por línea de materia prima.
+                    if (d.EsMateriaPrima && d.IdArticulo > 0 && d.Cantidad > 0)
+                    {
+                        try
+                        {
+                            var pp = ObtenerProductoProveedorPorId(d.IdArticulo);
+                            if (pp != null && !string.IsNullOrEmpty(pp.CodigoInterno))
+                            {
+                                // Precio pendiente → costo PROVISIONAL = promedio actual
+                                // (no distorsiona el ponderado); se ajusta al completar el precio.
+                                decimal precioUnit = g.PrecioPendiente ? pp.PrecioPromedio : d.PrecioUnitario;
+                                RegistrarEntradaInsumo(
+                                    codigoInsumo: pp.CodigoInterno,
+                                    cantidad: d.Cantidad,
+                                    costoUnitario: precioUnit,
+                                    concepto: (g.PrecioPendiente ? "Compra MP (precio pendiente) — egreso #" : "Compra MP — egreso #")
+                                               + idResultante + " — " + d.Descripcion,
+                                    referencia: "Gasto#" + idResultante,
+                                    usuario: g.Usuario);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            RegistrarAuditoria("GASTO_KARDEX_FALLO", "Gastos",
+                                "Egreso#" + idResultante + " no actualizó kardex (línea): " + ex.Message);
+                        }
+                    }
+                }
+            }
+            // ── Integración Materia Prima → Kardex (egreso de una sola línea) ────
+            // Compatibilidad: egreso sin lista de Detalles pero con IdInsumo.
+            else if (esNuevo && g.IdInsumo.HasValue && g.IdInsumo.Value > 0 && g.Cantidad > 0)
             {
                 try
                 {
                     var pp = ObtenerProductoProveedorPorId(g.IdInsumo.Value);
                     if (pp != null && !string.IsNullOrEmpty(pp.CodigoInterno))
                     {
-                        // Con precio pendiente la mercancía entra igual al Kardex, pero
-                        // a costo PROVISIONAL = costo promedio actual del insumo, de modo
-                        // que el promedio ponderado no se distorsione a 0 mientras se
-                        // espera el precio real. Al completar el precio se ajusta el costo.
                         decimal precioUnit = g.PrecioPendiente
                             ? pp.PrecioPromedio
                             : (g.Cantidad > 0 ? Math.Round(g.MontoUSD / g.Cantidad, 4) : 0m);
@@ -307,8 +394,6 @@ namespace SistemaGestion
                 }
                 catch (Exception ex)
                 {
-                    // No abortamos el guardado del egreso; solo dejamos auditoría
-                    // del problema con el kardex.
                     RegistrarAuditoria("GASTO_KARDEX_FALLO", "Gastos",
                         "Egreso#" + idResultante + " no actualizó kardex: " + ex.Message);
                 }
@@ -699,6 +784,171 @@ namespace SistemaGestion
             using var r = cmd.ExecuteReader();
             while (r.Read()) list.Add(BindEgreso(r));
             return list;
+        }
+
+        /// <summary>Líneas de detalle (DetallesGasto) de un egreso.</summary>
+        public static List<DetalleEgreso> ObtenerDetallesEgreso(int idGasto)
+        {
+            var list = new List<DetalleEgreso>();
+            try
+            {
+                using var c = Conn();
+                var cmd = c.CreateCommand();
+                cmd.CommandText = @"
+                    SELECT COALESCE(IdArticulo,0), COALESCE(CodigoInterno,''),
+                           Descripcion, COALESCE(TipoInsumo,''), COALESCE(EsInventariable,0),
+                           COALESCE(Cantidad,0), COALESCE(PrecioUnitario,0)
+                    FROM DetallesGasto WHERE IdGasto=$id ORDER BY Id";
+                cmd.Parameters.AddWithValue("$id", idGasto);
+                using var r = cmd.ExecuteReader();
+                while (r.Read())
+                    list.Add(new DetalleEgreso
+                    {
+                        IdArticulo     = r.GetInt32(0),
+                        CodigoInterno  = r.GetString(1),
+                        Descripcion    = r.GetString(2),
+                        TipoInsumo     = r.GetString(3),
+                        EsMateriaPrima = r.GetInt32(4) == 1,
+                        Cantidad       = (decimal)r.GetDouble(5),
+                        PrecioUnitario = (decimal)r.GetDouble(6)
+                    });
+            }
+            catch { /* tabla inexistente en BD vieja */ }
+            return list;
+        }
+
+        /// <summary>
+        /// Completa el precio de un egreso "precio pendiente" MULTILÍNEA: recibe las
+        /// líneas con su precio unitario real (USD), recalcula el total (con IVA),
+        /// actualiza cada línea, ajusta el costo de cada insumo de MP en el Kardex y
+        /// sincroniza la Cuenta por Pagar.
+        /// </summary>
+        public static void CompletarPrecioEgresoLineas(
+            int idEgreso, List<DetalleEgreso> lineas, decimal ivaPct,
+            string monedaOriginal, string tipoTasa, decimal tasaUsada,
+            decimal pagadoUSD, DateTime? vence)
+        {
+            string rol = Sesion.RolesEfectivos;
+            if (!Sesion.EsAdmin && !PermisosRol.Permite(rol, "EgresosRegistrar"))
+                throw new UnauthorizedAccessException(
+                    "Tu rol no tiene permiso para completar precios de egresos.");
+
+            var g = ObtenerEgresoPorId(idEgreso)
+                    ?? throw new Exception("Egreso #" + idEgreso + " no encontrado.");
+            if (!g.PrecioPendiente)
+                throw new Exception("El egreso #" + idEgreso + " no tiene precio pendiente.");
+            if (lineas == null || lineas.Count == 0)
+                throw new Exception("No hay líneas para completar.");
+
+            decimal baseImp = lineas.Sum(l => Math.Round(l.Cantidad * l.PrecioUnitario, 2));
+            if (baseImp <= 0) throw new Exception("Ingresa el precio de al menos una línea.");
+            decimal total = Math.Round(baseImp * (1m + ivaPct / 100m), 2);
+
+            g.PrecioPendiente = false;
+            g.MonedaOriginal  = monedaOriginal;
+            g.TipoTasa        = tipoTasa;
+            g.TasaUsada       = tasaUsada;
+            g.MontoOriginal   = total;
+            CalcularMontos(g);
+            if (g.IdTasaCambio == null && g.TipoTasa is "BCV" or "PARALELO")
+            {
+                try { var t = ObtenerTasaPorFecha(g.Fecha); if (t != null) g.IdTasaCambio = t.Id; }
+                catch { }
+            }
+
+            if (pagadoUSD < 0) pagadoUSD = 0;
+            g.PagadoUSD = pagadoUSD;
+            if (g.PagadoUSD >= g.MontoUSD - 0.01m)
+            {
+                g.PagadoUSD = g.MontoUSD; g.Estado = "Pagado";
+                g.FechaPago = DateTime.Today; g.FechaVencimiento = null;
+            }
+            else
+            {
+                g.Estado = "Pendiente";
+                if (g.PagadoUSD > 0) g.FechaPago = DateTime.Today;
+                if (vence.HasValue) g.FechaVencimiento = vence;
+                else if (g.FechaVencimiento == null) g.FechaVencimiento = g.Fecha.AddDays(30);
+            }
+
+            using (var c = Conn())
+            {
+                var cmd = c.CreateCommand();
+                cmd.CommandText = @"UPDATE Gastos SET
+                    MonedaOriginal=$mon, TipoTasa=$tt, TasaUsada=$tu, IdTasaCambio=$idt,
+                    MontoOriginal=$mo, MontoUSD=$musd, MontoBs=$mbs, PagadoUSD=$pag,
+                    PrecioPendiente=0, Estado=$es, FechaVencimiento=$fv, FechaPago=$fp
+                    WHERE Id=$id";
+                cmd.Parameters.AddWithValue("$mon", g.MonedaOriginal);
+                cmd.Parameters.AddWithValue("$tt",  g.TipoTasa);
+                cmd.Parameters.AddWithValue("$tu",  (double)g.TasaUsada);
+                cmd.Parameters.AddWithValue("$idt", (object?)g.IdTasaCambio ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("$mo",  (double)g.MontoOriginal);
+                cmd.Parameters.AddWithValue("$musd",(double)g.MontoUSD);
+                cmd.Parameters.AddWithValue("$mbs", (double)g.MontoBs);
+                cmd.Parameters.AddWithValue("$pag", (double)g.PagadoUSD);
+                cmd.Parameters.AddWithValue("$es",  g.Estado);
+                cmd.Parameters.AddWithValue("$fv",  (object?)g.FechaVencimiento?.ToString("yyyy-MM-dd") ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("$fp",  (object?)g.FechaPago?.ToString("yyyy-MM-dd") ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("$id",  idEgreso);
+                cmd.ExecuteNonQuery();
+            }
+
+            RegistrarAuditoria("GASTO_PRECIO_COMPLETADO", "Gastos",
+                $"#{idEgreso} USD={g.MontoUSD:N2} ({g.TipoTasa}) {g.Concepto}");
+
+            foreach (var l in lineas)
+            {
+                try
+                {
+                    using var c = Conn();
+                    var ud = c.CreateCommand();
+                    ud.CommandText = l.IdArticulo > 0
+                        ? "UPDATE DetallesGasto SET PrecioUnitario=$pu, Subtotal=$sub WHERE IdGasto=$id AND IdArticulo=$art"
+                        : "UPDATE DetallesGasto SET PrecioUnitario=$pu, Subtotal=$sub WHERE IdGasto=$id AND Descripcion=$de";
+                    ud.Parameters.AddWithValue("$pu",  (double)l.PrecioUnitario);
+                    ud.Parameters.AddWithValue("$sub", (double)Math.Round(l.Cantidad * l.PrecioUnitario, 2));
+                    ud.Parameters.AddWithValue("$id",  idEgreso);
+                    if (l.IdArticulo > 0) ud.Parameters.AddWithValue("$art", l.IdArticulo);
+                    else ud.Parameters.AddWithValue("$de", l.Descripcion ?? "");
+                    ud.ExecuteNonQuery();
+                }
+                catch { }
+
+                if (l.EsMateriaPrima && l.IdArticulo > 0 && l.PrecioUnitario > 0)
+                {
+                    try
+                    {
+                        var pp = ObtenerProductoProveedorPorId(l.IdArticulo);
+                        if (pp != null && !string.IsNullOrEmpty(pp.CodigoInterno))
+                            AjustarCostoEntradaKardex(pp.CodigoInterno, "Gasto#" + idEgreso, l.PrecioUnitario);
+                    }
+                    catch (Exception ex)
+                    {
+                        RegistrarAuditoria("GASTO_KARDEX_AJUSTE_FALLO", "Gastos",
+                            "Egreso#" + idEgreso + " no ajustó costo (línea): " + ex.Message);
+                    }
+                }
+            }
+
+            try
+            {
+                SincronizarCxPDesdeEgreso(
+                    idEgreso: idEgreso,
+                    proveedor: g.Proveedor ?? "",
+                    codigoProveedor: g.CodigoProveedor ?? "",
+                    concepto:  g.Concepto,
+                    numRef:    "Egreso #" + idEgreso,
+                    montoUSD:  g.MontoUSD,
+                    pagadoUSD: g.PagadoUSD,
+                    emision:   g.Fecha,
+                    vence:     g.FechaVencimiento ?? g.Fecha.AddDays(30));
+            }
+            catch (Exception ex)
+            {
+                RegistrarAuditoria("GASTO_CXP_FALLO", "Gastos",
+                    "Egreso#" + idEgreso + " no sincronizó CxP: " + ex.Message);
+            }
         }
 
         /// <summary>

@@ -52,6 +52,10 @@ namespace SistemaGestion
         private ComboBox       _cmbInsumo = null!;
         private NumericUpDown  _numCantidad = null!;
         private NumericUpDown  _numPrecioUnit = null!;
+        // Multilínea: una factura puede traer varios productos.
+        private DataGridView   _gridLineas = null!;
+        private Button         _btnAddLinea = null!, _btnDelLinea = null!;
+        private readonly System.Collections.Generic.List<DetalleEgreso> _lineas = new();
         private Label          _lblMontoCalc = null!;
 
         // Layout raíz (para insertar lblError + pnlBtn en filas correctas)
@@ -197,9 +201,11 @@ namespace SistemaGestion
             y += 50;
 
             // ── Panel Materia Prima (visible solo si categoría EsMateriaPrima) ──
+            // Multilínea: se agrega una línea por producto (una factura puede traer
+            // varios). Cada línea de MP entra al Kardex por separado al guardar.
             _pnlMP = new Panel
             {
-                Location = new Point(0, y), Size = new Size(640, 110),
+                Location = new Point(0, y), Size = new Size(640, 230),
                 BackColor = Color.FromArgb(248, 252, 255),
                 BorderStyle = BorderStyle.FixedSingle,
                 Visible = false
@@ -207,7 +213,7 @@ namespace SistemaGestion
             int my = 8;
             _pnlMP.Controls.Add(new Label
             {
-                Text = "  Materia Prima — actualiza stock + kardex automáticamente",
+                Text = "  Materia Prima — cada línea actualiza stock + kardex automáticamente",
                 Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
                 ForeColor = UITheme.Verde, AutoSize = false,
                 Location = new Point(0, my), Size = new Size(640, 16)
@@ -221,48 +227,87 @@ namespace SistemaGestion
             _pnlMP.Controls.Add(new Label
             {
                 Text = "Cantidad", Font = UITheme.BodyBold,
-                Location = new Point(380, my), AutoSize = true, ForeColor = UITheme.AzulOscuro
+                Location = new Point(360, my), AutoSize = true, ForeColor = UITheme.AzulOscuro
             });
             _pnlMP.Controls.Add(new Label
             {
                 Text = "Precio unit. (USD)", Font = UITheme.BodyBold,
-                Location = new Point(490, my), AutoSize = true, ForeColor = UITheme.AzulOscuro
+                Location = new Point(455, my), AutoSize = true, ForeColor = UITheme.AzulOscuro
             });
             my += 20;
             _cmbInsumo = new ComboBox
             {
-                Location = new Point(10, my), Size = new Size(360, 28),
+                Location = new Point(10, my), Size = new Size(340, 28),
                 DropDownStyle = ComboBoxStyle.DropDownList, Font = UITheme.Body
             };
             _numCantidad = new NumericUpDown
             {
-                Location = new Point(380, my), Size = new Size(100, 28),
+                Location = new Point(360, my), Size = new Size(90, 28),
                 Font = new Font("Segoe UI", 11f),
-                Maximum = 1_000_000m, DecimalPlaces = 2,
-                Value = _egreso.Cantidad
+                Maximum = 1_000_000m, DecimalPlaces = 2
             };
             _numPrecioUnit = new NumericUpDown
             {
-                Location = new Point(490, my), Size = new Size(140, 28),
+                Location = new Point(455, my), Size = new Size(100, 28),
                 Font = new Font("Segoe UI", 11f),
-                Maximum = 1_000_000m, DecimalPlaces = 4,
-                Value = _egreso.Cantidad > 0 ? Math.Round(_egreso.MontoUSD / _egreso.Cantidad, 4) : 0m
+                Maximum = 1_000_000m, DecimalPlaces = 4
             };
-            _numCantidad.ValueChanged   += (s, e) => RecalcMontoMP();
-            _numPrecioUnit.ValueChanged += (s, e) => RecalcMontoMP();
-            _pnlMP.Controls.AddRange(new Control[] { _cmbInsumo, _numCantidad, _numPrecioUnit });
-            my += 36;
+            _btnAddLinea = new Button
+            {
+                Text = "➕", Location = new Point(560, my), Size = new Size(70, 28),
+                FlatStyle = FlatStyle.Flat, BackColor = UITheme.Verde, ForeColor = Color.White,
+                Font = new Font("Segoe UI", 9f, FontStyle.Bold), Cursor = Cursors.Hand
+            };
+            _btnAddLinea.FlatAppearance.BorderSize = 0;
+            _btnAddLinea.Click += (s, e) => AgregarLinea();
+            _pnlMP.Controls.AddRange(new Control[] { _cmbInsumo, _numCantidad, _numPrecioUnit, _btnAddLinea });
+            my += 34;
+
+            _gridLineas = new DataGridView
+            {
+                Location = new Point(10, my), Size = new Size(620, 120),
+                ReadOnly = true, AllowUserToAddRows = false, AllowUserToResizeRows = false,
+                RowHeadersVisible = false, BackgroundColor = Color.White,
+                BorderStyle = BorderStyle.FixedSingle, MultiSelect = false,
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill, Font = UITheme.Body
+            };
+            _gridLineas.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Insumo",   FillWeight = 50 });
+            _gridLineas.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Cantidad", FillWeight = 15,
+                DefaultCellStyle = new DataGridViewCellStyle { Alignment = DataGridViewContentAlignment.MiddleRight } });
+            _gridLineas.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "P. Unit.", FillWeight = 17,
+                DefaultCellStyle = new DataGridViewCellStyle { Alignment = DataGridViewContentAlignment.MiddleRight } });
+            _gridLineas.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Subtotal", FillWeight = 18,
+                DefaultCellStyle = new DataGridViewCellStyle { Alignment = DataGridViewContentAlignment.MiddleRight } });
+            _pnlMP.Controls.Add(_gridLineas);
+            my += 126;
+
+            _btnDelLinea = new Button
+            {
+                Text = "Quitar línea seleccionada", Location = new Point(10, my), Size = new Size(200, 26),
+                FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(149,165,166), ForeColor = Color.White,
+                Font = new Font("Segoe UI", 8.5f), Cursor = Cursors.Hand
+            };
+            _btnDelLinea.FlatAppearance.BorderSize = 0;
+            _btnDelLinea.Click += (s, e) => QuitarLineaSeleccionada();
             _lblMontoCalc = new Label
             {
-                Text = "Auto-calcula: cantidad × precio = monto del egreso",
+                Text = "Agrega una línea por producto de la factura.",
                 Font = new Font("Segoe UI", 8.5f, FontStyle.Italic),
                 ForeColor = UITheme.TextoTenue, AutoSize = false,
-                Location = new Point(10, my), Size = new Size(620, 18)
+                Location = new Point(220, my + 4), Size = new Size(410, 18)
             };
-            _pnlMP.Controls.Add(_lblMontoCalc);
+            _pnlMP.Controls.AddRange(new Control[] { _btnDelLinea, _lblMontoCalc });
+
             CargarInsumos();
+            // Cargar líneas existentes (OCR o edición de un egreso ya guardado).
+            if (_egreso.Detalles != null && _egreso.Detalles.Count > 0)
+                _lineas.AddRange(_egreso.Detalles);
+            else if (!_esNuevo && _egreso.Id > 0)
+                _lineas.AddRange(DatabaseService.ObtenerDetallesEgreso(_egreso.Id));
+            RefrescarGridLineas();
             pnl.Controls.Add(_pnlMP);
-            y += 120;
+            y += 240;
 
             // El panel MP se muestra/oculta según categoría
             _cmbCategoria.SelectedIndexChanged += (s, e) => OnCategoriaChanged();
@@ -390,6 +435,7 @@ namespace SistemaGestion
                 _numPagado.Enabled    = !pp && _chkPendiente.Checked;
                 _dtpVence.Enabled     = !pp && _chkPendiente.Checked;
                 if (pp) { _numMonto.Value = 0m; _numPrecioUnit.Value = 0m; }
+                if (_gridLineas != null) RefrescarGridLineas();
             }
             _chkPrecioPendiente.CheckedChanged += (s, e) => AplicarPrecioPendiente();
             AplicarPrecioPendiente();
@@ -541,15 +587,67 @@ namespace SistemaGestion
             }
         }
 
-        private void RecalcMontoMP()
+        // ── Líneas de materia prima (multilínea) ────────────────────────────
+        private void AgregarLinea()
         {
-            // Cantidad × Precio Unit = Monto del egreso (en USD)
-            decimal monto = _numCantidad.Value * _numPrecioUnit.Value;
-            if (monto > 0)
+            if (_cmbInsumo.SelectedItem is not ProductoProveedor pp)
             {
-                _numMonto.Value = Math.Min(_numMonto.Maximum, monto);
-                _lblMontoCalc.Text =
-                    $"= {_numCantidad.Value:N2} × ${_numPrecioUnit.Value:N4} = ${monto:N2} USD";
+                MostrarError("Selecciona un insumo del catálogo para la línea.");
+                return;
+            }
+            if (_numCantidad.Value <= 0)
+            {
+                MostrarError("La cantidad de la línea debe ser mayor que cero.");
+                return;
+            }
+            _lineas.Add(new DetalleEgreso
+            {
+                IdArticulo     = pp.Id,
+                CodigoInterno  = pp.CodigoInterno ?? "",
+                Descripcion    = pp.Descripcion ?? "",
+                TipoInsumo     = pp.TipoInsumo ?? "Materia prima",
+                EsMateriaPrima = true,
+                Cantidad       = _numCantidad.Value,
+                PrecioUnitario = _chkPrecioPendiente.Checked ? 0m : _numPrecioUnit.Value
+            });
+            _numCantidad.Value = 0;
+            _numPrecioUnit.Value = 0;
+            RefrescarGridLineas();
+        }
+
+        private void QuitarLineaSeleccionada()
+        {
+            if (_gridLineas.CurrentRow == null) return;
+            int i = _gridLineas.CurrentRow.Index;
+            if (i >= 0 && i < _lineas.Count)
+            {
+                _lineas.RemoveAt(i);
+                RefrescarGridLineas();
+            }
+        }
+
+        private void RefrescarGridLineas()
+        {
+            // _chkPrecioPendiente puede no existir todavía (esta función corre al
+            // construir el panel MP, antes de crear la casilla de precio pendiente).
+            bool pp = _chkPrecioPendiente != null && _chkPrecioPendiente.Checked;
+
+            _gridLineas.Rows.Clear();
+            foreach (var l in _lineas)
+                _gridLineas.Rows.Add(l.Descripcion,
+                    l.Cantidad.ToString("N2"),
+                    pp ? "—" : l.PrecioUnitario.ToString("N4"),
+                    pp ? "—" : ("$ " + l.Subtotal.ToString("N2")));
+
+            decimal total = _lineas.Sum(l => l.Subtotal);
+            if (_lineas.Count == 0)
+                _lblMontoCalc.Text = "Agrega una línea por producto de la factura.";
+            else if (pp)
+                _lblMontoCalc.Text = _lineas.Count + " línea(s) · precio pendiente";
+            else
+            {
+                _lblMontoCalc.Text = _lineas.Count + " línea(s) · Total $ " + total.ToString("N2");
+                if (_numMonto != null) _numMonto.Value = Math.Min(_numMonto.Maximum, total);
             }
         }
 
@@ -671,28 +769,32 @@ namespace SistemaGestion
             if (!_v.EsValido) return;
 
             bool precioPendiente = _chkPrecioPendiente.Checked;
-            if (!precioPendiente && _numMonto.Value <= 0)
+            var cat = _cmbCategoria.SelectedItem as CategoriaGasto;
+            bool esMP = cat != null && cat.EsMateriaPrima;
+
+            // Validación adicional para Materia Prima (multilínea)
+            if (esMP)
+            {
+                // Si el usuario dejó datos en la fila de captura sin pulsar "➕",
+                // los tomamos como una línea más (conveniencia).
+                if (_cmbInsumo.SelectedItem is ProductoProveedor ppPend && _numCantidad.Value > 0)
+                    AgregarLinea();
+
+                if (_lineas.Count == 0)
+                {
+                    MostrarError("Agrega al menos una línea de insumo (insumo + cantidad, y precio si lo hay).");
+                    _cmbInsumo.Focus(); return;
+                }
+            }
+            // El monto se exige solo para egresos que NO son materia prima
+            // (en MP el monto sale de la suma de las líneas).
+            else if (!precioPendiente && _numMonto.Value <= 0)
             {
                 MostrarError("El monto debe ser mayor que cero.");
                 _numMonto.Focus(); return;
             }
 
-            var cat = _cmbCategoria.SelectedItem as CategoriaGasto;
-            // Validación adicional para Materia Prima
-            if (cat != null && cat.EsMateriaPrima)
-            {
-                if (_cmbInsumo.SelectedItem == null)
-                {
-                    MostrarError("Selecciona el insumo del catálogo para esta compra de MP.");
-                    _cmbInsumo.Focus(); return;
-                }
-                if (_numCantidad.Value <= 0)
-                {
-                    MostrarError("La cantidad debe ser mayor que cero.");
-                    _numCantidad.Focus(); return;
-                }
-            }
-            else if (precioPendiente)
+            if (!esMP && precioPendiente)
             {
                 // Precio pendiente sin materia prima: solo tiene sentido documental.
                 if (MessageBox.Show(this,
@@ -775,11 +877,19 @@ namespace SistemaGestion
                 }
                 _egreso.RutaComprobante = _txtComprobante.Text.Trim();
                 _egreso.Observaciones  = _txtObs.Text.Trim();
-                // MP: capturar insumo + cantidad
-                if (cat.EsMateriaPrima && _cmbInsumo.SelectedItem is ProductoProveedor pp)
+                // MP: capturar las líneas (una factura puede traer varios productos).
+                if (cat.EsMateriaPrima)
                 {
-                    _egreso.IdInsumo = pp.Id;
-                    _egreso.Cantidad = _numCantidad.Value;
+                    // Si es precio pendiente, forzamos precio 0 en las líneas.
+                    if (precioPendiente)
+                        foreach (var l in _lineas) l.PrecioUnitario = 0m;
+                    _egreso.Detalles = new System.Collections.Generic.List<DetalleEgreso>(_lineas);
+                }
+                else
+                {
+                    _egreso.Detalles = new System.Collections.Generic.List<DetalleEgreso>();
+                    _egreso.IdInsumo = null;
+                    _egreso.Cantidad = 0m;
                 }
 
                 int id = DatabaseService.GuardarEgreso(_egreso);

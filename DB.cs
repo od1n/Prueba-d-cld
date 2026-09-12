@@ -1142,6 +1142,30 @@ namespace SistemaGestion
             }
             catch (Exception exFix) { Console.WriteLine($"[DB] WARN fix Kardex idx: {exFix.Message}"); }
 
+            // Líneas de detalle de cada egreso (una factura puede tener 1 o más
+            // productos). Compartida con el portal web; la creamos también aquí
+            // para que el escritorio pueda registrar egresos multilínea.
+            try
+            {
+                using var cmdDG = c.CreateCommand();
+                cmdDG.CommandText = @"
+                    CREATE TABLE IF NOT EXISTS DetallesGasto (
+                        Id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                        IdGasto         INTEGER NOT NULL,
+                        Descripcion     TEXT    NOT NULL,
+                        IdArticulo      INTEGER,
+                        CodigoInterno   TEXT,
+                        TipoInsumo      TEXT,
+                        EsInventariable INTEGER NOT NULL DEFAULT 0,
+                        Cantidad        REAL    NOT NULL DEFAULT 0,
+                        PrecioUnitario  REAL    NOT NULL DEFAULT 0,
+                        Subtotal        REAL    NOT NULL DEFAULT 0
+                    );
+                    CREATE INDEX IF NOT EXISTS IX_DetallesGasto_Gasto ON DetallesGasto(IdGasto);";
+                cmdDG.ExecuteNonQuery();
+            }
+            catch (Exception exFix) { Console.WriteLine($"[DB] WARN fix DetallesGasto: {exFix.Message}"); }
+
             // Aplicar migraciones incrementales al esquema existente
             MigrarEsquema(c);
 
