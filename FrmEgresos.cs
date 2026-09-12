@@ -124,28 +124,14 @@ namespace SistemaGestion
             p.Controls.Add(btnRefr);
             x += 150;
 
-            // Botón importar OCR (abre el portal web en el navegador)
-            var btnOcr = new Button { Text = "↗ Importar OCR",
+            // Botón importar OCR — llama al digitalizador directamente (sin navegador
+            // ni API web) y abre el editor de egreso ya precargado con los datos.
+            var btnOcr = new Button { Text = "📷 Importar OCR",
                 FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(21, 101, 192),
                 ForeColor = Color.White, Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
                 Cursor = Cursors.Hand, Size = new Size(150, 32) };
             btnOcr.FlatAppearance.BorderSize = 0;
-            btnOcr.Click += (s, e) =>
-            {
-                try
-                {
-                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                    {
-                        FileName        = "https://localhost:5443/pages/egresos-nuevo.html",
-                        UseShellExecute = true
-                    });
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show("No se pudo abrir el portal: " + ex.Message,
-                        "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                }
-            };
+            btnOcr.Click += async (s, e) => await ImportarPorOcr();
             p.Controls.Add(btnOcr);
 
             // Botón nuevo gasto (manual)
@@ -562,6 +548,95 @@ namespace SistemaGestion
                 MessageBox.Show(this, ex.Message, "Error",
                     MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
+        }
+
+        // ── Importar por OCR (imagen/PDF) — nativo, vía digitalizador ────────
+        private async System.Threading.Tasks.Task ImportarPorOcr()
+        {
+            using var ofd = new OpenFileDialog
+            {
+                Title  = "Selecciona la factura o nota de entrega (imagen o PDF)",
+                Filter = "Documentos (imagen o PDF)|*.jpg;*.jpeg;*.png;*.webp;*.pdf|" +
+                         "Imágenes|*.jpg;*.jpeg;*.png;*.webp|PDF|*.pdf|Todos|*.*"
+            };
+            if (ofd.ShowDialog(this) != DialogResult.OK) return;
+            string ruta = ofd.FileName;
+
+            Cursor = Cursors.WaitCursor;
+            try
+            {
+                if (!await OcrDigitalizadorService.ServicioActivoAsync())
+                {
+                    Cursor = Cursors.Default;
+                    MessageBox.Show(this,
+                        "El digitalizador no responde en " + OcrDigitalizadorService.UrlBase + ".\n\n" +
+                        "Inícialo con run.bat en la carpeta 'digitalizador' (o revisa la variable SG_DIG_URL) " +
+                        "y vuelve a intentar.",
+                        "Digitalizador no disponible", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                var r = await OcrDigitalizadorService.ExtraerAsync(ruta);
+                Cursor = Cursors.Default;
+
+                if (!r.Encontrado)
+                {
+                    var seguir = MessageBox.Show(this,
+                        "El modelo no reconoció datos claros en el documento.\n" +
+                        "¿Abrir el formulario igual para completarlo a mano?",
+                        "Sin datos legibles", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                    if (seguir != DialogResult.Yes) return;
+                }
+
+                var eg = ConstruirEgresoDesdeOcr(r, ruta);
+                using var f = new FrmGastoEditor(eg);
+                if (f.ShowDialog(this) == DialogResult.OK) RecargarTab();
+            }
+            catch (Exception ex)
+            {
+                Cursor = Cursors.Default;
+                MessageBox.Show(this, ex.Message, "Error de OCR",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally { Cursor = Cursors.Default; }
+        }
+
+        private static Egreso ConstruirEgresoDesdeOcr(OcrResultado r, string rutaComprobante)
+        {
+            bool esBs = r.Moneda == "BS";
+            return new Egreso
+            {
+                Fecha           = OcrDigitalizadorService.ParseFecha(r.Fecha) ?? DateTime.Today,
+                Proveedor       = r.Proveedor ?? "",
+                Concepto        = !string.IsNullOrWhiteSpace(r.Proveedor)
+                                    ? "Compra a " + r.Proveedor
+                                    : (!string.IsNullOrWhiteSpace(r.NumeroFactura)
+                                        ? "Compra " + r.NumeroFactura : "Compra"),
+                MonedaOriginal  = esBs ? "BS" : "USD",
+                TipoTasa        = esBs ? "BCV" : "USD_DIRECTO",
+                MontoOriginal   = r.Total,
+                RutaComprobante = rutaComprobante,
+                // Nota de entrega sin montos → se marca precio pendiente automáticamente.
+                PrecioPendiente = r.Total <= 0m,
+                Observaciones   = ObsDesdeOcr(r)
+            };
+        }
+
+        private static string ObsDesdeOcr(OcrResultado r)
+        {
+            var sb = new System.Text.StringBuilder();
+            if (!string.IsNullOrWhiteSpace(r.NumeroFactura)) sb.Append("Doc: ").Append(r.NumeroFactura);
+            if (r.Iva > 0) { if (sb.Length > 0) sb.Append(" | "); sb.Append("IVA: ").Append(r.Iva.ToString("N2")); }
+            if (r.Items != null && r.Items.Count > 0)
+            {
+                if (sb.Length > 0) sb.Append('\n');
+                sb.Append("Líneas OCR:");
+                foreach (var it in r.Items)
+                    sb.Append("\n • ").Append(it.Descripcion)
+                      .Append("  x").Append(it.Cantidad.ToString("0.##"))
+                      .Append(it.PrecioUnitario > 0 ? " @ " + it.PrecioUnitario.ToString("0.####") : "");
+            }
+            return sb.ToString();
         }
 
         private void EditarGasto(int id)

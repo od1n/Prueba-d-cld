@@ -4,5 +4,8 @@ python-multipart==0.0.12
 jinja2==3.1.4
 requests==2.32.3
 # OCR de PDF: rasterizado de PDF a imagen (PyMuPDF) + manejo de imágenes (Pillow)
-pymupdf==1.24.10
-pillow==10.4.0
+# Rangos >= para que pip use el wheel precompilado correcto segun la version de
+# Python (incluido 3.13 en OLIMPO); versiones viejas fijas obligaban a compilar
+# desde el codigo fuente y requerian Visual Studio.
+pymupdf>=1.25.0
+pillow>=11.0.0
