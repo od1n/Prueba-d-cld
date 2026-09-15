@@ -1,0 +1,376 @@
+<title>Reportes EHP</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap');
+
+  /* ============ PALETA (marca EHP / SistemaGestion) ============ */
+  :root{
+    color-scheme: light;
+    --ground:#eaeef4;
+    --card:#ffffff;
+    --text:#25303f;
+    --muted:#6a7688;
+    --line:#dbe2ec;
+
+    --deepblue:#1e4e8c;
+    --blue:#1f5fa8;
+    --green:#2e8b57;
+    --orange:#dd6a1e;
+    --teal:#17708c;
+    --red:#c0392b;
+    --gold:#9c6b22;
+
+    /* sombras neumórficas */
+    --sh-dark:#c3ccda;
+    --sh-light:#ffffff;
+
+    --font-ui:"IBM Plex Sans",-apple-system,Segoe UI,Roboto,sans-serif;
+    --font-head:"Sora",var(--font-ui);
+    --font-num:"IBM Plex Mono",ui-monospace,monospace;
+    --r:16px;
+  }
+
+  /* ============ VARIANTE A: RELIEVE SUAVE (recomendada) ============ */
+  .app[data-variant="soft"]{
+    --ground:#edf0f5;
+    --card:#ffffff;
+    --raise: 0 1px 2px rgba(26,45,74,.06), 0 12px 26px rgba(26,45,74,.10);
+    --raise-sm: 0 1px 2px rgba(26,45,74,.06), 0 4px 12px rgba(26,45,74,.08);
+    --edge: 1px solid #e4e9f1;
+    --topglow: inset 0 1px 0 #ffffff;
+    --inset: inset 0 2px 5px rgba(26,45,74,.10);
+    --accent-mode: strip;
+  }
+  /* ============ VARIANTE B: NEUMÓRFICO PLENO (como el reel) ============ */
+  .app[data-variant="neu"]{
+    --ground:#e6ebf2;
+    --card:#e6ebf2;
+    --raise: 7px 7px 16px var(--sh-dark), -7px -7px 16px var(--sh-light);
+    --raise-sm: 4px 4px 9px var(--sh-dark), -4px -4px 9px var(--sh-light);
+    --edge: none;
+    --topglow: none;
+    --inset: inset 4px 4px 9px var(--sh-dark), inset -4px -4px 9px var(--sh-light);
+    --accent-mode: dot;
+  }
+
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--ground); color:var(--text);
+    font-family:var(--font-ui); font-size:14px; line-height:1.5;
+    padding:24px 16px 40px;
+    transition:background .25s;
+  }
+  .wrap{max-width:1120px; margin:0 auto;}
+
+  /* barra superior de decisión (fuera de la maqueta) */
+  .decider{
+    display:flex; flex-wrap:wrap; align-items:center; gap:12px 16px;
+    margin-bottom:18px;
+  }
+  .decider h1{
+    font-family:var(--font-head); font-weight:700; font-size:17px; margin:0;
+    letter-spacing:-.01em; color:var(--deepblue);
+  }
+  .decider p{margin:0; color:var(--muted); font-size:12.5px; flex:1 1 260px;}
+  .switch{display:inline-flex; background:var(--ground); border-radius:12px; padding:5px;
+    box-shadow:var(--inset);}
+  .switch button{
+    font-family:var(--font-ui); font-weight:600; font-size:12.5px; cursor:pointer;
+    border:0; background:transparent; color:var(--muted);
+    padding:8px 14px; border-radius:9px; transition:.18s;
+  }
+  .switch button[aria-pressed="true"]{
+    background:var(--card); color:var(--deepblue); box-shadow:var(--raise-sm);
+  }
+
+  /* ============ VENTANA DE LA APP ============ */
+  .app{
+    background:var(--ground); border-radius:22px; overflow:hidden;
+    box-shadow:0 30px 70px -30px rgba(20,40,70,.45);
+    transition:background .25s;
+  }
+  .titlebar{
+    background:linear-gradient(180deg, #24589a, var(--deepblue));
+    color:#fff; padding:14px 20px; display:flex; align-items:center; gap:12px;
+  }
+  .titlebar .dot{width:11px;height:11px;border-radius:50%;background:rgba(255,255,255,.35)}
+  .titlebar h2{font-family:var(--font-head); font-weight:600; font-size:15px; margin:0; letter-spacing:.01em}
+  .titlebar .spacer{flex:1}
+  .titlebar .win{display:flex; gap:16px; color:rgba(255,255,255,.7); font-size:15px}
+
+  .body{display:flex; min-height:560px}
+
+  /* ============ NAV LATERAL AGRUPADA ============ */
+  .side{
+    width:236px; flex:0 0 236px; padding:16px 14px; background:var(--ground);
+    border-right:1px solid rgba(120,140,170,.14);
+    overflow-y:auto;
+  }
+  .grp{margin-bottom:14px}
+  .grp > .glabel{
+    font-size:10.5px; font-weight:600; letter-spacing:.13em; text-transform:uppercase;
+    color:var(--muted); padding:0 10px 7px;
+  }
+  .nav{display:flex; flex-direction:column; gap:3px}
+  .nav a{
+    display:flex; align-items:center; gap:10px; text-decoration:none;
+    color:var(--text); font-size:13px; font-weight:500;
+    padding:9px 11px; border-radius:11px; cursor:pointer; transition:.15s;
+  }
+  .nav a .ic{width:8px;height:8px;border-radius:50%;background:var(--blue);opacity:.55;flex:0 0 auto}
+  .nav a:hover{background:rgba(120,140,170,.10)}
+  .nav a.active{
+    background:var(--card); box-shadow:var(--raise-sm); color:var(--deepblue); font-weight:600;
+    border:var(--edge);
+  }
+  .nav a.active .ic{opacity:1}
+  .tag-new{margin-left:auto; font-size:9.5px; font-weight:700; letter-spacing:.04em;
+    background:var(--green); color:#fff; padding:2px 7px; border-radius:20px}
+
+  /* ============ CONTENIDO ============ */
+  .main{flex:1; padding:22px 24px; overflow:auto}
+  .crumbs{display:flex; align-items:baseline; gap:10px; margin-bottom:18px}
+  .crumbs h3{font-family:var(--font-head); font-weight:700; font-size:20px; margin:0; letter-spacing:-.015em}
+  .crumbs span{color:var(--muted); font-size:12.5px}
+
+  /* KPI grid */
+  .kpis{display:grid; grid-template-columns:repeat(4,1fr); gap:16px}
+  .kpi{
+    position:relative; background:var(--card); border-radius:var(--r); padding:16px 16px 15px;
+    box-shadow:var(--raise), var(--topglow); border:var(--edge); overflow:hidden;
+    transition:transform .15s, box-shadow .25s, background .25s;
+  }
+  .kpi:hover{transform:translateY(-2px)}
+  .kpi .klabel{font-size:10.5px; font-weight:600; letter-spacing:.09em; text-transform:uppercase; color:var(--muted)}
+  .kpi .kval{font-family:var(--font-num); font-weight:600; font-size:25px; margin-top:9px;
+    color:var(--text); font-variant-numeric:tabular-nums; letter-spacing:-.02em}
+  .kpi .ksub{font-size:11px; color:var(--muted); margin-top:3px}
+  /* acento — modo tira (soft) */
+  .app[data-variant="soft"] .kpi{border-left:4px solid var(--c)}
+  .app[data-variant="soft"] .kpi .kval{color:var(--c)}
+  /* acento — modo punto en relieve (neu) */
+  .kdot{position:absolute; top:15px; right:15px; width:26px;height:26px;border-radius:50%;
+    background:var(--ground); box-shadow:var(--raise-sm); display:none; place-items:center}
+  .kdot::after{content:""; width:9px;height:9px;border-radius:50%; background:var(--c)}
+  .app[data-variant="neu"] .kdot{display:grid}
+  .app[data-variant="neu"] .kpi .kval{color:var(--c)}
+
+  /* panel / tabla */
+  .panel{background:var(--card); border-radius:var(--r); box-shadow:var(--raise), var(--topglow);
+    border:var(--edge); padding:6px; margin-top:20px; overflow:hidden}
+  .panel h4{font-family:var(--font-head); font-weight:600; font-size:14px; margin:12px 14px 4px}
+  .panel .phint{font-size:11.5px; color:var(--muted); margin:0 14px 12px}
+  .tblwrap{overflow-x:auto}
+  table{width:100%; border-collapse:collapse; font-size:12.5px; min-width:640px}
+  th{font-size:10.5px; text-transform:uppercase; letter-spacing:.07em; color:var(--muted);
+    text-align:left; font-weight:600; padding:9px 12px; border-bottom:1px solid var(--line)}
+  td{padding:10px 12px; border-bottom:1px solid rgba(120,140,170,.10)}
+  td.num{font-family:var(--font-num); text-align:right; font-variant-numeric:tabular-nums}
+  tr:last-child td{border-bottom:0}
+  .chip{display:inline-block; font-size:10.5px; font-weight:600; padding:3px 9px; border-radius:20px}
+  .chip.si{background:rgba(46,139,87,.14); color:var(--green)}
+  .chip.no{background:rgba(120,140,170,.14); color:var(--muted)}
+
+  .example-note{margin:16px 2px 0; font-size:11.5px; color:var(--muted)}
+
+  .placeholder{display:grid; place-items:center; min-height:280px; color:var(--muted);
+    background:var(--card); border-radius:var(--r); box-shadow:var(--raise-sm); border:var(--edge);
+    text-align:center; padding:24px}
+  .placeholder .pi{width:56px;height:56px;border-radius:50%;background:var(--ground);
+    box-shadow:var(--inset); margin:0 auto 14px}
+
+  @media (max-width:820px){
+    .kpis{grid-template-columns:repeat(2,1fr)}
+    .side{display:none}
+  }
+  @media (max-width:460px){
+    .kpis{grid-template-columns:1fr 1fr}
+    .kpi .kval{font-size:21px}
+  }
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="wrap">
+  <div class="decider">
+    <h1>Reportes · propuesta de rediseño</h1>
+    <p>Mismo módulo, con profundidad y relieve como el ejemplo, pero con los colores de EHP. Cambia el estilo para comparar. Las 19 pestañas pasan a un menú lateral agrupado, e incluye el nuevo reporte de <strong>Empleados</strong>.</p>
+    <div class="switch" role="group" aria-label="Estilo visual">
+      <button id="btnSoft" aria-pressed="true">Relieve suave (recomendado)</button>
+      <button id="btnNeu" aria-pressed="false">Neumórfico pleno</button>
+    </div>
+  </div>
+
+  <div class="app" id="app" data-variant="soft">
+    <div class="titlebar">
+      <span class="dot"></span>
+      <h2>SistemaGestion — Reportes</h2>
+      <span class="spacer"></span>
+      <span class="win">–&nbsp; ▢&nbsp; ✕</span>
+    </div>
+
+    <div class="body">
+      <aside class="side">
+        <div class="grp">
+          <div class="glabel">General</div>
+          <nav class="nav">
+            <a data-view="resumen" class="active"><span class="ic" style="background:var(--blue)"></span>Resumen</a>
+          </nav>
+        </div>
+        <div class="grp">
+          <div class="glabel">Ventas</div>
+          <nav class="nav">
+            <a><span class="ic" style="background:var(--green)"></span>Ventas</a>
+            <a><span class="ic" style="background:var(--green)"></span>Ventas por cliente</a>
+            <a><span class="ic" style="background:var(--green)"></span>Patrones de venta</a>
+            <a><span class="ic" style="background:var(--green)"></span>Clientes</a>
+            <a><span class="ic" style="background:var(--green)"></span>Precios</a>
+          </nav>
+        </div>
+        <div class="grp">
+          <div class="glabel">Cobros y pagos</div>
+          <nav class="nav">
+            <a><span class="ic" style="background:var(--gold)"></span>Abonos</a>
+            <a><span class="ic" style="background:var(--gold)"></span>Cuentas por cobrar</a>
+            <a><span class="ic" style="background:var(--gold)"></span>Compras</a>
+          </nav>
+        </div>
+        <div class="grp">
+          <div class="glabel">Producción</div>
+          <nav class="nav">
+            <a><span class="ic" style="background:var(--teal)"></span>Producción</a>
+            <a><span class="ic" style="background:var(--teal)"></span>Moldes</a>
+            <a><span class="ic" style="background:var(--teal)"></span>Inventario</a>
+            <a><span class="ic" style="background:var(--teal)"></span>Reorden materia prima</a>
+            <a><span class="ic" style="background:var(--teal)"></span>Mermas</a>
+          </nav>
+        </div>
+        <div class="grp">
+          <div class="glabel">Finanzas</div>
+          <nav class="nav">
+            <a><span class="ic" style="background:var(--blue)"></span>Rentabilidad</a>
+            <a><span class="ic" style="background:var(--blue)"></span>Ganancias / pérdidas</a>
+            <a><span class="ic" style="background:var(--blue)"></span>Flujo de caja</a>
+            <a><span class="ic" style="background:var(--blue)"></span>Comparación</a>
+          </nav>
+        </div>
+        <div class="grp">
+          <div class="glabel">Impuestos</div>
+          <nav class="nav">
+            <a><span class="ic" style="background:var(--red)"></span>Libro IVA</a>
+            <a><span class="ic" style="background:var(--red)"></span>ISLR estimado</a>
+          </nav>
+        </div>
+        <div class="grp">
+          <div class="glabel">Personal</div>
+          <nav class="nav">
+            <a data-view="empleados"><span class="ic" style="background:var(--orange)"></span>Empleados<span class="tag-new">NUEVO</span></a>
+            <a><span class="ic" style="background:var(--orange)"></span>Nómina</a>
+          </nav>
+        </div>
+      </aside>
+
+      <main class="main">
+        <!-- VISTA RESUMEN -->
+        <section id="view-resumen">
+          <div class="crumbs"><h3>Resumen</h3><span>Período: mes en curso · montos en USD</span></div>
+          <div class="kpis">
+            <div class="kpi" style="--c:var(--green)"><span class="kdot"></span><div class="klabel">Total facturado</div><div class="kval">$ 141.800,23</div><div class="ksub">este mes</div></div>
+            <div class="kpi" style="--c:var(--blue)"><span class="kdot"></span><div class="klabel">Total compras</div><div class="kval">$ 0,00</div><div class="ksub">este mes</div></div>
+            <div class="kpi" style="--c:var(--blue)"><span class="kdot"></span><div class="klabel">Clientes</div><div class="kval">430</div><div class="ksub">registrados</div></div>
+            <div class="kpi" style="--c:var(--gold)"><span class="kdot"></span><div class="klabel">Proveedores</div><div class="kval">2</div><div class="ksub">activos</div></div>
+            <div class="kpi" style="--c:var(--green)"><span class="kdot"></span><div class="klabel">Productos</div><div class="kval">84</div><div class="ksub">en catálogo</div></div>
+            <div class="kpi" style="--c:var(--orange)"><span class="kdot"></span><div class="klabel">Bajo mínimo</div><div class="kval">0</div><div class="ksub">a reponer</div></div>
+            <div class="kpi" style="--c:var(--teal)"><span class="kdot"></span><div class="klabel">Moldes</div><div class="kval">33</div><div class="ksub">registrados</div></div>
+            <div class="kpi" style="--c:var(--red)"><span class="kdot"></span><div class="klabel">Mant. vencido</div><div class="kval">0</div><div class="ksub">moldes</div></div>
+          </div>
+
+          <div class="panel">
+            <h4>Egresos por categoría</h4>
+            <p class="phint">Materia prima · servicios · mantenimiento — barra de ejemplo</p>
+            <div class="tblwrap"><table>
+              <thead><tr><th>Categoría</th><th>Movimientos</th><th style="text-align:right">Total USD</th></tr></thead>
+              <tbody>
+                <tr><td>Materia prima (HDPE / resina)</td><td class="num">6</td><td class="num">15.127,75</td></tr>
+                <tr><td>Servicios y mantenimiento</td><td class="num">3</td><td class="num">2.480,00</td></tr>
+                <tr><td>Oficina</td><td class="num">1</td><td class="num">320,50</td></tr>
+              </tbody>
+            </table></div>
+          </div>
+          <p class="example-note">Datos tomados de tu pantalla actual; el resto son de ejemplo para mostrar el estilo.</p>
+        </section>
+
+        <!-- VISTA EMPLEADOS (reporte nuevo) -->
+        <section id="view-empleados" hidden>
+          <div class="crumbs"><h3>Empleados</h3><span>Reporte nuevo · 6 activos</span></div>
+          <div class="kpis" style="grid-template-columns:repeat(4,1fr)">
+            <div class="kpi" style="--c:var(--blue)"><span class="kdot"></span><div class="klabel">Empleados activos</div><div class="kval">6</div></div>
+            <div class="kpi" style="--c:var(--green)"><span class="kdot"></span><div class="klabel">Cobran bono prod.</div><div class="kval">4</div></div>
+            <div class="kpi" style="--c:var(--gold)"><span class="kdot"></span><div class="klabel">Nómina base / sem.</div><div class="kval">$ 720</div></div>
+            <div class="kpi" style="--c:var(--teal)"><span class="kdot"></span><div class="klabel">Antigüedad prom.</div><div class="kval">7 a</div></div>
+          </div>
+          <div class="panel">
+            <h4>Listado de empleados</h4>
+            <p class="phint">Datos de ejemplo — así se vería el reporte con las columnas del sistema</p>
+            <div class="tblwrap"><table>
+              <thead><tr>
+                <th>Cédula</th><th>Nombre</th><th>Cargo</th><th>Tipo</th><th>Frecuencia</th>
+                <th style="text-align:right">Sueldo base</th><th>Bono prod.</th><th>Bono ventas</th><th>Activo</th>
+              </tr></thead>
+              <tbody>
+                <tr><td class="num">V-12.345.678</td><td>José Marcano</td><td>Moldeador</td><td>Obrero</td><td>Semanal</td><td class="num">120,00</td><td><span class="chip si">Sí</span></td><td><span class="chip no">No</span></td><td><span class="chip si">Sí</span></td></tr>
+                <tr><td class="num">V-15.678.901</td><td>Luis Bravo</td><td>Cortador</td><td>Taller</td><td>Semanal</td><td class="num">110,00</td><td><span class="chip si">Sí</span></td><td><span class="chip no">No</span></td><td><span class="chip si">Sí</span></td></tr>
+                <tr><td class="num">V-18.234.567</td><td>María Solano</td><td>Administración</td><td>Oficina</td><td>Quincenal</td><td class="num">180,00</td><td><span class="chip no">No</span></td><td><span class="chip si">Sí</span></td><td><span class="chip si">Sí</span></td></tr>
+                <tr><td class="num">V-20.111.222</td><td>Carlos Pérez</td><td>Acabado</td><td>Obrero</td><td>Semanal</td><td class="num">100,00</td><td><span class="chip si">Sí</span></td><td><span class="chip no">No</span></td><td><span class="chip si">Sí</span></td></tr>
+                <tr><td class="num">V-14.556.778</td><td>Rosa Díaz</td><td>Ventas</td><td>Administrativo</td><td>Mensual</td><td class="num">220,00</td><td><span class="chip no">No</span></td><td><span class="chip si">Sí</span></td><td><span class="chip si">Sí</span></td></tr>
+                <tr><td class="num">V-22.909.808</td><td>Pedro Gil</td><td>Moldeador</td><td>Temporal</td><td>Diario</td><td class="num">15,00</td><td><span class="chip si">Sí</span></td><td><span class="chip no">No</span></td><td><span class="chip si">Sí</span></td></tr>
+              </tbody>
+            </table></div>
+          </div>
+          <p class="example-note">Nombres y cédulas inventados para la maqueta.</p>
+        </section>
+
+        <!-- VISTA GENÉRICA -->
+        <section id="view-otro" hidden>
+          <div class="crumbs"><h3 id="otroTit">Reporte</h3><span>vista de ejemplo</span></div>
+          <div class="placeholder"><div><div class="pi"></div>Este reporte conserva su contenido actual;<br>aquí solo se muestra el nuevo estilo y la nueva navegación.</div></div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <p class="example-note" style="text-align:center; max-width:640px; margin:16px auto 0">
+    Maqueta para evaluar el estilo. En la app de escritorio (WinForms) el relieve se logra pintando los controles a mano; el "Relieve suave" es más práctico y legible que el neumórfico pleno.
+  </p>
+</div>
+
+<script>
+  (function(){
+    var app=document.getElementById('app');
+    var bS=document.getElementById('btnSoft'), bN=document.getElementById('btnNeu');
+    function setVar(v){
+      app.dataset.variant=v;
+      bS.setAttribute('aria-pressed', v==='soft');
+      bN.setAttribute('aria-pressed', v==='neu');
+    }
+    bS.addEventListener('click',function(){setVar('soft')});
+    bN.addEventListener('click',function(){setVar('neu')});
+
+    var views={
+      resumen:document.getElementById('view-resumen'),
+      empleados:document.getElementById('view-empleados'),
+      otro:document.getElementById('view-otro')
+    };
+    var otroTit=document.getElementById('otroTit');
+    var links=document.querySelectorAll('.nav a');
+    links.forEach(function(a){
+      a.addEventListener('click',function(){
+        links.forEach(function(x){x.classList.remove('active')});
+        a.classList.add('active');
+        var v=a.getAttribute('data-view');
+        views.resumen.hidden = v!=='resumen';
+        views.empleados.hidden = v!=='empleados';
+        if(v==='resumen'||v==='empleados'){ views.otro.hidden=true; }
+        else{ views.otro.hidden=false; otroTit.textContent=a.textContent.replace('NUEVO','').trim(); }
+      });
+    });
+  })();
+</script>

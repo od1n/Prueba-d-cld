@@ -124,7 +124,7 @@ namespace SistemaGestion.Api.Auth
 
         // ── Permisos de escritura por módulo ──────────────────────────────
         public static bool PuedeEscribirNomina(ClaimsPrincipal u) =>
-            TieneRol(u, "Admin");
+            TieneRol(u, "Admin", "Contabilidad");
         public static bool PuedeEscribirCompras(ClaimsPrincipal u) =>
             TieneRol(u, "Admin", "Compras");
         public static bool PuedeEscribirEgresos(ClaimsPrincipal u) =>
