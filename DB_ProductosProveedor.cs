@@ -191,7 +191,7 @@ namespace SistemaGestion
                 UPDATE ProductosProveedor
                 SET CodigoProveedor=$cp, IdProveedorPrinc=$ip, Descripcion=$de,
                     TipoInsumo=$ti, Unidad=$un, PrecioUltCompra=$pu,
-                    PrecioPromedio=$pp, StockActual=$sa, StockMinimo=$sm,
+                    PrecioPromedio=$pp, CostoPromedio=$pp, StockActual=$sa, StockMinimo=$sm,
                     Activo=$ac, Observaciones=$ob
                 WHERE Id=$id";
             cmd.Parameters.AddWithValue("$id", pp.Id);
@@ -322,7 +322,7 @@ namespace SistemaGestion
 
                 var cmdUpd = conn.CreateCommand(); cmdUpd.Transaction = tx;
                 cmdUpd.CommandText = @"UPDATE ProductosProveedor
-                    SET StockActual=$ns, PrecioPromedio=$cpp, PrecioUltCompra=$pu
+                    SET StockActual=$ns, PrecioPromedio=$cpp, CostoPromedio=$cpp, PrecioUltCompra=$pu
                     WHERE CodigoInterno=$cod";
                 cmdUpd.Parameters.AddWithValue("$ns",  (double)nuevoStock);
                 cmdUpd.Parameters.AddWithValue("$cpp", (double)costoPP);
@@ -407,7 +407,7 @@ namespace SistemaGestion
 
                 // Actualizar costo promedio y último precio de compra del insumo.
                 var up = conn.CreateCommand(); up.Transaction = tx;
-                up.CommandText = "UPDATE ProductosProveedor SET PrecioPromedio=$pp, PrecioUltCompra=$pu WHERE CodigoInterno=$cod";
+                up.CommandText = "UPDATE ProductosProveedor SET PrecioPromedio=$pp, CostoPromedio=$pp, PrecioUltCompra=$pu WHERE CodigoInterno=$cod";
                 up.Parameters.AddWithValue("$pp", (double)avgNew);
                 up.Parameters.AddWithValue("$pu", (double)costoRealUnit);
                 up.Parameters.AddWithValue("$cod", codigoInsumo);

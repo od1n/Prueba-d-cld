@@ -317,7 +317,7 @@ namespace SistemaGestion
                 foreach (var mat in reg.Materiales)
                 {
                     var pp = c.CreateCommand(); pp.Transaction = tx;
-                    pp.CommandText = "SELECT COALESCE(StockActual,0), COALESCE(CostoPromedio,0) FROM ProductosProveedor WHERE CodigoInterno=$ci";
+                    pp.CommandText = "SELECT COALESCE(StockActual,0), COALESCE(NULLIF(CostoPromedio,0), PrecioPromedio, 0) FROM ProductosProveedor WHERE CodigoInterno=$ci";
                     pp.Parameters.AddWithValue("$ci", mat.CodigoInsumo);
                     decimal saMp = 0m, cprom = 0m; bool existeMp = false;
                     using (var rp = pp.ExecuteReader())
