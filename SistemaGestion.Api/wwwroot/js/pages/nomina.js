@@ -7,6 +7,7 @@ let periodoActivo = null;   // objeto del período seleccionado
 let detallesActivos = [];   // líneas del período abierto
 let empleadoEditar = null;  // empleado en formulario
 let _empleadosCargados = []; // lista completa para filtro client-side
+let _tasaBCVEmp = 0, _tasaParEmp = 0; // tasa del dia para convertir sueldo Bs<->USD
 
 // ── Tabs ──────────────────────────────────────────────────────────────────
 const TABS = [
@@ -562,6 +563,7 @@ async function renderTabEmpleados() {
     <div id="listaEmpleados"><div class="loading-msg"><div class="spinner"></div></div></div>`;
     try {
         const solo = document.getElementById('soloActivos')?.checked ?? true;
+        try { const t = await apiGet('/api/nomina/tasa-actual'); _tasaBCVEmp = t?.tasaBCV || 0; _tasaParEmp = t?.tasaParalela || 0; } catch {}
         const lista = await apiGet(`/api/nomina/empleados?soloActivos=${solo}`) || [];
         _empleadosCargados = lista;
         renderListaEmpleados(lista);
@@ -638,9 +640,22 @@ function pagoEmpleadoHTML(tipo, emp) {
             Cobra por <strong>bono de producción</strong> (tarifa por producto, igual para todos los obreros).
             No lleva sueldo base ni tarifa por persona.</div>`;
     }
+    const esNuevo    = !empleadoEditar;
+    const esAdminEmp  = !!(typeof Auth !== 'undefined' && Auth.getUser && Auth.getUser() && Auth.getUser().esAdmin);
+    const sueldoLock  = (!esNuevo && !esAdminEmp) ? 'disabled' : '';
+    const bcvEmp      = _tasaBCVEmp || 0;
+    const tasaHint    = bcvEmp > 0
+        ? `Tasa BCV: ${formatNum(bcvEmp,2)} · Paralela: ${_tasaParEmp>0?formatNum(_tasaParEmp,2):'—'}`
+        : 'No hay tasa del día registrada; regístrala para convertir a Bs.';
+    const notaLock    = sueldoLock ? ' · <span style="color:var(--naranja)">Solo un administrador puede cambiar un sueldo ya registrado.</span>' : '';
     let h = `<div class="form-group mb-8">
         <label class="form-label">${labelSueldoBase(tipo)}</label>
-        <input id="eSueldoBase" type="number" class="input-field" value="${base}" min="0" step="0.01">
+        <input id="eSueldoBase" type="number" class="input-field" value="${base}" min="0" step="0.01" ${sueldoLock} oninput="sincSueldo('usd')">
+    </div>
+    <div class="form-group mb-8">
+        <label class="form-label">Equivalente en Bs (tasa BCV)</label>
+        <input id="eSueldoBs" type="number" class="input-field" value="${bcvEmp>0?(base*bcvEmp).toFixed(2):0}" min="0" step="0.01" ${sueldoLock} oninput="sincSueldo('bs')">
+        <div class="text-dim" style="font-size:8.5pt;margin-top:4px">${tasaHint}${notaLock}</div>
     </div>`;
     if (tipo === 'Oficina') {
         h += `<label style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
@@ -660,6 +675,16 @@ function pagoEmpleadoHTML(tipo, emp) {
     }
     return h;
 }
+function sincSueldo(origen) {
+    const bcv = _tasaBCVEmp || 0;
+    if (bcv <= 0) return;
+    const usdEl = document.getElementById('eSueldoBase');
+    const bsEl  = document.getElementById('eSueldoBs');
+    if (!usdEl || !bsEl) return;
+    if (origen === 'usd') bsEl.value = ((parseFloat(usdEl.value) || 0) * bcv).toFixed(2);
+    else                  usdEl.value = ((parseFloat(bsEl.value) || 0) / bcv).toFixed(2);
+}
+
 function onTipoEmpleadoChange() {
     const tipo = document.getElementById('eTipo')?.value || 'Obrero';
     const cont = document.getElementById('ePago');

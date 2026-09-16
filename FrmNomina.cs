@@ -181,7 +181,7 @@ namespace SistemaGestion
                 e.Id, e.Cedula, e.NombreCompleto, e.Cargo, e.TipoEmpleado,
                 Ingreso    = e.FechaIngreso.ToShortDateString(),
                 Antiguedad = e.AniosServicio + " anos",
-                Sueldo     = e.TipoEmpleado == "Obrero" ? "por produccion" : e.SueldoBaseUSD.ToString("C2"),
+                Sueldo     = e.TipoEmpleado == "Obrero" ? "por produccion" : ("$ " + e.SueldoBaseUSD.ToString("N2")),
                 Frecuencia = e.FrecuenciaPago,
                 Bonos      = (e.EligibleBonoProd ? "Prod " : "") + (e.EligibleBonoVenta ? "Venta" : ""),
                 Estado     = e.Activo ? "Activo" : "Inactivo"
@@ -281,9 +281,11 @@ namespace SistemaGestion
         private TextBox       txtCedula, txtNombre, txtApellido, txtCargo, txtTel, txtEmail;
         private ComboBox      cmbTipo;
         private DateTimePicker dtpIngreso;
-        private NumericUpDown  numSueldo, numSalNormal;
+        private NumericUpDown  numSueldo, numSalNormal, numSueldoBs;
         private CheckBox       chkActivo, chkBonoProd, chkBonoVenta;
-        private Label          lblSueldo, lblSalNormal;
+        private Label          lblSueldo, lblSalNormal, lblSueldoBs, lblTasaEmp, lblSueldoNota;
+        private bool           _syncBs;
+        private decimal        _bcvEmp, _parEmp;
 
         private static readonly string[] TIPOS_EMP = { "Obrero", "Oficina", "Taller", "Administrativo", "Temporal" };
         private static string MapTipoEmpleado(string t) {
@@ -304,7 +306,7 @@ namespace SistemaGestion
         {
             bool nuevo = e == null;
             Text = nuevo ? "Nuevo Empleado" : "Editar — " + e?.NombreCompleto;
-            Size = new Size(520, 560); StartPosition = FormStartPosition.CenterParent;
+            Size = new Size(560, 620); StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.Sizable; MaximizeBox = true; MinimizeBox = false;
             BackColor = Color.FromArgb(240, 244, 250);
 
@@ -318,9 +320,9 @@ namespace SistemaGestion
             void L(string t) => Controls.Add(new Label { Text = t, Location = new Point(16, y + 3),
                 AutoSize = true, Font = new Font("Segoe UI", 9f, FontStyle.Bold) });
             TextBox T(string v = "") { var tb = new TextBox { Text = v,
-                Location = new Point(175, y), Size = new Size(315, 24) }; Controls.Add(tb); return tb; }
+                Location = new Point(215, y), Size = new Size(315, 24) }; Controls.Add(tb); return tb; }
             NumericUpDown N(decimal v, decimal max = 99999) { var n = new NumericUpDown {
-                Location = new Point(175, y), Size = new Size(200, 24),
+                Location = new Point(215, y), Size = new Size(200, 24),
                 Maximum = max, DecimalPlaces = 2, Value = v }; Controls.Add(n); return n; }
 
             L("Cedula:");        txtCedula   = T(e?.Cedula   ?? ""); y += 32;
@@ -329,7 +331,7 @@ namespace SistemaGestion
             L("Cargo:");         txtCargo    = T(e?.Cargo    ?? ""); y += 32;
 
             L("Tipo empleado:");
-            cmbTipo = new ComboBox { Location = new Point(175, y), Size = new Size(200, 24),
+            cmbTipo = new ComboBox { Location = new Point(215, y), Size = new Size(200, 24),
                 DropDownStyle = ComboBoxStyle.DropDownList };
             cmbTipo.Items.AddRange(new object[] { "Obrero", "Oficina", "Taller", "Administrativo", "Temporal" });
             cmbTipo.SelectedItem = MapTipoEmpleado(e?.TipoEmpleado);
@@ -337,23 +339,68 @@ namespace SistemaGestion
             Controls.Add(cmbTipo); y += 32;
 
             L("Fecha ingreso:");
-            dtpIngreso = new DateTimePicker { Location = new Point(175, y), Size = new Size(200, 24),
+            dtpIngreso = new DateTimePicker { Location = new Point(215, y), Size = new Size(200, 24),
                 Format = DateTimePickerFormat.Short,
                 Value = e?.FechaIngreso ?? DateTime.Today };
             Controls.Add(dtpIngreso); y += 32;
 
-            lblSueldo = new Label { Text = "Sueldo base USD:", Location = new Point(16, y + 3),
-                AutoSize = true, Font = new Font("Segoe UI", 9f, FontStyle.Bold) };
+            // ── Sueldo base + equivalente en Bs (el valor que se guarda es USD) ──
+            var _tasaEmp = DatabaseService.ObtenerTasaHoy();
+            _bcvEmp = _tasaEmp?.TasaBCV ?? 0m;
+            _parEmp = _tasaEmp?.TasaParalelo ?? 0m;
+
+            lblSueldo = new Label { Text = LabelSueldoBase(cmbTipo.SelectedItem?.ToString() ?? "Oficina"),
+                Location = new Point(16, y + 3), AutoSize = true,
+                Font = new Font("Segoe UI", 9f, FontStyle.Bold) };
             Controls.Add(lblSueldo);
-            numSueldo = N(e?.SueldoBaseUSD ?? 0); y += 32;
-            if (!Sesion.PuedeEditarSueldo)
+            numSueldo = new NumericUpDown { Location = new Point(215, y), Size = new Size(150, 24),
+                Maximum = 99999m, DecimalPlaces = 2, Value = e?.SueldoBaseUSD ?? 0m };
+            Controls.Add(numSueldo); y += 30;
+
+            lblSueldoBs = new Label { Text = "Equivalente en Bs:", Location = new Point(16, y + 3),
+                AutoSize = true, Font = new Font("Segoe UI", 9f) };
+            Controls.Add(lblSueldoBs);
+            numSueldoBs = new NumericUpDown { Location = new Point(215, y), Size = new Size(150, 24),
+                Maximum = 999999999m, DecimalPlaces = 2,
+                Value = Math.Min(999999999m, Math.Round((e?.SueldoBaseUSD ?? 0m) * _bcvEmp, 2)) };
+            Controls.Add(numSueldoBs); y += 28;
+
+            lblTasaEmp = new Label {
+                Text = _bcvEmp > 0
+                    ? $"Tasa BCV hoy: {_bcvEmp:N2}  ·  Paralela: {(_parEmp > 0 ? _parEmp.ToString("N2") : "—")}   (USD = Bs ÷ BCV)"
+                    : "No hay tasa del día registrada — regístrala en Tasa de cambio para convertir a Bs.",
+                Location = new Point(16, y), AutoSize = true,
+                Font = new Font("Segoe UI", 8f, FontStyle.Italic),
+                ForeColor = _bcvEmp > 0 ? Color.FromArgb(90, 90, 100) : Color.FromArgb(150, 60, 0) };
+            Controls.Add(lblTasaEmp); y += 22;
+
+            // Conversión en vivo USD <-> Bs (USD es lo que persiste)
+            numSueldo.ValueChanged += (s, ev) => {
+                if (_syncBs || _bcvEmp <= 0) return;
+                _syncBs = true;
+                numSueldoBs.Value = Math.Min(numSueldoBs.Maximum, Math.Round(numSueldo.Value * _bcvEmp, 2));
+                _syncBs = false;
+            };
+            numSueldoBs.ValueChanged += (s, ev) => {
+                if (_syncBs || _bcvEmp <= 0) return;
+                _syncBs = true;
+                numSueldo.Value = Math.Min(numSueldo.Maximum, Math.Round(numSueldoBs.Value / _bcvEmp, 2));
+                _syncBs = false;
+            };
+
+            // Sueldo NUEVO lo carga quien crea; sueldo YA REGISTRADO solo lo cambia Admin.
+            bool puedeEditarEsteSueldo = nuevo ? Sesion.PuedeEditarSueldo : Sesion.EsAdmin;
+            if (!puedeEditarEsteSueldo)
             {
-                numSueldo.Enabled = false;   // el sueldo fijo solo lo cambian Ventas/Compras/Contabilidad/Admin
-                Controls.Add(new Label {
-                    Text = "(El sueldo solo lo cambian Ventas, Compras o Contabilidad)",
-                    Location = new Point(175, y - 6), AutoSize = true,
-                    Font = new Font("Segoe UI", 8f, FontStyle.Italic), ForeColor = Color.FromArgb(150, 60, 0) });
-                y += 18;
+                numSueldo.Enabled = false;
+                numSueldoBs.Enabled = false;
+                lblSueldoNota = new Label {
+                    Text = nuevo
+                        ? "(El sueldo solo lo cargan Admin, Ventas, Compras o Contabilidad)"
+                        : "(Solo un administrador puede cambiar un sueldo ya registrado)",
+                    Location = new Point(215, y - 4), AutoSize = true,
+                    Font = new Font("Segoe UI", 8f, FontStyle.Italic), ForeColor = Color.FromArgb(150, 60, 0) };
+                Controls.Add(lblSueldoNota); y += 18;
             }
 
             lblSalNormal = new Label { Text = "Sal. normal mensual USD:", Location = new Point(16, y + 3),
@@ -363,16 +410,16 @@ namespace SistemaGestion
 
             // Bonos: la TARIFA es por producto (se define en el producto); aqui solo si el empleado cobra.
             chkBonoProd = new CheckBox { Text = "Cobra bono de produccion (por producto)",
-                Location = new Point(175, y), AutoSize = true, Checked = e?.EligibleBonoProd ?? false };
+                Location = new Point(215, y), AutoSize = true, Checked = e?.EligibleBonoProd ?? false };
             Controls.Add(chkBonoProd); y += 26;
             chkBonoVenta = new CheckBox { Text = "Cobra bono de ventas (por producto)",
-                Location = new Point(175, y), AutoSize = true, Checked = e?.EligibleBonoVenta ?? false };
+                Location = new Point(215, y), AutoSize = true, Checked = e?.EligibleBonoVenta ?? false };
             Controls.Add(chkBonoVenta); y += 32;
 
             L("Telefono:");  txtTel   = T(e?.Telefono ?? ""); y += 32;
             L("Email:");     txtEmail = T(e?.Email    ?? ""); y += 28;
 
-            chkActivo = new CheckBox { Text = "Empleado activo", Location = new Point(175, y),
+            chkActivo = new CheckBox { Text = "Empleado activo", Location = new Point(215, y),
                 AutoSize = true, Checked = e?.Activo ?? true };
             Controls.Add(chkActivo); y += 44;
 
@@ -418,12 +465,18 @@ namespace SistemaGestion
             {
                 // Sin sueldo base ni salario normal fijo; cobra solo bono de produccion (por producto).
                 lblSueldo.Visible = numSueldo.Visible = false;
+                lblSueldoBs.Visible = numSueldoBs.Visible = false;
+                lblTasaEmp.Visible = false;
+                if (lblSueldoNota != null) lblSueldoNota.Visible = false;
                 lblSalNormal.Visible = numSalNormal.Visible = false;
                 chkBonoProd.Checked = true;  chkBonoProd.Visible  = false;
                 chkBonoVenta.Checked = false; chkBonoVenta.Visible = false;
                 return;
             }
             lblSueldo.Visible = numSueldo.Visible = true;
+            lblSueldoBs.Visible = numSueldoBs.Visible = true;
+            lblTasaEmp.Visible = true;
+            if (lblSueldoNota != null) lblSueldoNota.Visible = true;
             lblSueldo.Text = LabelSueldoBase(tipo);
             bool salVisible = tipo != "Temporal";
             lblSalNormal.Visible = numSalNormal.Visible = salVisible;

@@ -6,6 +6,34 @@ namespace SistemaGestion.Api.Endpoints
     {
         public static void MapNominaEndpoints(this WebApplication app)
         {
+            // Snapshot del sueldo con las tasas del dia (BCV y paralela). Best-effort.
+            static void RegHistSueldo(Microsoft.Data.Sqlite.SqliteConnection c, int idEmp, decimal sueldoUSD, string usuario)
+            {
+                try {
+                    var ct = c.CreateCommand();
+                    ct.CommandText = @"CREATE TABLE IF NOT EXISTS HistorialSueldo (
+                        Id INTEGER PRIMARY KEY AUTOINCREMENT, IdEmpleado INTEGER NOT NULL, Fecha TEXT NOT NULL,
+                        SueldoUSD REAL NOT NULL DEFAULT 0, SueldoBs REAL NOT NULL DEFAULT 0,
+                        TasaBCV REAL NOT NULL DEFAULT 0, TasaParalela REAL NOT NULL DEFAULT 0, Usuario TEXT)";
+                    ct.ExecuteNonQuery();
+                    decimal bcv = 0m, par = 0m;
+                    var tc = c.CreateCommand();
+                    tc.CommandText = "SELECT COALESCE(TasaBCV,0),COALESCE(TasaParalelo,0) FROM TasaCambio ORDER BY Fecha DESC LIMIT 1";
+                    using (var rr = tc.ExecuteReader()) if (rr.Read()) { bcv = (decimal)rr.GetDouble(0); par = (decimal)rr.GetDouble(1); }
+                    var hc = c.CreateCommand();
+                    hc.CommandText = @"INSERT INTO HistorialSueldo (IdEmpleado,Fecha,SueldoUSD,SueldoBs,TasaBCV,TasaParalela,Usuario)
+                        VALUES ($ie,$fe,$su,$sb,$bcv,$par,$u)";
+                    hc.Parameters.AddWithValue("$ie", idEmp);
+                    hc.Parameters.AddWithValue("$fe", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+                    hc.Parameters.AddWithValue("$su", (double)sueldoUSD);
+                    hc.Parameters.AddWithValue("$sb", (double)Math.Round(sueldoUSD * bcv, 2));
+                    hc.Parameters.AddWithValue("$bcv", (double)bcv);
+                    hc.Parameters.AddWithValue("$par", (double)par);
+                    hc.Parameters.AddWithValue("$u", usuario ?? "");
+                    hc.ExecuteNonQuery();
+                } catch { }
+            }
+
             // ════════════════════════════════════════════════════════════════
             //  EMPLEADOS
             // ════════════════════════════════════════════════════════════════
@@ -64,6 +92,7 @@ namespace SistemaGestion.Api.Endpoints
                 var id = c.CreateCommand();
                 id.CommandText = "SELECT last_insert_rowid()";
                 int newId = (int)(long)(id.ExecuteScalar() ?? 0L);
+                if (sueldoNuevo > 0) RegHistSueldo(c, newId, sueldoNuevo, ctx.User.Identity?.Name ?? "Portal");
                 try {
                     var au = c.CreateCommand();
                     au.CommandText = "INSERT INTO LogAuditoria (FechaHora,Usuario,Accion,Tabla,Detalle) VALUES ($fh,$us,$ac,$ta,$de)";
@@ -89,9 +118,9 @@ namespace SistemaGestion.Api.Endpoints
                     var oo = qsa.ExecuteScalar();
                     if (oo != null && oo != DBNull.Value) sueldoAnt = Convert.ToDecimal(oo);
                 } catch {}
-                bool puedeSueldo = ctx.User.IsInRole("Admin") || ctx.User.IsInRole("Ventas")
-                    || ctx.User.IsInRole("Compras") || ctx.User.IsInRole("Contabilidad");
-                decimal sueldoFinal = (sueldoAnt >= 0 && req.SueldoBaseUSD != sueldoAnt && !puedeSueldo)
+                // Sueldo YA REGISTRADO: solo un Admin puede cambiarlo.
+                bool esAdmin = ctx.User.IsInRole("Admin");
+                decimal sueldoFinal = (sueldoAnt >= 0 && req.SueldoBaseUSD != sueldoAnt && !esAdmin)
                     ? sueldoAnt : req.SueldoBaseUSD;
                 var upd = c.CreateCommand();
                 upd.CommandText = @"UPDATE Empleados SET
@@ -131,6 +160,8 @@ namespace SistemaGestion.Api.Endpoints
                         au.ExecuteNonQuery();
                     } catch {}
                 }
+                if (rows > 0 && sueldoAnt >= 0 && sueldoAnt != sueldoFinal)
+                    RegHistSueldo(c, id, sueldoFinal, ctx.User.Identity?.Name ?? "Portal");
                 return rows == 0 ? Results.NotFound() : Results.Ok(new { ok = true });
             }).AddEndpointFilter(RequireRole.Of(TokenService.PuedeEscribirNomina)).RequireAuthorization();
 
@@ -143,6 +174,19 @@ namespace SistemaGestion.Api.Endpoints
                 cmd.ExecuteNonQuery();
                 return Results.Ok(new { ok = true });
             }).AddEndpointFilter(RequireRole.Of(TokenService.PuedeEscribirNomina)).RequireAuthorization();
+
+            // Tasa del dia para convertir sueldos Bs <-> USD en el portal.
+            app.MapGet("/api/nomina/tasa-actual", () =>
+            {
+                using var c = Db.Conn();
+                var cmd = c.CreateCommand();
+                cmd.CommandText = "SELECT COALESCE(TasaBCV,0), COALESCE(TasaParalelo,0), Fecha FROM TasaCambio ORDER BY Fecha DESC LIMIT 1";
+                using var r = cmd.ExecuteReader();
+                if (r.Read())
+                    return Results.Ok(new { tasaBCV = r.GetDouble(0), tasaParalela = r.GetDouble(1), fecha = r.GetString(2) });
+                return Results.Ok(new { tasaBCV = 0.0, tasaParalela = 0.0, fecha = (string?)null });
+            }).RequireAuthorization();
+
 
             // ════════════════════════════════════════════════════════════════
             //  PERÍODOS

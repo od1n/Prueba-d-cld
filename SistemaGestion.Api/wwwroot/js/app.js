@@ -47,7 +47,8 @@ const Auth = {
         sessionStorage.setItem('sg_user', JSON.stringify({
             nombreUsuario:  data.nombreUsuario,
             nombreCompleto: data.nombreCompleto,
-            rol:            data.rol
+            rol:            data.rol,
+            esAdmin:        !!data.esAdmin
         }));
         return data;
     },

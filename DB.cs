@@ -814,6 +814,17 @@ namespace SistemaGestion
                 SalarioNormalUSD REAL    NOT NULL DEFAULT 0
             );
 
+            CREATE TABLE IF NOT EXISTS HistorialSueldo (
+                Id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                IdEmpleado   INTEGER NOT NULL,
+                Fecha        TEXT    NOT NULL,
+                SueldoUSD    REAL    NOT NULL DEFAULT 0,
+                SueldoBs     REAL    NOT NULL DEFAULT 0,
+                TasaBCV      REAL    NOT NULL DEFAULT 0,
+                TasaParalela REAL    NOT NULL DEFAULT 0,
+                Usuario      TEXT
+            );
+
             CREATE TABLE IF NOT EXISTS PeriodosNomina (
                 Id               INTEGER PRIMARY KEY AUTOINCREMENT,
                 FechaDesde       TEXT    NOT NULL,
@@ -5358,6 +5369,33 @@ namespace SistemaGestion
             return r.Read() ? BindEmp(r) : null;
         }
 
+        // Registra un snapshot del sueldo con las tasas del dia (BCV y paralela).
+        // Best-effort: nunca bloquea el guardado del empleado.
+        private static void RegistrarHistorialSueldo(Microsoft.Data.Sqlite.SqliteConnection c, int idEmpleado, decimal sueldoUSD)
+        {
+            try
+            {
+                decimal bcv = 0m, par = 0m;
+                var tc = c.CreateCommand();
+                tc.CommandText = "SELECT COALESCE(TasaBCV,0), COALESCE(TasaParalelo,0) FROM TasaCambio ORDER BY Fecha DESC LIMIT 1";
+                using (var rr = tc.ExecuteReader())
+                    if (rr.Read()) { bcv = (decimal)rr.GetDouble(0); par = (decimal)rr.GetDouble(1); }
+                var hc = c.CreateCommand();
+                hc.CommandText = @"INSERT INTO HistorialSueldo
+                    (IdEmpleado,Fecha,SueldoUSD,SueldoBs,TasaBCV,TasaParalela,Usuario)
+                    VALUES ($ie,$fe,$su,$sb,$bcv,$par,$u)";
+                hc.Parameters.AddWithValue("$ie", idEmpleado);
+                hc.Parameters.AddWithValue("$fe", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+                hc.Parameters.AddWithValue("$su", (double)sueldoUSD);
+                hc.Parameters.AddWithValue("$sb", (double)Math.Round(sueldoUSD * bcv, 2));
+                hc.Parameters.AddWithValue("$bcv", (double)bcv);
+                hc.Parameters.AddWithValue("$par", (double)par);
+                hc.Parameters.AddWithValue("$u", Sesion.NombreUsuario ?? "");
+                hc.ExecuteNonQuery();
+            }
+            catch { /* historico best-effort */ }
+        }
+
         public static void InsertarEmpleado(Empleado e)
         {
             using var c = Conn();
@@ -5373,6 +5411,7 @@ namespace SistemaGestion
             e.Id = (int)(long)cmd.ExecuteScalar();
             RegistrarAuditoria("EMPLEADO_NUEVO", "Empleados",
                 $"{e.NombreCompleto} (sueldo fijo {e.SueldoBaseUSD:0.##} USD)");
+            if (e.SueldoBaseUSD > 0) RegistrarHistorialSueldo(c, e.Id, e.SueldoBaseUSD);
         }
 
         public static void ActualizarEmpleado(Empleado e)
@@ -5387,8 +5426,8 @@ namespace SistemaGestion
                 var o = qsa.ExecuteScalar();
                 if (o != null && o != DBNull.Value) sueldoAnt = Convert.ToDecimal(o);
             } catch {}
-            // El sueldo fijo solo lo cambian Admin/Ventas/Compras/Contabilidad; si no, se conserva
-            if (sueldoAnt >= 0 && e.SueldoBaseUSD != sueldoAnt && !Sesion.PuedeEditarSueldo)
+            // Sueldo YA REGISTRADO: solo un Admin puede cambiarlo; si no, se conserva el anterior
+            if (sueldoAnt >= 0 && e.SueldoBaseUSD != sueldoAnt && !Sesion.EsAdmin)  // sueldo ya registrado: solo Admin
                 e.SueldoBaseUSD = sueldoAnt;
 
             var cmd = c.CreateCommand();
@@ -5403,8 +5442,11 @@ namespace SistemaGestion
             cmd.ExecuteNonQuery();
             // Registro de quién y cuándo cambió el sueldo fijo
             if (sueldoAnt >= 0 && sueldoAnt != e.SueldoBaseUSD)
+            {
                 RegistrarAuditoria("EMPLEADO_SUELDO_CAMBIO", "Empleados",
                     $"{e.NombreCompleto}: sueldo fijo {sueldoAnt:0.##} -> {e.SueldoBaseUSD:0.##} USD");
+                RegistrarHistorialSueldo(c, e.Id, e.SueldoBaseUSD);
+            }
         }
 
         private static Empleado BindEmp(SqliteDataReader r) => new Empleado

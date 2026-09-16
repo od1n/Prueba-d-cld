@@ -126,7 +126,8 @@ namespace SistemaGestion.Api.Endpoints
                     EsperarMinimo(sw, 200);
                     // ⚠ Ya NO devolvemos el token en el cuerpo: vivirá únicamente
                     // en la cookie HttpOnly para que XSS no pueda exfiltrarlo.
-                    return Results.Ok(new { nombreUsuario = nombre, nombreCompleto = nomComp, rol });
+                    bool esAdminLogin = ("," + (rolesCsv ?? "").Replace(" ", "") + ",").Contains(",Admin,");
+                    return Results.Ok(new { nombreUsuario = nombre, nombreCompleto = nomComp, rol, esAdmin = esAdminLogin });
                 }
                 catch (Exception ex)
                 {
