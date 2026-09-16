@@ -281,10 +281,10 @@ namespace SistemaGestion
         private TextBox       txtCedula, txtNombre, txtApellido, txtCargo, txtTel, txtEmail;
         private ComboBox      cmbTipo;
         private DateTimePicker dtpIngreso;
-        private NumericUpDown  numSueldo, numSalNormal, numSueldoBs;
+        private NumericUpDown  numSueldo, numSalNormal, numSueldoBs, numSalNormalBs;
         private CheckBox       chkActivo, chkBonoProd, chkBonoVenta;
-        private Label          lblSueldo, lblSalNormal, lblSueldoBs, lblTasaEmp, lblSueldoNota;
-        private bool           _syncBs;
+        private Label          lblSueldo, lblSalNormal, lblSueldoBs, lblTasaEmp, lblSueldoNota, lblSalNormalBs;
+        private bool           _syncBs, _syncSN;
         private decimal        _bcvEmp, _parEmp;
 
         private static readonly string[] TIPOS_EMP = { "Obrero", "Oficina", "Taller", "Administrativo", "Temporal" };
@@ -306,7 +306,7 @@ namespace SistemaGestion
         {
             bool nuevo = e == null;
             Text = nuevo ? "Nuevo Empleado" : "Editar — " + e?.NombreCompleto;
-            Size = new Size(560, 620); StartPosition = FormStartPosition.CenterParent;
+            Size = new Size(560, 660); StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.Sizable; MaximizeBox = true; MinimizeBox = false;
             BackColor = Color.FromArgb(240, 244, 250);
 
@@ -406,7 +406,30 @@ namespace SistemaGestion
             lblSalNormal = new Label { Text = "Sal. normal mensual USD:", Location = new Point(16, y + 3),
                 AutoSize = true, Font = new Font("Segoe UI", 9f, FontStyle.Bold) };
             Controls.Add(lblSalNormal);
-            numSalNormal = N(e?.SalarioNormalUSD ?? 0); y += 32;
+            numSalNormal = new NumericUpDown { Location = new Point(215, y), Size = new Size(150, 24),
+                Maximum = 99999m, DecimalPlaces = 2, Value = e?.SalarioNormalUSD ?? 0m };
+            Controls.Add(numSalNormal); y += 30;
+
+            lblSalNormalBs = new Label { Text = "Equivalente en Bs:", Location = new Point(16, y + 3),
+                AutoSize = true, Font = new Font("Segoe UI", 9f) };
+            Controls.Add(lblSalNormalBs);
+            numSalNormalBs = new NumericUpDown { Location = new Point(215, y), Size = new Size(150, 24),
+                Maximum = 999999999m, DecimalPlaces = 2,
+                Value = Math.Min(999999999m, Math.Round((e?.SalarioNormalUSD ?? 0m) * _bcvEmp, 2)) };
+            Controls.Add(numSalNormalBs); y += 30;
+
+            numSalNormal.ValueChanged += (s, ev) => {
+                if (_syncSN || _bcvEmp <= 0) return;
+                _syncSN = true;
+                numSalNormalBs.Value = Math.Min(numSalNormalBs.Maximum, Math.Round(numSalNormal.Value * _bcvEmp, 2));
+                _syncSN = false;
+            };
+            numSalNormalBs.ValueChanged += (s, ev) => {
+                if (_syncSN || _bcvEmp <= 0) return;
+                _syncSN = true;
+                numSalNormal.Value = Math.Min(numSalNormal.Maximum, Math.Round(numSalNormalBs.Value / _bcvEmp, 2));
+                _syncSN = false;
+            };
 
             // Bonos: la TARIFA es por producto (se define en el producto); aqui solo si el empleado cobra.
             chkBonoProd = new CheckBox { Text = "Cobra bono de produccion (por producto)",
@@ -469,6 +492,7 @@ namespace SistemaGestion
                 lblTasaEmp.Visible = false;
                 if (lblSueldoNota != null) lblSueldoNota.Visible = false;
                 lblSalNormal.Visible = numSalNormal.Visible = false;
+                lblSalNormalBs.Visible = numSalNormalBs.Visible = false;
                 chkBonoProd.Checked = true;  chkBonoProd.Visible  = false;
                 chkBonoVenta.Checked = false; chkBonoVenta.Visible = false;
                 return;
@@ -480,6 +504,7 @@ namespace SistemaGestion
             lblSueldo.Text = LabelSueldoBase(tipo);
             bool salVisible = tipo != "Temporal";
             lblSalNormal.Visible = numSalNormal.Visible = salVisible;
+            lblSalNormalBs.Visible = numSalNormalBs.Visible = salVisible;
             // Elegibilidad de bonos por tipo
             chkBonoVenta.Visible = (tipo == "Oficina" || tipo == "Administrativo");
             chkBonoProd.Visible  = (tipo == "Administrativo");

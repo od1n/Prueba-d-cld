@@ -670,7 +670,11 @@ function pagoEmpleadoHTML(tipo, emp) {
     if (tipo !== 'Temporal') {
         h += `<div class="form-group mb-8">
             <label class="form-label">Salario normal USD (para IVSS / prestaciones)</label>
-            <input id="eSNormal" type="number" class="input-field" value="${sn}" min="0" step="0.01">
+            <input id="eSNormal" type="number" class="input-field" value="${sn}" min="0" step="0.01" oninput="sincSalNormal('usd')">
+        </div>
+        <div class="form-group mb-8">
+            <label class="form-label">Salario normal — equivalente en Bs (tasa BCV)</label>
+            <input id="eSNormalBs" type="number" class="input-field" value="${bcvEmp>0?(sn*bcvEmp).toFixed(2):0}" min="0" step="0.01" oninput="sincSalNormal('bs')">
         </div>`;
     }
     return h;
@@ -680,6 +684,16 @@ function sincSueldo(origen) {
     if (bcv <= 0) return;
     const usdEl = document.getElementById('eSueldoBase');
     const bsEl  = document.getElementById('eSueldoBs');
+    if (!usdEl || !bsEl) return;
+    if (origen === 'usd') bsEl.value = ((parseFloat(usdEl.value) || 0) * bcv).toFixed(2);
+    else                  usdEl.value = ((parseFloat(bsEl.value) || 0) / bcv).toFixed(2);
+}
+
+function sincSalNormal(origen) {
+    const bcv = _tasaBCVEmp || 0;
+    if (bcv <= 0) return;
+    const usdEl = document.getElementById('eSNormal');
+    const bsEl  = document.getElementById('eSNormalBs');
     if (!usdEl || !bsEl) return;
     if (origen === 'usd') bsEl.value = ((parseFloat(usdEl.value) || 0) * bcv).toFixed(2);
     else                  usdEl.value = ((parseFloat(bsEl.value) || 0) / bcv).toFixed(2);
