@@ -27,7 +27,7 @@ namespace SistemaGestion
     public class FrmDashboardV2 : FormBase
     {
         // ── Paleta (claro, alineado a UITheme + propuestas mockup) ──────────
-        private static readonly Color CFondo     = Color.FromArgb(244, 246, 250);
+        private static readonly Color CFondo     = Color.FromArgb(223, 230, 241); // = UINeo.Ground
         private static readonly Color CSurf      = Color.White;
         private static readonly Color CBorde     = Color.FromArgb(215, 222, 230);
         private static readonly Color CTexto     = Color.FromArgb(30,  34,  51);
@@ -154,12 +154,21 @@ namespace SistemaGestion
 
         private Panel ConstruirStripKPIs()
         {
-            var p = new Panel { Dock = DockStyle.Fill, BackColor = CSurf };
+            var p = new Panel { Dock = DockStyle.Fill, BackColor = UINeo.Ground };
             var fila = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill, RowCount = 1, ColumnCount = 9,
-                BackColor = CSurf, Padding = new Padding(8, 6, 8, 6)
+                BackColor = UINeo.Ground, Padding = new Padding(10, 8, 10, 8)
             };
+            // Sombra neumórfica bajo cada celda KPI marcada con Tag "neo"
+            fila.Paint += (s, e) =>
+            {
+                var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias;
+                foreach (Control c in fila.Controls)
+                    if (c is Panel sp && (sp.Tag as string) == "neo" && sp.Visible)
+                        UINeo.SombraRelieve(g, sp.Bounds, 10);
+            };
+            fila.Layout += (s, e) => fila.Invalidate();
             // KPIs proporcionales + botones fijos (responsive a cualquier tamaño)
             fila.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 14f));   // Ventas Hoy
             fila.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 13f));   // Mes
@@ -177,22 +186,23 @@ namespace SistemaGestion
             fila.Controls.Add(KpiCell("STK",         out _lblStock,     "0",       CDang),    3, 0);
             fila.Controls.Add(KpiCell("CxC",         out _lblCxC,       "$ 0,00",  CAzul),    4, 0);
             fila.Controls.Add(KpiBcvParalelo(),                                              5, 0);
-            fila.Controls.Add(new Panel { BackColor = CSurf },                                6, 0);
+            fila.Controls.Add(new Panel { BackColor = UINeo.Ground },                          6, 0);
             fila.Controls.Add(BotonAnalizarIA(),                                              7, 0);
             fila.Controls.Add(BotonActualizar(),                                              8, 0);
 
             p.Controls.Add(fila);
-            // borde inferior
-            p.Paint += (s, e) => e.Graphics.DrawLine(new Pen(CBorde),
-                0, p.Height - 1, p.Width, p.Height - 1);
             return p;
         }
 
         private Panel KpiCell(string etiqueta, out Label lblValor, string valorIni, Color barra)
         {
-            var p = new Panel { Dock = DockStyle.Fill, BackColor = CSurf,
-                Padding = new Padding(6, 4, 4, 4) };
-            var bar = new Panel { Dock = DockStyle.Left, Width = 3, BackColor = barra };
+            var p = new Panel { Dock = DockStyle.Fill, BackColor = UINeo.Surface,
+                Padding = new Padding(8, 5, 5, 5), Tag = "neo",
+                Margin = new Padding(5, 4, 5, 4) };
+            p.Resize += (s2, e2) => { if (p.Width > 0 && p.Height > 0) {
+                using var pt = UICards.RoundRect(new Rectangle(0, 0, p.Width, p.Height), 10);
+                p.Region = new Region(pt); } };
+            var bar = new Panel { Dock = DockStyle.Left, Width = 4, BackColor = barra };
             var lblEt = new Label { Text = etiqueta, Font = new Font("Segoe UI", 7.5f, FontStyle.Bold),
                 ForeColor = CTextoTen, AutoSize = false, Dock = DockStyle.Top, Height = 16,
                 Padding = new Padding(6, 0, 0, 0) };
@@ -203,16 +213,21 @@ namespace SistemaGestion
             lblValor = lblVal;
             p.Controls.Add(lblVal); p.Controls.Add(lblEt); p.Controls.Add(bar);
             return p;
+            // (celda KPI elevada)
         }
 
         private Panel KpiBcvParalelo()
         {
-            var p = new Panel { Dock = DockStyle.Fill, BackColor = CSurf,
-                Padding = new Padding(10, 2, 6, 2) };
-            var bar = new Panel { Dock = DockStyle.Left, Width = 3, BackColor = COk };
+            var p = new Panel { Dock = DockStyle.Fill, BackColor = UINeo.Surface,
+                Padding = new Padding(10, 2, 6, 2), Tag = "neo",
+                Margin = new Padding(5, 4, 5, 4) };
+            p.Resize += (s2, e2) => { if (p.Width > 0 && p.Height > 0) {
+                using var pt = UICards.RoundRect(new Rectangle(0, 0, p.Width, p.Height), 10);
+                p.Region = new Region(pt); } };
+            var bar = new Panel { Dock = DockStyle.Left, Width = 4, BackColor = COk };
 
             // Fila de valores: altura fija = 1 línea, imposible que wrappee
-            var rowVals = new Panel { Dock = DockStyle.Fill, BackColor = CSurf };
+            var rowVals = new Panel { Dock = DockStyle.Fill, BackColor = UINeo.Surface };
 
             var lblBcvTag = new Label { Text = "BCV", Font = new Font("Segoe UI", 8f, FontStyle.Bold),
                 ForeColor = CTextoTen, Dock = DockStyle.Left, Width = 32, AutoSize = false,
@@ -586,18 +601,18 @@ namespace SistemaGestion
 
             // Subclase Panel con DoubleBuffer real + estilos de pintado
             // que evitan acumulacion de trazos al redimensionar/cambiar.
-            _pnlGrafica = new GraficaPanel { Dock = DockStyle.Fill, BackColor = CSurf };
+            _pnlGrafica = new GraficaPanel { Dock = DockStyle.Fill, BackColor = UINeo.Surface };
             _pnlGrafica.Paint += PintarGrafica;
             // Forzar invalidacion COMPLETA al resize, no parcial
             _pnlGrafica.Resize += (s, e) => _pnlGrafica.Invalidate();
 
             var contenedor = new Panel { Dock = DockStyle.Fill,
-                BackColor = CSurf, Padding = new Padding(12) };
+                BackColor = UINeo.Ground, Padding = new Padding(12) };
             contenedor.Controls.Add(_pnlGrafica);
             contenedor.Controls.Add(header);
 
             // Borde
-            var wrap = new Panel { Dock = DockStyle.Fill, BackColor = CBorde,
+            var wrap = new Panel { Dock = DockStyle.Fill, BackColor = UINeo.Ground,
                 Padding = new Padding(1) };
             wrap.Controls.Add(contenedor);
             p.Controls.Add(wrap);
@@ -864,7 +879,8 @@ namespace SistemaGestion
         {
             var g = e.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.Clear(CSurf);
+            g.Clear(UINeo.Ground);
+            UINeo.PozoHundido(g, new Rectangle(0, 0, _pnlGrafica.Width - 1, _pnlGrafica.Height - 1), 14);
             if (_data is null)
             {
                 using var br = new SolidBrush(CTextoTen);
@@ -907,7 +923,7 @@ namespace SistemaGestion
             int n = datos.Count;
             using var penLine = new Pen(CAzul, 2);
             using var penGrid = new Pen(Color.FromArgb(240, 242, 246), 1);
-            using var brArea  = new SolidBrush(Color.FromArgb(30, CAzul));
+            using var brArea  = new SolidBrush(Color.FromArgb(46, CCyan));
             using var brLbl   = new SolidBrush(CTextoTen);
             using var brVal   = new SolidBrush(CTexto);
             var fontLbl = new Font("Segoe UI", 9f);
@@ -940,7 +956,7 @@ namespace SistemaGestion
                 g.DrawLines(penLine, pts);
             }
             // ultimo punto destacado
-            using var brPt = new SolidBrush(CAzul);
+            using var brPt = new SolidBrush(CCyan);
             g.FillEllipse(brPt, pts[n - 1].X - 4, pts[n - 1].Y - 4, 8, 8);
             g.DrawString(prefijo + ((float)datos[n - 1].val).ToString("N0"),
                 new Font("Segoe UI", 9f, FontStyle.Bold), brVal,
@@ -960,8 +976,6 @@ namespace SistemaGestion
             float maxV = (float)Math.Max(1m, datos.Max(d => d.val));
             int n = datos.Count;
             float bw = (W - padL - padR) / (float)(n * 1.5f);
-            using var brBar = new SolidBrush(CAzul);
-            using var brBarSoft = new SolidBrush(Color.FromArgb(150, CAzul));
             using var brLbl = new SolidBrush(CTextoTen);
             using var penGrid = new Pen(Color.FromArgb(240, 242, 246), 1);
             var fontLbl = new Font("Segoe UI", 9f);
@@ -976,7 +990,13 @@ namespace SistemaGestion
             {
                 float x = padL + (W - padL - padR) * (i + 0.25f) / n;
                 float h = (H - padT - padB) * (float)datos[i].val / maxV;
-                g.FillRectangle(i == n - 1 ? brBar : brBarSoft, x, H - padB - h, bw, h);
+                if (h < 1f) h = 1f;
+                var rBar = new RectangleF(x, H - padB - h, bw, h);
+                bool ult = (i == n - 1);
+                Color cTop = ult ? CCyan : Color.FromArgb(170, CCyan);
+                Color cBot = ult ? CAzul : Color.FromArgb(195, CAzul);
+                using (var lg = new LinearGradientBrush(rBar, cTop, cBot, LinearGradientMode.Vertical))
+                    g.FillRectangle(lg, rBar);
                 g.DrawString(datos[i].lbl, fontLbl, brLbl, x, H - padB + 4);
             }
         }
@@ -991,7 +1011,6 @@ namespace SistemaGestion
             float maxV = (float)Math.Max(1m, datos.Max(d => d.val));
             int n = Math.Min(10, datos.Count);
             float rh = (H - padT - padB) / (float)n - 4;
-            using var brBar = new SolidBrush(CAzul);
             using var brVal = new SolidBrush(CTextoTen);
             var fontLbl = new Font("Segoe UI", 9.5f);
             // Pase 1: dibujar todas las barras
@@ -1001,10 +1020,12 @@ namespace SistemaGestion
                 float y = padT + i * (rh + 4);
                 float w = (W - padL - padR) * (float)datos[i].val / maxV;
                 posiciones[i] = (y, w);
-                g.FillRectangle(brBar, padL, y, Math.Max(w, 2), rh);
+                var rBar = new RectangleF(padL, y, Math.Max(w, 2), rh);
+                using (var lg = new LinearGradientBrush(rBar, CCyan, CAzul, LinearGradientMode.Horizontal))
+                    g.FillRectangle(lg, rBar);
             }
             // Pase 2: fondo limpio + TextRenderer con elipsis confiable
-            using var brBg = new SolidBrush(CSurf);
+            using var brBg = new SolidBrush(UINeo.Surface);
             for (int i = 0; i < n; i++)
             {
                 var (y, w) = posiciones[i];
@@ -1041,7 +1062,7 @@ namespace SistemaGestion
                 g.FillPie(br, cx, cy, size, size, ang, sw);
                 ang += sw;
             }
-            using var brHole = new SolidBrush(CSurf);
+            using var brHole = new SolidBrush(UINeo.Surface);
             g.FillEllipse(brHole, cx + size / 4, cy + size / 4, size / 2, size / 2);
             // Texto central centrado correctamente
             using var brTotal = new SolidBrush(CTexto);

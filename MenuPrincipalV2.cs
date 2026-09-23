@@ -302,23 +302,40 @@ namespace SistemaGestion
 
         private Panel ConstruirStripInfo()
         {
-            var p = new Panel { Dock = DockStyle.Fill, BackColor = CSurf };
-            p.Paint += (s, e) => e.Graphics.DrawLine(new Pen(CBorde),
-                0, p.Height - 1, p.Width, p.Height - 1);
+            var p = new Panel { Dock = DockStyle.Fill, BackColor = UINeo.Ground };
 
             var fila = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill, RowCount = 1, ColumnCount = 4,
-                BackColor = CSurf, Padding = new Padding(8, 4, 8, 4)
+                BackColor = UINeo.Ground, Padding = new Padding(10, 8, 10, 8)
             };
+            // Sombra de relieve neumórfico bajo cada sub-tarjeta del strip
+            fila.Paint += (s, e) =>
+            {
+                var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias;
+                foreach (Control c in fila.Controls)
+                    if (c is Panel sp && sp.Visible)
+                        UINeo.SombraRelieve(g, sp.Bounds, 12);
+            };
+            fila.Layout += (s, e) => fila.Invalidate();
+            // Convierte un panel en sub-tarjeta elevada (esquinas redondeadas)
+            void Relieve(Control c, int radio = 12)
+            {
+                c.Margin = new Padding(6, 5, 6, 5);
+                void redib() { if (c.Width > 0 && c.Height > 0) {
+                    using var pt = RoundRect(new Rectangle(0, 0, c.Width, c.Height), radio);
+                    c.Region = new Region(pt); } }
+                c.Resize += (s2, e2) => redib();
+                redib();
+            }
             fila.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 320f));   // saludo + fecha
             fila.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 300f));   // BCV/Paralelo
             fila.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));    // alertas
             fila.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180f));   // boton actualizar tasa
 
             // Saludo + fecha
-            var pnlSaludo = new Panel { Dock = DockStyle.Fill, BackColor = CSurf,
-                Padding = new Padding(12, 4, 4, 4) };
+            var pnlSaludo = new Panel { Dock = DockStyle.Fill, BackColor = UINeo.Surface,
+                Padding = new Padding(14, 6, 6, 6) };
             var lblSaludo = new Label
             {
                 Text = SaludoSegunHora() + ", " + (PrimerNombre() ?? "Admin"),
@@ -334,13 +351,16 @@ namespace SistemaGestion
             };
             pnlSaludo.Controls.Add(lblFecha); pnlSaludo.Controls.Add(lblSaludo);
             fila.Controls.Add(pnlSaludo, 0, 0);
+            Relieve(pnlSaludo);
 
             // KPI BCV/Paralelo (mismo widget que el dashboard)
-            fila.Controls.Add(KpiBcvParalelo(), 1, 0);
+            var pnlBcv = KpiBcvParalelo();
+            fila.Controls.Add(pnlBcv, 1, 0);
+            Relieve(pnlBcv);
 
             // Alertas resumidas
-            var pnlA = new Panel { Dock = DockStyle.Fill, BackColor = CSurf,
-                Padding = new Padding(8, 4, 4, 4) };
+            var pnlA = new Panel { Dock = DockStyle.Fill, BackColor = UINeo.Surface,
+                Padding = new Padding(10, 6, 6, 6) };
             var bar = new Panel { Dock = DockStyle.Left, Width = 3, BackColor = CWarn };
             var lblTit = new Label { Text = "ALERTAS",
                 Font = new Font("Segoe UI", 7.5f, FontStyle.Bold),
@@ -359,6 +379,7 @@ namespace SistemaGestion
             };
             pnlA.Controls.Add(_lblAlertas); pnlA.Controls.Add(lblTit); pnlA.Controls.Add(bar);
             fila.Controls.Add(pnlA, 2, 0);
+            Relieve(pnlA);
 
             // Boton "Actualizar tasa" — altura fija, anclado horizontal y centrado vertical
             var btnTasa = new Button
@@ -394,14 +415,14 @@ namespace SistemaGestion
 
         private Panel KpiBcvParalelo()
         {
-            var p = new Panel { Dock = DockStyle.Fill, BackColor = CSurf,
+            var p = new Panel { Dock = DockStyle.Fill, BackColor = UINeo.Surface,
                 Padding = new Padding(8, 4, 4, 4) };
             var bar = new Panel { Dock = DockStyle.Left, Width = 3, BackColor = COk };
 
             var fila = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill, RowCount = 2, ColumnCount = 4,
-                BackColor = CSurf
+                BackColor = UINeo.Surface
             };
             // Columnas internas mas anchas para que "BCV" y "PAR" no se partan
             fila.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 50f));    // label BCV
