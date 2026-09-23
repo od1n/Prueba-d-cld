@@ -167,16 +167,21 @@ namespace SistemaGestion
                 Dock = DockStyle.Fill, Orientation = Orientation.Vertical,
                 BackColor = Color.FromArgb(220, 230, 245) };
             split.FixedPanel = FixedPanel.Panel2;   // el panel de material mantiene su ancho
-            split.Panel2MinSize = 360;
 
             void AjustarSplit()
             {
-                int panel2 = 470;                    // ancho fijo del panel de material
-                int dist = split.Width - panel2;
-                if (dist < split.Panel1MinSize) dist = split.Panel1MinSize;
-                int max = split.Width - split.Panel2MinSize;
-                if (dist > max) dist = max;
-                if (dist > 0) split.SplitterDistance = dist;
+                try
+                {
+                    if (split.Width <= 0) return;
+                    int min = split.Panel1MinSize;
+                    int max = split.Width - split.Panel2MinSize;
+                    if (max <= min) return;             // ventana demasiado angosta: no tocar
+                    int dist = split.Width - 470;       // ~470 px para el panel de material
+                    if (dist < min) dist = min;
+                    if (dist > max) dist = max;
+                    split.SplitterDistance = dist;
+                }
+                catch { /* nunca romper la ventana por el splitter */ }
             }
             Load += (s, e) => AjustarSplit();
 
