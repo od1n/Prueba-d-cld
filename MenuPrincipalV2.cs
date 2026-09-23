@@ -320,13 +320,13 @@ namespace SistemaGestion
                 var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias;
                 foreach (Control c in fila.Controls)
                     if (c.Visible && (c is Panel || (c.Tag as string) == "neo"))
-                        UINeo.SombraRelieve(g, c.Bounds, 14);
+                        UINeo.SombraAuto(g, c, 14);
             };
             fila.Layout += (s, e) => fila.Invalidate();
             // Convierte un panel en sub-tarjeta elevada (esquinas redondeadas)
             void Relieve(Control c, int radio = 14)
             {
-                c.Margin = new Padding(8, 8, 8, 8);
+                c.Margin = new Padding(8, 6, 8, 14);
                 void redib() { if (c.Width > 0 && c.Height > 0) {
                     using var pt = RoundRect(new Rectangle(0, 0, c.Width, c.Height), radio);
                     c.Region = new Region(pt); } }

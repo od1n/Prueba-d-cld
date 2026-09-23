@@ -166,8 +166,8 @@ namespace SistemaGestion
             {
                 var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias;
                 foreach (Control c in fila.Controls)
-                    if (c is Panel sp && (sp.Tag as string) == "neo" && sp.Visible)
-                        UINeo.SombraRelieve(g, sp.Bounds, 12);
+                    if (c.Visible && (c.Tag as string) == "neo")
+                        UINeo.SombraAuto(g, c, 12);
             };
             fila.Layout += (s, e) => fila.Invalidate();
             // KPIs proporcionales + botones fijos (responsive a cualquier tamaño)
@@ -199,7 +199,7 @@ namespace SistemaGestion
         {
             var p = new Panel { Dock = DockStyle.Fill, BackColor = UINeo.Surface,
                 Padding = new Padding(8, 6, 5, 6), Tag = "neo",
-                Margin = new Padding(6, 8, 6, 8) };
+                Margin = new Padding(6, 6, 6, 14) };
             p.Resize += (s2, e2) => { if (p.Width > 0 && p.Height > 0) {
                 using var pt = UICards.RoundRect(new Rectangle(0, 0, p.Width, p.Height), 12);
                 p.Region = new Region(pt); } };
@@ -221,7 +221,7 @@ namespace SistemaGestion
         {
             var p = new Panel { Dock = DockStyle.Fill, BackColor = UINeo.Surface,
                 Padding = new Padding(10, 4, 6, 4), Tag = "neo",
-                Margin = new Padding(6, 8, 6, 8) };
+                Margin = new Padding(6, 6, 6, 14) };
             p.Resize += (s2, e2) => { if (p.Width > 0 && p.Height > 0) {
                 using var pt = UICards.RoundRect(new Rectangle(0, 0, p.Width, p.Height), 12);
                 p.Region = new Region(pt); } };

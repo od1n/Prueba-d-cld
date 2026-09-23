@@ -25,8 +25,8 @@ namespace SistemaGestion
         public static readonly Color Ground     = Color.FromArgb(221, 229, 240); // #dde5f0
         public static readonly Color Surface     = Color.FromArgb(221, 229, 240); // = fondo (neumorfismo)
         public static readonly Color SurfaceHi    = Color.FromArgb(231, 238, 247); // hover / realce
-        public static readonly Color ShadowDark   = Color.FromArgb(185, 197, 214); // #b9c5d6 (sombra)
-        public static readonly Color ShadowLight  = Color.FromArgb(248, 251, 255); // #f8fbff (luz)
+        public static readonly Color ShadowDark   = Color.FromArgb(163, 176, 196); // sombra (más contraste)
+        public static readonly Color ShadowLight  = Color.FromArgb(250, 253, 255); // luz
         public static readonly Color Ink          = Color.FromArgb( 38,  55,  79); // #26374f
         public static readonly Color InkSoft      = Color.FromArgb(106, 120, 144); // #6a7890
 
@@ -42,16 +42,27 @@ namespace SistemaGestion
         /// suficiente para que la sombra no se recorte (≥ 8 px por lado).
         /// </summary>
         public static void SombraRelieve(Graphics g, Rectangle cardRect, int radio)
+            => SombraDoble(g, cardRect, radio, ShadowDark, ShadowLight, 96, 80);
+
+        /// <summary>Relieve cuyo tono es una variación del color del propio elemento (botones de color).</summary>
+        public static void SombraRelieveColor(Graphics g, Rectangle rect, int radio, Color color)
+        {
+            Color dk = UICards.Mezclar(color, Color.Black, 0.34f);  // tono más oscuro
+            Color lt = UICards.Mezclar(color, Color.White, 0.55f);  // tono más claro
+            SombraDoble(g, rect, radio, dk, lt, 150, 120);
+        }
+
+        private static void SombraDoble(Graphics g, Rectangle cardRect, int radio,
+                                        Color oscura, Color clara, int alphaOsc, int alphaClara)
         {
             if (cardRect.Width <= 0 || cardRect.Height <= 0) return;
             var smAnt = g.SmoothingMode;
             g.SmoothingMode = SmoothingMode.AntiAlias;
-
             // Sombra oscura (abajo-derecha) — de lejos (tenue) a cerca (fuerte)
             for (int o = 8; o >= 1; o--)
             {
-                int a = (int)(58 * (1.0 - (o - 1) / 8.0)); if (a < 6) a = 6;
-                using var br = new SolidBrush(Color.FromArgb(a, ShadowDark));
+                int a = (int)(alphaOsc * (1.0 - (o - 1) / 8.0)); if (a < 6) a = 6;
+                using var br = new SolidBrush(Color.FromArgb(Math.Min(a, 255), oscura));
                 using var p = UICards.RoundRect(
                     new Rectangle(cardRect.X + o, cardRect.Y + o, cardRect.Width, cardRect.Height), radio);
                 g.FillPath(br, p);
@@ -59,14 +70,26 @@ namespace SistemaGestion
             // Luz (arriba-izquierda)
             for (int o = 8; o >= 1; o--)
             {
-                int a = (int)(72 * (1.0 - (o - 1) / 8.0)); if (a < 7) a = 7;
-                using var br = new SolidBrush(Color.FromArgb(a, ShadowLight));
+                int a = (int)(alphaClara * (1.0 - (o - 1) / 8.0)); if (a < 7) a = 7;
+                using var br = new SolidBrush(Color.FromArgb(Math.Min(a, 255), clara));
                 using var p = UICards.RoundRect(
                     new Rectangle(cardRect.X - o, cardRect.Y - o, cardRect.Width, cardRect.Height), radio);
                 g.FillPath(br, p);
             }
             g.SmoothingMode = smAnt;
         }
+
+        /// <summary>Elige relieve gris (superficie) o de color (acento) según el fondo del control.</summary>
+        public static void SombraAuto(Graphics g, Control c, int radio)
+        {
+            if (EsAccento(c.BackColor)) SombraRelieveColor(g, c.Bounds, radio, c.BackColor);
+            else                        SombraRelieve(g, c.Bounds, radio);
+        }
+
+        private static bool EsAccento(Color bg)
+            => !(Cerca(bg, Surface) || Cerca(bg, Ground) || Cerca(bg, SurfaceHi));
+        private static bool Cerca(Color a, Color b)
+            => Math.Abs(a.R - b.R) + Math.Abs(a.G - b.G) + Math.Abs(a.B - b.B) <= 24;
 
         /// <summary>
         /// Recorre los hijos de un contenedor y pinta el relieve detrás de los
@@ -77,7 +100,7 @@ namespace SistemaGestion
         {
             foreach (Control c in contenedor.Controls)
                 if (c.Visible && EsNeo(c))
-                    SombraRelieve(g, c.Bounds, radio);
+                    SombraAuto(g, c, radio);
         }
 
         private static bool EsNeo(Control c) => (c.Tag as string)?.Contains("neo") == true;
