@@ -251,40 +251,65 @@ namespace SistemaGestion
             b.Font        = FuenteBoton;
             b.MinimumSize = new Size(0, AlturaBoton);
 
+            // TODOS los botones: pastilla neumórfica (relieve propio) con el
+            // color semántico SOLO en el texto. Sin rellenos de color.
             Color bg = b.BackColor;
-            if (bg == SystemColors.Control)      { PastillaAccento(b, Primario, PrimarioHover); return; }
-            Color? acc = MapearAcento(bg);
-            if      (acc == Peligro)     PastillaAccento(b, Peligro, Oscurecer(Peligro, 0.18f));
-            else if (acc == Ok)          PastillaAccento(b, Ok, Oscurecer(Ok, 0.18f));
-            else if (acc == Acento)      PastillaAccento(b, Acento, Oscurecer(Acento, 0.15f));
-            else if (acc == Morado)      PastillaAccento(b, Morado, Oscurecer(Morado, 0.18f));
-            else if (acc == Advertencia) PastillaAccento(b, Advertencia, Oscurecer(Advertencia, 0.18f));
-            else if (acc == Primario)    PastillaAccento(b, Primario, PrimarioHover);
-            else if (Luma(bg) > 205)     PastillaSuave(b);                 // secundario claro
-            else                         PastillaAccento(b, Primario, PrimarioHover);
+            Color tinta;
+            if (bg == SystemColors.Control) tinta = Primario;
+            else
+            {
+                Color? acc = MapearAcento(bg);
+                if      (acc == Peligro)     tinta = Peligro;
+                else if (acc == Ok)          tinta = Ok;
+                else if (acc == Morado)      tinta = Morado;
+                else if (acc == Advertencia) tinta = Advertencia;
+                else if (acc == Acento)      tinta = Primario;   // cian: poco contraste
+                else if (acc == Primario)    tinta = Primario;
+                else if (Luma(bg) > 205)     tinta = Tinta;      // secundario neutro
+                else                         tinta = Primario;
+            }
+            PastillaSuave(b, tinta);
         }
 
-        public static void PastillaAccento(Button b, Color fondo, Color hover)
+        // Botón neumórfico ÚNICO: mismo tono del fondo + bisel de relieve
+        // (luz arriba-izq, sombra abajo-der) + color semántico en el texto.
+        public static void PastillaSuave(Button b, Color? tinta = null)
         {
+            int radio = RadioChico;
             b.FlatStyle = FlatStyle.Flat;
+            b.BackColor = Fondo;
+            b.ForeColor = tinta ?? Primario;
             b.FlatAppearance.BorderSize = 0;
-            b.BackColor = fondo;
-            b.ForeColor = Color.White;
-            b.FlatAppearance.MouseOverBackColor = hover;
+            b.FlatAppearance.MouseOverBackColor = SuperficieAlt;
+            b.FlatAppearance.MouseDownBackColor = Color.FromArgb(206, 216, 230);
             b.Tag = MarcaNeo(b.Tag);
-            Redondear(b, RadioChico);
+            Redondear(b, radio);
+            b.Paint += (s, e) =>
+                BevelNeo(e.Graphics, new Rectangle(0, 0, b.Width, b.Height), radio);
         }
 
-        public static void PastillaSuave(Button b)
+        // Alias por compatibilidad (ya no existen rellenos de color)
+        public static void PastillaAccento(Button b, Color fondo, Color hover)
+            => PastillaSuave(b, fondo);
+
+        /// <summary>Bisel neumórfico DENTRO del control: funciona en cualquier layout.</summary>
+        public static void BevelNeo(Graphics g, Rectangle r, int radio)
         {
-            b.FlatStyle = FlatStyle.Flat;
-            b.BackColor = SuperficieAlt;
-            b.ForeColor = Primario;
-            b.FlatAppearance.BorderSize  = 1;
-            b.FlatAppearance.BorderColor = BordeClaro;
-            b.FlatAppearance.MouseOverBackColor = Color.FromArgb(240, 245, 252);
-            b.Tag = MarcaNeo(b.Tag);
-            Redondear(b, RadioChico);
+            if (r.Width < 6 || r.Height < 6) return;
+            var sm = g.SmoothingMode; g.SmoothingMode = SmoothingMode.AntiAlias;
+            int d = radio * 2;
+            if (d > r.Width) d = r.Width;
+            if (d > r.Height) d = r.Height;
+            int rr = d / 2;
+            using var penL = new Pen(Color.FromArgb(235, Luz), 1.8f);
+            using var penD = new Pen(Color.FromArgb(150, Sombra), 1.8f);
+            g.DrawArc(penL, r.X + 1, r.Y + 1, d, d, 180, 90);
+            g.DrawLine(penL, r.X + rr, r.Y + 1, r.Right - rr, r.Y + 1);
+            g.DrawLine(penL, r.X + 1, r.Y + rr, r.X + 1, r.Bottom - rr);
+            g.DrawArc(penD, r.Right - 2 - d, r.Bottom - 2 - d, d, d, 0, 90);
+            g.DrawLine(penD, r.X + rr, r.Bottom - 2, r.Right - rr, r.Bottom - 2);
+            g.DrawLine(penD, r.Right - 2, r.Y + rr, r.Right - 2, r.Bottom - rr);
+            g.SmoothingMode = sm;
         }
 
         public static void EstilizarInput(TextBox t)
@@ -329,11 +354,11 @@ namespace SistemaGestion
             var b = new Button { Text = texto, AutoSize = false, Height = AlturaBoton };
             switch (tipo)
             {
-                case TipoBoton.Secundario: PastillaSuave(b); break;
-                case TipoBoton.Peligro:    PastillaAccento(b, Peligro, Oscurecer(Peligro, 0.18f)); break;
-                case TipoBoton.Exito:      PastillaAccento(b, Ok, Oscurecer(Ok, 0.18f)); break;
-                case TipoBoton.Acento:     PastillaAccento(b, Acento, Oscurecer(Acento, 0.15f)); break;
-                default:                   PastillaAccento(b, Primario, PrimarioHover); break;
+                case TipoBoton.Secundario: PastillaSuave(b, Tinta); break;
+                case TipoBoton.Peligro:    PastillaSuave(b, Peligro); break;
+                case TipoBoton.Exito:      PastillaSuave(b, Ok); break;
+                case TipoBoton.Acento:     PastillaSuave(b, Primario); break;
+                default:                   PastillaSuave(b, Primario); break;
             }
             return b;
         }
