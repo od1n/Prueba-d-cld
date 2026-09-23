@@ -10,7 +10,7 @@ namespace SistemaGestion
     //  Permite configurar IVA, aportes IVSS/RPVH/INCES, UT y salario mínimo.
     //  Solo accesible por administradores.
     // ══════════════════════════════════════════════════════════════════════
-    public class FrmConfigLegal : Form
+    public class FrmConfigLegal : FormBase
     {
         // ── Controles de facturación ───────────────────────────────────────
         private NumericUpDown _nudIVA       = null!;

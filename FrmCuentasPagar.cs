@@ -327,7 +327,7 @@ namespace SistemaGestion
     // =========================================================================
     // DIALOGO NUEVA / EDITAR CUENTA
     // =========================================================================
-    public class DlgCuentaPagar : Form
+    public class DlgCuentaPagar : FormBase
     {
         public CuentaPagar Resultado { get; private set; }
         private readonly CuentaPagar _original;
@@ -498,7 +498,7 @@ namespace SistemaGestion
     // =========================================================================
     // DIALOGO REGISTRAR PAGO
     // =========================================================================
-    public class DlgPagoCxP : Form
+    public class DlgPagoCxP : FormBase
     {
         public PagoCxP Resultado { get; private set; }
         private NumericUpDown numMonto;
@@ -580,7 +580,7 @@ namespace SistemaGestion
     // =========================================================================
     // VISOR DE PAGOS
     // =========================================================================
-    public class FrmVerPagosCxP : Form
+    public class FrmVerPagosCxP : FormBase
     {
         public FrmVerPagosCxP(CuentaPagar cuenta, List<PagoCxP> pagos)
         {

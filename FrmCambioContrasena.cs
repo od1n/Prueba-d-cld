@@ -6,7 +6,7 @@ using System.Windows.Forms;
 
 namespace SistemaGestion
 {
-    public class FrmCambioContrasena : Form
+    public class FrmCambioContrasena : FormBase
     {
         private readonly string _usuario;
         private readonly bool   _forzado;

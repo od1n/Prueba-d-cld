@@ -541,7 +541,7 @@ namespace SistemaGestion
     // ════════════════════════════════════════════════════════════════════════
     //  Dialogo: Nueva / Editar retencion
     // ════════════════════════════════════════════════════════════════════════
-    public class DlgRetencionISLR : Form
+    public class DlgRetencionISLR : FormBase
     {
         public RetencionISLR Retencion { get; }
 

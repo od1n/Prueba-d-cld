@@ -485,7 +485,7 @@ namespace SistemaGestion
     // ══════════════════════════════════════════════════════════════════════════
     //  SELECTOR DE INGRESO DE PRODUCCION
     // ══════════════════════════════════════════════════════════════════════════
-    public class DlgSelIngreso : Form
+    public class DlgSelIngreso : FormBase
     {
         public IngresoProduccion IngresoSeleccionado { get; private set; }
         private DataGridView dgv;
@@ -556,7 +556,7 @@ namespace SistemaGestion
     // ══════════════════════════════════════════════════════════════════════════
     //  DIALOGO NUEVA / VER INSPECCION
     // ══════════════════════════════════════════════════════════════════════════
-    public class DlgInspeccion : Form
+    public class DlgInspeccion : FormBase
     {
         public InspeccionCalidad    Resultado { get; private set; }
         public List<DefectoCalidad> Defectos  { get; private set; } = new();

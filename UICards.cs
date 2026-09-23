@@ -55,103 +55,85 @@ namespace SistemaGestion
             Color colorAcento, Action accion, bool tieneAcceso = true,
             ToolTip tip = null, string textoTooltip = null)
         {
-            // Wash claro (8% del color sobre blanco)
-            Color washCard = tieneAcceso
-                ? Mezclar(colorAcento, Color.White, 0.92f)
-                : Color.FromArgb(238, 240, 244);
-            Color bordeCard = tieneAcceso
-                ? Mezclar(colorAcento, Color.White, 0.55f)
-                : Color.FromArgb(195, 200, 210);
+            // Neumórfico a color: superficie = fondo; relieve por sombra; acento en barra/ícono/texto.
+            Color surf  = tieneAcceso ? Tema.Superficie : Color.FromArgb(224, 228, 235);
+            Color borde = tieneAcceso ? Color.FromArgb(250, 252, 255) : Color.FromArgb(214, 218, 226);
+            Color hover = Tema.SuperficieAlt;
 
             var card = new Panel
             {
-                BackColor = washCard,
+                BackColor = surf,
                 Cursor = tieneAcceso ? Cursors.Hand : Cursors.Default
             };
-
-            // Esquinas redondeadas reales mediante Region
             card.Resize += (s, e) =>
             {
                 if (card.Width <= 0 || card.Height <= 0) return;
-                using var path = RoundRect(new Rectangle(0, 0, card.Width, card.Height), 10);
+                using var path = RoundRect(new Rectangle(0, 0, card.Width, card.Height), 14);
                 card.Region = new Region(path);
             };
             card.Paint += (s, e) =>
             {
-                var g = e.Graphics;
-                g.SmoothingMode = SmoothingMode.AntiAlias;
-                using var pen = new Pen(bordeCard, 1.2f);
-                using var path = RoundRect(new Rectangle(0, 0, card.Width - 1, card.Height - 1), 10);
+                var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias;
+                using var pen = new Pen(borde, 1.4f);
+                using var path = RoundRect(new Rectangle(0, 0, card.Width - 1, card.Height - 1), 14);
                 g.DrawPath(pen, path);
             };
 
-            // Barra lateral de color (codificación por módulo)
+            // Relieve neumórfico: lo pinta el contenedor detrás de la tarjeta.
+            bool hooked = false;
+            card.ParentChanged += (s, e) =>
+            {
+                if (hooked || card.Parent == null) return;
+                hooked = true;
+                var par = card.Parent;
+                par.Paint += (ss, ee) =>
+                {
+                    if (card.IsDisposed || !card.Visible) return;
+                    ee.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                    UINeo.SombraRelieve(ee.Graphics, card.Bounds, 14);
+                };
+                par.Invalidate();
+            };
+            card.LocationChanged += (s, e) => card.Parent?.Invalidate();
+
             var bar = new Panel { Dock = DockStyle.Left, Width = 4,
                 BackColor = tieneAcceso ? colorAcento : CTextoTen };
 
-            // Círculo del icono — fondo más saturado para que destaque
-            var pnlIco = new Panel
-            {
-                Size = new Size(48, 48),
-                Location = new Point(18, 18),
-                BackColor = washCard
-            };
-            Color fondoIco = tieneAcceso
-                ? Mezclar(colorAcento, Color.White, 0.78f)
-                : Color.FromArgb(228, 230, 236);
+            var pnlIco = new Panel { Size = new Size(48, 48), Location = new Point(18, 18), BackColor = surf };
+            Color fondoIco = tieneAcceso ? Mezclar(colorAcento, surf, 0.80f) : Color.FromArgb(226, 230, 236);
             pnlIco.Paint += (s, e) =>
             {
-                var g = e.Graphics;
-                g.SmoothingMode = SmoothingMode.AntiAlias;
+                var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias;
                 using var br = new SolidBrush(fondoIco);
                 g.FillEllipse(br, 0, 0, pnlIco.Width - 1, pnlIco.Height - 1);
             };
             var lblIco = new Label
             {
-                Text = icono,
-                Font = new Font("Segoe UI", 18f, FontStyle.Bold),
-                ForeColor = tieneAcceso ? colorAcento : CTextoTen,
-                Dock = DockStyle.Fill,
-                TextAlign = ContentAlignment.MiddleCenter,
-                BackColor = Color.Transparent
+                Text = icono, Font = new Font("Segoe UI", 18f, FontStyle.Bold),
+                ForeColor = tieneAcceso ? colorAcento : CTextoTen, Dock = DockStyle.Fill,
+                TextAlign = ContentAlignment.MiddleCenter, BackColor = Color.Transparent
             };
             pnlIco.Controls.Add(lblIco);
 
-            // Título
             var lblT = new Label
             {
-                Text = titulo,
-                Font = new Font("Segoe UI", 11.5f, FontStyle.Bold),
-                ForeColor = tieneAcceso ? CTexto : CTextoTen,
-                AutoSize = false, Location = new Point(78, 22),
-                Size = new Size(260, 22),
-                BackColor = washCard
+                Text = titulo, Font = new Font("Segoe UI", 11.5f, FontStyle.Bold),
+                ForeColor = tieneAcceso ? Tema.Tinta : CTextoTen, AutoSize = false,
+                Location = new Point(78, 22), Size = new Size(260, 22), BackColor = surf
             };
-
-            // Subtítulo
             var lblS = new Label
             {
-                Text = subtitulo,
-                Font = new Font("Segoe UI", 9f),
-                ForeColor = CTextoTen,
-                AutoSize = false, Location = new Point(78, 46),
-                Size = new Size(260, 18),
-                BackColor = washCard
+                Text = subtitulo, Font = new Font("Segoe UI", 9f), ForeColor = Tema.TintaSuave,
+                AutoSize = false, Location = new Point(78, 46), Size = new Size(260, 18), BackColor = surf
             };
 
-            // Footer "Abrir →" / "Sin acceso"
-            var pnlFooter = new Panel
-            {
-                Dock = DockStyle.Bottom, Height = 30,
-                BackColor = washCard
-            };
+            var pnlFooter = new Panel { Dock = DockStyle.Bottom, Height = 30, BackColor = surf };
             var lblAbrir = new Label
             {
                 Text = tieneAcceso ? "Abrir  →" : "  Sin acceso  ",
                 Font = new Font("Segoe UI", 9f, FontStyle.Bold),
                 ForeColor = tieneAcceso ? colorAcento : CTextoTen,
-                AutoSize = true, Location = new Point(20, 8),
-                BackColor = washCard
+                AutoSize = true, Location = new Point(20, 8), BackColor = surf
             };
             pnlFooter.Controls.Add(lblAbrir);
 
@@ -161,19 +143,16 @@ namespace SistemaGestion
             card.Controls.Add(pnlIco);
             card.Controls.Add(bar);
 
-            // Tooltip opcional
             if (tip != null && !string.IsNullOrEmpty(textoTooltip))
             {
-                tip.SetToolTip(card,  textoTooltip);
-                tip.SetToolTip(lblT,  textoTooltip);
-                tip.SetToolTip(lblS,  textoTooltip);
+                tip.SetToolTip(card, textoTooltip);
+                tip.SetToolTip(lblT, textoTooltip);
+                tip.SetToolTip(lblS, textoTooltip);
                 tip.SetToolTip(lblIco, textoTooltip);
             }
 
-            // Hover + click recursivo (todos los hijos también)
             if (tieneAcceso)
             {
-                Color colorHover = Mezclar(colorAcento, Color.White, 0.85f);
                 void Pintar(Control c, Color bg)
                 {
                     if (c == bar || c == pnlIco) return;
@@ -181,21 +160,15 @@ namespace SistemaGestion
                         c.BackColor = bg;
                     foreach (Control h in c.Controls) Pintar(h, bg);
                 }
-                EventHandler enter = (s, e) => Pintar(card, colorHover);
-                EventHandler leave = (s, e) => Pintar(card, washCard);
+                EventHandler enter = (s, e) => Pintar(card, hover);
+                EventHandler leave = (s, e) => Pintar(card, surf);
                 EventHandler clk   = (s, e) => {
                     try { accion(); }
-                    catch (Exception ex)
-                    {
-                        MessageBox.Show(ex.Message, "Error",
-                            MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    }
+                    catch (Exception ex) { MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error); }
                 };
                 void Enganchar(Control c)
                 {
-                    c.MouseEnter += enter;
-                    c.MouseLeave += leave;
-                    c.Click      += clk;
+                    c.MouseEnter += enter; c.MouseLeave += leave; c.Click += clk;
                     foreach (Control h in c.Controls) Enganchar(h);
                 }
                 Enganchar(card);

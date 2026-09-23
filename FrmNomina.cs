@@ -44,7 +44,7 @@ namespace SistemaGestion
 
             
             var _menuTip = AyudaService.CrearTooltip();
-            var pnlGrid = new Panel { BackColor = Color.FromArgb(240, 244, 250) };
+            var pnlGrid = new Panel { BackColor = Tema.Fondo };
             int cols = 2, btnW = 220, btnH = 110, gap = 12, padX = 24, padY = 16;
             pnlGrid.Size = new Size(cols * btnW + gap + padX * 2, 2 * btnH + gap + padY * 2);
             pnlGrid.Location = new Point(0, 50);
@@ -54,35 +54,15 @@ namespace SistemaGestion
             {
                 var (ico, titulo, sub, color, accion) = items[i];
                 int col = i % cols, row = i / cols;
-                var card = new Panel {
-                    Size = new Size(btnW, btnH),
-                    Location = new Point(padX + col * (btnW + gap), padY + row * (btnH + gap)),
-                    BackColor = Color.White, Cursor = Cursors.Hand
+                string tip = titulo switch {
+                    "Empleados"        => "Ver y gestionar el catálogo de empleados",
+                    "Procesar Nómina"  => "Calcular y cerrar la nómina semanal",
+                    "Préstamos"        => "Gestionar préstamos internos a empleados",
+                    "Beneficios LOTTT" => "Calcular utilidades y prestaciones sociales",
+                    _ => null
                 };
-                var lIco = new Label { Text = ico, Font = new Font("Segoe UI", 20f),
-                    ForeColor = color, AutoSize = false, Size = new Size(40, 40), Location = new Point(12, 12) };
-                var lTit = new Label { Text = titulo, Font = new Font("Segoe UI", 10f, FontStyle.Bold),
-                    ForeColor = Color.FromArgb(30, 41, 59), AutoSize = true, Location = new Point(56, 18) };
-                var lSub = new Label { Text = sub, Font = new Font("Segoe UI", 8f),
-                    ForeColor = Color.FromArgb(100, 116, 139), AutoSize = true, Location = new Point(56, 38) };
-                var acc = accion;
-                card.Controls.AddRange(new Control[] { lIco, lTit, lSub });
-                card.Click  += (s, e) => acc();
-                lIco.Click  += (s, e) => acc();
-                lTit.Click  += (s, e) => acc();
-                lSub.Click  += (s, e) => acc();
-                card.MouseEnter += (s, e) => { card.BackColor = Color.FromArgb(232, 240, 250); };
-                card.MouseLeave += (s, e) => { card.BackColor = Color.White; };
-                card.Paint += (s, e) => {
-                    e.Graphics.DrawRectangle(new Pen(Color.FromArgb(220, 230, 245), 1f),
-                        0, 0, card.Width - 1, card.Height - 1);
-                };
-                switch (titulo) {
-                case "Empleados": AyudaService.Tip(_menuTip, card, "Ver y gestionar el catálogo de empleados"); break;
-                case "Procesar Nómina": AyudaService.Tip(_menuTip, card, "Calcular y cerrar la nómina semanal"); break;
-                case "Préstamos": AyudaService.Tip(_menuTip, card, "Gestionar préstamos internos a empleados"); break;
-                case "Beneficios LOTTT": AyudaService.Tip(_menuTip, card, "Calcular utilidades y prestaciones sociales"); break;
-                }
+                var card = UICards.CrearTarjeta(ico, titulo, sub, color, accion, true, _menuTip, tip);
+                card.SetBounds(padX + col * (btnW + gap), padY + row * (btnH + gap), btnW, btnH);
                 pnlGrid.Controls.Add(card);
             }
 
@@ -119,7 +99,7 @@ namespace SistemaGestion
     // ══════════════════════════════════════════════════════════════════════════
     //  CATALOGO DE EMPLEADOS
     // ══════════════════════════════════════════════════════════════════════════
-    public class FrmEmpleados : Form
+    public class FrmEmpleados : FormBase
     {
         private DataGridView dgv;
         private Label        lblRes;
@@ -281,7 +261,7 @@ namespace SistemaGestion
     // ══════════════════════════════════════════════════════════════════════════
     //  DIALOGO EMPLEADO
     // ══════════════════════════════════════════════════════════════════════════
-    public class DlgEmpleado : Form
+    public class DlgEmpleado : FormBase
     {
         public Empleado Resultado { get; private set; }
 

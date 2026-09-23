@@ -233,7 +233,7 @@ namespace SistemaGestion
         }
     }
 
-    public class DlgCuenta : Form
+    public class DlgCuenta : FormBase
     {
         public CuentaCobrar Resultado { get; private set; }
         private TextBox txtCliente, txtConcepto;
@@ -303,7 +303,7 @@ namespace SistemaGestion
         private DateTimePicker D(DateTime v, int y) { var dp = new DateTimePicker { Value = v, Location = new Point(150, y), Size = new Size(230, 25), Format = DateTimePickerFormat.Short }; Controls.Add(dp); return dp; }
     }
 
-    public class DlgPago : Form
+    public class DlgPago : FormBase
     {
         public decimal MontoPago { get; private set; }
         public DlgPago(decimal saldo)

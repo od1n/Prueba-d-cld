@@ -294,7 +294,7 @@ namespace SistemaGestion
     // ══════════════════════════════════════════════════════════════════════════
     //  DIALOGO NUEVA / EDITAR ORDEN
     // ══════════════════════════════════════════════════════════════════════════
-    public class DlgOrdenProduccion : Form
+    public class DlgOrdenProduccion : FormBase
     {
         public OrdenProduccion      Resultado { get; private set; }
         public List<LineaOrden>     Lineas    { get; private set; } = new();
@@ -679,7 +679,7 @@ namespace SistemaGestion
     // ══════════════════════════════════════════════════════════════════════════
     //  DIALOGO CANTIDAD REAL PRODUCIDA (al cerrar orden)
     // ══════════════════════════════════════════════════════════════════════════
-    public class DlgCantidadReal : Form
+    public class DlgCantidadReal : FormBase
     {
         public decimal CantidadReal { get; private set; }
 

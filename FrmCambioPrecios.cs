@@ -380,7 +380,7 @@ namespace SistemaGestion
     }
 
     // Mini-diálogo para cambiar el precio de UN producto rápido.
-    public class DlgPrecioRapido : Form
+    public class DlgPrecioRapido : FormBase
     {
         public decimal PrecioNuevo { get; private set; }
         private readonly NumericUpDown _num;
@@ -427,7 +427,7 @@ namespace SistemaGestion
         }
     }
 
-    public class DlgProducto : Form
+    public class DlgProducto : FormBase
     {
         public ProductoPrecio Resultado { get; private set; }
         private TextBox txtCodigo, txtNombre;

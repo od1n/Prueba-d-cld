@@ -20,7 +20,7 @@ using System.Windows.Forms;
 
 namespace SistemaGestion
 {
-    public class DlgAnularFactura : Form
+    public class DlgAnularFactura : FormBase
     {
         public string Motivo { get; private set; } = "";
 
@@ -145,7 +145,7 @@ namespace SistemaGestion
     }
 
     // ── Diálogo de corrección de fecha ─────────────────────────────────────
-    public class DlgCorregirFecha : Form
+    public class DlgCorregirFecha : FormBase
     {
         public DateTime NuevaFecha { get; private set; }
 

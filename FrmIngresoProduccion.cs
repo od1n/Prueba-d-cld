@@ -121,7 +121,7 @@ namespace SistemaGestion
         }
     }
 
-    public class DlgIngreso : Form
+    public class DlgIngreso : FormBase
     {
         public IngresoProduccion Resultado { get; private set; }
         private TextBox txtProducto, txtLote, txtResponsable, txtObservacion;

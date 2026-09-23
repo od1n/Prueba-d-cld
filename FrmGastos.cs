@@ -123,7 +123,7 @@ namespace SistemaGestion
     }
 
     // ── Dialogo Gasto ─────────────────────────────────────────────────────────
-    public class DlgGasto : Form
+    public class DlgGasto : FormBase
     {
         public Gasto Resultado { get; private set; }
         private ComboBox cmbCategoria, cmbEstado;

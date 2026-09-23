@@ -376,7 +376,7 @@ namespace SistemaGestion
     //  Diálogo para crear un nuevo abono
     // ════════════════════════════════════════════════════════════════════════
 
-    public class DlgNuevoAbono : Form
+    public class DlgNuevoAbono : FormBase
     {
         private ComboBox   _cboCliente = null!, _cboMetodo = null!, _cboCuenta = null!;
         private TextBox    _txtMonto = null!, _txtReferencia = null!,

@@ -671,7 +671,7 @@ CargarDatos();
     // ══════════════════════════════════════════════════════════════════════════
     //  DIALOGO FACTURA  (cabecera + lineas de productos)
     // ══════════════════════════════════════════════════════════════════════════
-    public class DlgFactura : Form
+    public class DlgFactura : FormBase
     {
         public Factura                       Resultado   { get; private set; }
         public List<LineaFactura> Lineas { get; private set; }
@@ -1689,7 +1689,7 @@ CargarDatos();
     // ══════════════════════════════════════════════════════════════════════════
     //  DIALOGO GESTIONAR COMPROBANTES DE FACTURA
     // ══════════════════════════════════════════════════════════════════════════
-    public class DlgComprobantesFactura : Form
+    public class DlgComprobantesFactura : FormBase
     {
         public List<ComprobanteFactura> ComprobantesResultado { get; private set; } = new();
         public List<string> RutasImagenResultado { get; private set; } = new();
@@ -2025,7 +2025,7 @@ CargarDatos();
     // ══════════════════════════════════════════════════════════════════════════
     //  DIALOGO SELECCIONAR PRODUCTO
     // ══════════════════════════════════════════════════════════════════════════
-    public class DlgSelProducto : Form
+    public class DlgSelProducto : FormBase
     {
         public Inventario ProductoSeleccionado { get; private set; }
 

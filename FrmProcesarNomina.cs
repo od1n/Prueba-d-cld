@@ -595,7 +595,7 @@ namespace SistemaGestion
     // ══════════════════════════════════════════════════════════════════════════
     //  DIALOGO: NUEVO PERIODO
     // ══════════════════════════════════════════════════════════════════════════
-    public class DlgPeriodoNomina : Form
+    public class DlgPeriodoNomina : FormBase
     {
         public PeriodoNomina Resultado { get; private set; }
 
@@ -697,7 +697,7 @@ namespace SistemaGestion
     // ══════════════════════════════════════════════════════════════════════════
     //  DIALOGO: EDITAR LINEA DE NOMINA
     // ══════════════════════════════════════════════════════════════════════════
-    public class DlgDetalleNomina : Form
+    public class DlgDetalleNomina : FormBase
     {
         public DetalleNomina Resultado { get; private set; }
 

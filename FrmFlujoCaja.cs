@@ -571,7 +571,7 @@ namespace SistemaGestion
     // ══════════════════════════════════════════════════════════════════════════
     //  DIALOGO: AGREGAR MOVIMIENTO MANUAL
     // ══════════════════════════════════════════════════════════════════════════
-    public class DlgMovimientoCaja : Form
+    public class DlgMovimientoCaja : FormBase
     {
         public MovimientoCaja Resultado { get; private set; }
 

@@ -201,7 +201,7 @@ namespace SistemaGestion
 
     }
 
-    public class DlgNuevoPrestamo : Form
+    public class DlgNuevoPrestamo : FormBase
     {
         public PrestamoEmpleado Resultado { get; private set; }
 
@@ -280,7 +280,7 @@ namespace SistemaGestion
         }
     }
 
-    public class DlgAbonoManual : Form
+    public class DlgAbonoManual : FormBase
     {
         public decimal Monto { get; private set; }
 

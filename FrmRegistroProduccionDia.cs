@@ -637,7 +637,7 @@ namespace SistemaGestion
     // ════════════════════════════════════════════════════════════════════════
     //  Task C: DIALOGO SELECCIÓN DE MOLDES PARA LA PLANILLA
     // ════════════════════════════════════════════════════════════════════════
-    public class DlgSeleccionarMoldesPlanilla : Form
+    public class DlgSeleccionarMoldesPlanilla : FormBase
     {
         public List<TbMolde> MoldesSeleccionados { get; private set; } = new();
         private readonly CheckedListBox _clb;
@@ -743,7 +743,7 @@ namespace SistemaGestion
     // ════════════════════════════════════════════════════════════════════════
     //  DIALOGO CONFIRMACION DE MERMA (sin cambios)
     // ════════════════════════════════════════════════════════════════════════
-    public class DlgConfirmarMerma : Form
+    public class DlgConfirmarMerma : FormBase
     {
         public DlgConfirmarMerma(ResumenMermaProduccion r)
         {

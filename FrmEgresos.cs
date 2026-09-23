@@ -938,7 +938,7 @@ namespace SistemaGestion
     //  Multilínea: si el egreso tiene líneas (DetallesGasto), se ingresa el
     //  precio unitario por línea; si no, se ingresa una base imponible única.
     // ════════════════════════════════════════════════════════════════════════
-    public class DlgCompletarPrecio : Form
+    public class DlgCompletarPrecio : FormBase
     {
         public bool               EsMultilinea { get; private set; }
         public List<DetalleEgreso> Lineas      { get; private set; } = new();

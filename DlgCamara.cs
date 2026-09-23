@@ -14,7 +14,7 @@ using System.Windows.Forms;
 
 namespace SistemaGestion
 {
-    public class DlgCamara : Form
+    public class DlgCamara : FormBase
     {
         public Camara Resultado { get; private set; }
         private readonly Camara _original;

@@ -593,7 +593,7 @@ namespace SistemaGestion
     // ══════════════════════════════════════════════════════════════════════════
     //  DIALOGO: AGREGAR / EDITAR PROGRAMA DE MANTENIMIENTO
     // ══════════════════════════════════════════════════════════════════════════
-    public class DlgPrograma : Form
+    public class DlgPrograma : FormBase
     {
         public ProgramaMant Resultado { get; private set; }
 
@@ -686,7 +686,7 @@ namespace SistemaGestion
     // ══════════════════════════════════════════════════════════════════════════
     //  DIALOGO: REGISTRAR MANTENIMIENTO REALIZADO
     // ══════════════════════════════════════════════════════════════════════════
-    public class DlgRegistroMant : Form
+    public class DlgRegistroMant : FormBase
     {
         public RegistroMantenimiento Resultado { get; private set; }
 
