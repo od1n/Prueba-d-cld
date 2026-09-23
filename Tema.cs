@@ -20,6 +20,7 @@
 using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Collections.Generic;
 using System.Windows.Forms;
 
 namespace SistemaGestion
@@ -94,18 +95,36 @@ namespace SistemaGestion
                 form.ForeColor  = Tinta;
                 form.AutoScaleMode       = AutoScaleMode.Dpi;
                 form.AutoScaleDimensions = new SizeF(96f, 96f);
+                form.AutoScroll = true;   // si el contenido no cabe, aparece scroll (no se corta)
             }
             catch { }
             Recorrer(form);
         }
 
+        private static readonly HashSet<Control> _enganchados = new();
+
         private static void Recorrer(Control parent)
         {
+            EngancharDinamico(parent);
             foreach (Control c in parent.Controls)
             {
                 try { Estilizar(c); } catch { /* nunca romper una ventana por estilo */ }
                 if (c.HasChildren) Recorrer(c);
             }
+        }
+
+        // Aplica el tema tambien a los controles que se crean DESPUES de cargar
+        // (p. ej. tarjetas de Reportes que se agregan al terminar una consulta).
+        private static void EngancharDinamico(Control cont)
+        {
+            if (!_enganchados.Add(cont)) return;
+            cont.ControlAdded += (s, e) =>
+            {
+                try { Estilizar(e.Control); } catch { }
+                if (e.Control.HasChildren) Recorrer(e.Control);
+                EngancharDinamico(e.Control);
+            };
+            cont.Disposed += (s, e) => _enganchados.Remove(cont);
         }
 
         private static void Estilizar(Control c)
@@ -133,35 +152,40 @@ namespace SistemaGestion
 
             Color bg = p.BackColor;
             double lum = Luma(bg);
-            int sat = Satur(bg);
-            bool docked = p.Dock == DockStyle.Top || p.Dock == DockStyle.Bottom;
+            bool top = p.Dock == DockStyle.Top;
+            Color? acc = MapearAcento(bg);
 
-            if (lum < 115 && p.BackColorSet())          // OSCURO -> encabezado/footer claro
+            // ENCABEZADO (barra superior oscura o azul/morada) -> azul uniforme + texto blanco
+            if (top && (lum < 132 || acc == Primario || acc == Morado))
             {
-                p.BackColor = HeaderFondo;
+                p.BackColor = Primario;
                 p.Tag = "tema-hecho";
-                bool abajo = p.Dock == DockStyle.Bottom;
-                p.Paint += (s, e) =>
-                {
-                    using var pen = new Pen(Color.FromArgb(120, Sombra), 1f);
-                    int y = abajo ? 0 : p.Height - 1;
-                    e.Graphics.DrawLine(pen, 0, y, p.Width, y);
-                };
-                p.Invalidate();
+                foreach (Control h in Descendientes(p))
+                    if (h is Label lb)
+                        lb.ForeColor = (lb.Font.Bold && lb.Font.Size >= 11f)
+                            ? Color.White : Color.FromArgb(216, 230, 248);
             }
-            else
+            // TILE de color (tarjeta con número) -> mismo color mapeado + redondeado
+            else if (acc != null && p.Dock == DockStyle.None && lum < 200)
             {
-                Color? acc = MapearAcento(bg);
-                if (acc != null && !docked && lum < 200)   // TILE de color
-                {
-                    p.BackColor = acc.Value;
-                    p.Tag = "tema-hecho";
-                    Redondear(p, RadioChico);
-                }
-                else if (lum > 200 || bg == SystemColors.Control)  // claro/neutro -> fondo
-                {
-                    p.BackColor = Fondo;
-                }
+                p.BackColor = acc.Value;
+                p.Tag = "tema-hecho";
+                Redondear(p, RadioChico);
+            }
+            // Contenedor claro/neutro -> fondo del sistema
+            else if (lum > 200 || bg == SystemColors.Control)
+            {
+                p.BackColor = Fondo;
+            }
+        }
+
+        private static IEnumerable<Control> Descendientes(Control c)
+        {
+            foreach (Control h in c.Controls)
+            {
+                yield return h;
+                if (h.HasChildren)
+                    foreach (var n in Descendientes(h)) yield return n;
             }
         }
 
@@ -169,14 +193,6 @@ namespace SistemaGestion
         private static void EstilizarLabel(Label l)
         {
             if (l.Font.Size < 8.5f) l.Font = Body;
-            if (!NormalizarAgresivo) return;
-            try
-            {
-                Color pbg = FondoEfectivo(l);
-                if (Luma(l.ForeColor) > 188 && Luma(pbg) > 188)
-                    l.ForeColor = l.Font.Bold ? Tinta : TintaSuave;
-            }
-            catch { }
         }
 
         // ══════════════════════════════════════════════════════════════════
@@ -351,16 +367,6 @@ namespace SistemaGestion
             => Color.FromArgb(
                 (int)(c.R * (1 - f)), (int)(c.G * (1 - f)), (int)(c.B * (1 - f)));
 
-        private static Color FondoEfectivo(Control c)
-        {
-            Control? p = c.Parent;
-            while (p != null)
-            {
-                if (p.BackColor.A > 0 && p.BackColor != Color.Transparent) return p.BackColor;
-                p = p.Parent;
-            }
-            return Fondo;
-        }
 
         private static string MarcaNeo(object? actual)
         {
@@ -382,12 +388,5 @@ namespace SistemaGestion
             p.CloseFigure();
             return p;
         }
-    }
-
-    internal static class ControlTemaExt
-    {
-        // Un panel "sin color propio" hereda el del padre; tratamos SystemColors.Control
-        // y colores muy oscuros explícitos como intencionales.
-        public static bool BackColorSet(this Control c) => c.BackColor != SystemColors.Control;
     }
 }
