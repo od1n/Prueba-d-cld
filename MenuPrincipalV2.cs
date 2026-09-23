@@ -28,7 +28,7 @@ namespace SistemaGestion
     public class MenuPrincipalV2 : FormBase
     {
         // Paleta clara unificada con FrmDashboardV2
-        private static readonly Color CFondo    = Color.FromArgb(244, 246, 250);
+        private static readonly Color CFondo    = Color.FromArgb(223, 230, 241); // = UINeo.Ground
         private static readonly Color CSurf     = Color.White;
         private static readonly Color CBorde    = Color.FromArgb(215, 222, 230);
         private static readonly Color CTexto    = Color.FromArgb(30,  34,  51);
@@ -244,6 +244,7 @@ namespace SistemaGestion
             };
             b.FlatAppearance.BorderSize = 0;
             b.FlatAppearance.MouseOverBackColor = Color.FromArgb(45, 80, 130);
+            UINeo.PastillaBoton(b, 8);
             if (accion != null) b.Click += (s, e) => accion();
             return b;
         }
@@ -326,6 +327,8 @@ namespace SistemaGestion
                     using var pt = RoundRect(new Rectangle(0, 0, c.Width, c.Height), radio);
                     c.Region = new Region(pt); } }
                 c.Resize += (s2, e2) => redib();
+                c.Paint += (s2, e2) => UINeo.BordeClaro(e2.Graphics,
+                    new Rectangle(0, 0, c.Width, c.Height), radio);
                 redib();
             }
             fila.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 320f));   // saludo + fecha
@@ -995,17 +998,12 @@ namespace SistemaGestion
         // y rojo para Salir. Línea superior tenue como separador.
         private Panel ConstruirBottomBar()
         {
-            var p = new Panel { Dock = DockStyle.Fill, BackColor = UITheme.FondoCard };
-            p.Paint += (s, e) =>
-            {
-                using var pen = new Pen(UITheme.Borde, 1f);
-                e.Graphics.DrawLine(pen, 0, 0, p.Width, 0);
-            };
+            var p = new Panel { Dock = DockStyle.Fill, BackColor = UINeo.Ground };
 
             var fila = new FlowLayoutPanel
             {
                 Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight,
-                BackColor = UITheme.FondoCard, Padding = new Padding(20, 8, 20, 8),
+                BackColor = UINeo.Ground, Padding = new Padding(20, 10, 20, 10),
                 AutoSize = false, WrapContents = false
             };
 
@@ -1026,11 +1024,12 @@ namespace SistemaGestion
             };
             _btnToggleChat.FlatAppearance.BorderSize = 0;
             _btnToggleChat.FlatAppearance.MouseOverBackColor = Color.FromArgb(60, 52, 145);
+            UINeo.PastillaBoton(_btnToggleChat);
             _btnToggleChat.Click += (s, e) => ToggleChat();
             fila.Controls.Add(_btnToggleChat);
 
             // Spacer
-            fila.Controls.Add(new Panel { Width = 30, Height = 1, BackColor = UITheme.FondoCard });
+            fila.Controls.Add(new Panel { Width = 30, Height = 1, BackColor = UINeo.Ground });
 
             // Salir — rojo sólido para destacar acción destructiva
             var btnSalir = new Button
@@ -1046,6 +1045,7 @@ namespace SistemaGestion
             };
             btnSalir.FlatAppearance.BorderSize = 0;
             btnSalir.FlatAppearance.MouseOverBackColor = Color.FromArgb(150, 30, 30);
+            UINeo.PastillaBoton(btnSalir);
             btnSalir.Click += BtnSalir_Click;
             fila.Controls.Add(btnSalir);
 
@@ -1069,6 +1069,7 @@ namespace SistemaGestion
             b.FlatAppearance.BorderSize = 0;
             b.FlatAppearance.MouseOverBackColor = UITheme.AzulHover;
             b.FlatAppearance.MouseDownBackColor = UITheme.AzulOscuro;
+            UINeo.PastillaBoton(b);
             b.Click += (s, e) => { try { accion(); } catch (Exception ex) { MessageBox.Show(this, ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error); } };
             return b;
         }

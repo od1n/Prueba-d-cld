@@ -95,7 +95,7 @@ namespace SistemaGestion
             };
             root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 42f));   // navbar (igual menu)
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 76f));   // strip KPIs
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 90f));   // strip KPIs
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));   // contenido
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 50f));   // bottom (cerrar)
 
@@ -276,6 +276,7 @@ namespace SistemaGestion
             };
             b.FlatAppearance.BorderSize = 0;
             b.FlatAppearance.MouseOverBackColor = CHoverBg;
+            UINeo.PastillaBoton(b);
             b.Click += async (s, e) => await CargarDatosAsync();
             return b;
         }
@@ -330,6 +331,7 @@ namespace SistemaGestion
             };
             _btnAnalizarIA.FlatAppearance.BorderSize = 0;
             _btnAnalizarIA.FlatAppearance.MouseOverBackColor = Color.FromArgb(60, 52, 145);
+            UINeo.PastillaBoton(_btnAnalizarIA);
             _btnAnalizarIA.Click += async (s, e) => await AnalizarConIAAsync();
             return _btnAnalizarIA;
         }
@@ -537,7 +539,7 @@ namespace SistemaGestion
             {
                 Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown,
                 WrapContents = false, AutoScroll = true,
-                BackColor = CSurf, Padding = new Padding(0)
+                BackColor = UINeo.Surface, Padding = new Padding(0)
             };
             content.Controls.Add(_pnlAlertas);
             return p;
@@ -549,7 +551,7 @@ namespace SistemaGestion
             var p = new Panel { Dock = DockStyle.Fill, Margin = new Padding(8, 0, 0, 8) };
 
             // Header con titulo + dots + pin
-            var header = new Panel { Dock = DockStyle.Top, Height = 36, BackColor = CSurf };
+            var header = new Panel { Dock = DockStyle.Top, Height = 36, BackColor = UINeo.Surface };
             _lblTituloGrafica = new Label
             {
                 Text = _nombresGraficas[_idxGrafica],
@@ -573,6 +575,7 @@ namespace SistemaGestion
                 Margin = new Padding(4)
             };
             _btnPin.FlatAppearance.BorderColor = CBorde;
+            UINeo.PastillaBoton(_btnPin, 8);
             _btnPin.Click += (s, e) => ToggleFijar();
 
             var btnNext = new Button
@@ -582,6 +585,7 @@ namespace SistemaGestion
                 Font = new Font("Segoe UI", 12f, FontStyle.Bold), Cursor = Cursors.Hand
             };
             btnNext.FlatAppearance.BorderColor = CBorde;
+            UINeo.PastillaBoton(btnNext, 8);
             btnNext.Click += (s, e) => CambiarGrafica(+1);
 
             var btnPrev = new Button
@@ -591,6 +595,7 @@ namespace SistemaGestion
                 Font = new Font("Segoe UI", 12f, FontStyle.Bold), Cursor = Cursors.Hand
             };
             btnPrev.FlatAppearance.BorderColor = CBorde;
+            UINeo.PastillaBoton(btnPrev, 8);
             btnPrev.Click += (s, e) => CambiarGrafica(-1);
 
             header.Controls.Add(_lblTituloGrafica);
@@ -607,13 +612,22 @@ namespace SistemaGestion
             _pnlGrafica.Resize += (s, e) => _pnlGrafica.Invalidate();
 
             var contenedor = new Panel { Dock = DockStyle.Fill,
-                BackColor = UINeo.Ground, Padding = new Padding(12) };
+                BackColor = UINeo.Surface, Padding = new Padding(12) };
             contenedor.Controls.Add(_pnlGrafica);
             contenedor.Controls.Add(header);
 
             // Borde
             var wrap = new Panel { Dock = DockStyle.Fill, BackColor = UINeo.Ground,
-                Padding = new Padding(1) };
+                Padding = new Padding(6) };
+            contenedor.Resize += (s, e) => { if (contenedor.Width > 0 && contenedor.Height > 0) {
+                using var pt = UICards.RoundRect(new Rectangle(0, 0, contenedor.Width, contenedor.Height), 12);
+                contenedor.Region = new Region(pt); } };
+            wrap.Paint += (s, e) =>
+            {
+                var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias;
+                UINeo.SombraRelieve(g, contenedor.Bounds, 12);
+            };
+            wrap.Resize += (s, e) => wrap.Invalidate();
             wrap.Controls.Add(contenedor);
             p.Controls.Add(wrap);
             return p;
@@ -648,19 +662,14 @@ namespace SistemaGestion
         // ── Bottom bar CLARO con buen contraste (estilo unificado) ─────────
         private Panel ConstruirBottomBar()
         {
-            var p = new Panel { Dock = DockStyle.Fill, BackColor = UITheme.FondoCard };
-            p.Paint += (s, e) =>
-            {
-                using var pen = new Pen(UITheme.Borde, 1f);
-                e.Graphics.DrawLine(pen, 0, 0, p.Width, 0);
-            };
+            var p = new Panel { Dock = DockStyle.Fill, BackColor = UINeo.Ground };
 
             var lblHint = new Label
             {
                 Text = "  Tip: ↻ Actualizar refresca todos los datos · 📌 Fija/libera la gráfica",
                 Font = new Font("Segoe UI", 9.5f),
                 ForeColor = UITheme.TextoTenue,
-                BackColor = UITheme.FondoCard,
+                BackColor = UINeo.Ground,
                 AutoSize = false, Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.MiddleLeft,
                 Padding = new Padding(20, 0, 0, 0)
@@ -679,13 +688,14 @@ namespace SistemaGestion
             };
             btnCerrar.FlatAppearance.BorderSize = 0;
             btnCerrar.FlatAppearance.MouseOverBackColor = UITheme.AzulHover;
+            UINeo.PastillaBoton(btnCerrar);
             btnCerrar.Click += (s, e) => Close();
 
             var flowR = new FlowLayoutPanel
             {
                 Dock = DockStyle.Right,
                 FlowDirection = FlowDirection.RightToLeft,
-                BackColor = UITheme.FondoCard,
+                BackColor = UINeo.Ground,
                 Width = 170,
                 WrapContents = false,
                 Padding = new Padding(0)
@@ -700,11 +710,20 @@ namespace SistemaGestion
 
         private Panel TarjetaConTitulo(string titulo, out Panel content)
         {
-            var wrap = new Panel { Dock = DockStyle.Fill, BackColor = CBorde,
-                Padding = new Padding(1) };
-            var inner = new Panel { Dock = DockStyle.Fill, BackColor = CSurf };
-            var head = new Panel { Dock = DockStyle.Top, Height = 28,
-                BackColor = Color.FromArgb(244, 246, 250) };
+            var wrap = new Panel { Dock = DockStyle.Fill, BackColor = UINeo.Ground,
+                Padding = new Padding(6) };
+            var inner = new Panel { Dock = DockStyle.Fill, BackColor = UINeo.Surface };
+            inner.Resize += (s, e) => { if (inner.Width > 0 && inner.Height > 0) {
+                using var pt = UICards.RoundRect(new Rectangle(0, 0, inner.Width, inner.Height), 12);
+                inner.Region = new Region(pt); } };
+            wrap.Paint += (s, e) =>
+            {
+                var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias;
+                UINeo.SombraRelieve(g, inner.Bounds, 12);
+            };
+            wrap.Resize += (s, e) => wrap.Invalidate();
+            var head = new Panel { Dock = DockStyle.Top, Height = 30,
+                BackColor = UINeo.Surface };
             head.Controls.Add(new Label
             {
                 Text = "  " + titulo,
@@ -712,7 +731,7 @@ namespace SistemaGestion
                 ForeColor = CTexto, Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.MiddleLeft
             });
-            content = new Panel { Dock = DockStyle.Fill, BackColor = CSurf };
+            content = new Panel { Dock = DockStyle.Fill, BackColor = UINeo.Surface };
             inner.Controls.Add(content); inner.Controls.Add(head);
             wrap.Controls.Add(inner);
             return wrap;

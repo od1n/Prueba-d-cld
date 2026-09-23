@@ -12,6 +12,7 @@
 using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Windows.Forms;
 
 namespace SistemaGestion
 {
@@ -66,6 +67,28 @@ namespace SistemaGestion
         /// Pinta un "pozo" hundido (inset) — para contenedores de datos/gráficas:
         /// sombra interior arriba-izquierda + luz interior abajo-derecha.
         /// </summary>
+        /// <summary>Convierte un botón plano en "pastilla" redondeada, conservando su color de acento.</summary>
+        public static void PastillaBoton(Button b, int radio = 10)
+        {
+            b.FlatStyle = FlatStyle.Flat;
+            b.FlatAppearance.BorderSize = 0;
+            void redib() { if (b.Width > 0 && b.Height > 0) {
+                using var p = UICards.RoundRect(new Rectangle(0, 0, b.Width, b.Height), radio);
+                b.Region = new Region(p); } }
+            b.Resize += (s, e) => redib();
+            redib();
+        }
+
+        /// <summary>Dibuja un borde claro redondeado en el borde del control (realce de tarjeta elevada).</summary>
+        public static void BordeClaro(Graphics g, Rectangle r, int radio)
+        {
+            var sm = g.SmoothingMode; g.SmoothingMode = SmoothingMode.AntiAlias;
+            using var pen = new Pen(Color.FromArgb(252, 253, 255), 1.4f);
+            using var p = UICards.RoundRect(new Rectangle(r.X, r.Y, r.Width - 1, r.Height - 1), radio);
+            g.DrawPath(pen, p);
+            g.SmoothingMode = sm;
+        }
+
         public static void PozoHundido(Graphics g, Rectangle r, int radio)
         {
             if (r.Width <= 0 || r.Height <= 0) return;
