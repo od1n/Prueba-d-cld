@@ -22,13 +22,14 @@ namespace SistemaGestion
     public static class UINeo
     {
         // ── Paleta neumórfica ────────────────────────────────────────────────
-        public static readonly Color Ground     = Color.FromArgb(221, 229, 240); // #dde5f0
-        public static readonly Color Surface     = Color.FromArgb(221, 229, 240); // = fondo (neumorfismo)
-        public static readonly Color SurfaceHi    = Color.FromArgb(231, 238, 247); // hover / realce
-        public static readonly Color ShadowDark   = Color.FromArgb(163, 176, 196); // sombra (más contraste)
-        public static readonly Color ShadowLight  = Color.FromArgb(250, 253, 255); // luz
-        public static readonly Color Ink          = Color.FromArgb( 38,  55,  79); // #26374f
-        public static readonly Color InkSoft      = Color.FromArgb(106, 120, 144); // #6a7890
+        // Reenvían al módulo central Tema (único punto de control).
+        public static Color Ground     => Tema.Fondo;
+        public static Color Surface    => Tema.Superficie;
+        public static Color SurfaceHi  => Tema.SuperficieAlt;
+        public static Color ShadowDark => Tema.Sombra;
+        public static Color ShadowLight=> Tema.Luz;
+        public static Color Ink        => Tema.Tinta;
+        public static Color InkSoft    => Tema.TintaSuave;
 
         /// <summary>Tinte suave de un color de acento sobre la superficie neumórfica.</summary>
         public static Color Tinte(Color acento, float pesoSuperficie = 0.82f)

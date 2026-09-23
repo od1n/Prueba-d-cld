@@ -26,7 +26,7 @@ namespace SistemaGestion
             // Aplicar tema antes de OnLoad para que los controles añadidos
             // en el constructor del subform ya hereden las fuentes/colores.
             this.Font      = UITheme.Body;
-            this.BackColor = UINeo.Ground;
+            this.BackColor = Tema.Fondo;
             this.AutoScaleMode       = AutoScaleMode.Dpi;
             this.AutoScaleDimensions = new System.Drawing.SizeF(96f, 96f);
         }
@@ -41,7 +41,7 @@ namespace SistemaGestion
         protected override void OnLoad(EventArgs e)
         {
             base.OnLoad(e);
-            if (TemaAutomatico) UITheme.Aplicar(this);
+            if (TemaAutomatico) Tema.Aplicar(this);
 
             // ── Persistencia de tamaño/posición ─────────────────────────────
             // Restaurar antes de mostrar, guardar con debounce al cambiar.
