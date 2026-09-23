@@ -81,9 +81,25 @@ namespace SistemaGestion
 
         /// <summary>Elige relieve gris (superficie) o de color (acento) según el fondo del control.</summary>
         public static void SombraAuto(Graphics g, Control c, int radio)
+            => SombraRelieve(g, c.Bounds, radio);
+
+        /// <summary>Borde claro nítido para definir el contorno de una tarjeta elevada.</summary>
+        public static void BordeNeo(Graphics g, Rectangle r, int radio)
         {
-            if (EsAccento(c.BackColor)) SombraRelieveColor(g, c.Bounds, radio, c.BackColor);
-            else                        SombraRelieve(g, c.Bounds, radio);
+            var sm = g.SmoothingMode; g.SmoothingMode = SmoothingMode.AntiAlias;
+            using (var p = UICards.RoundRect(new Rectangle(r.X, r.Y, r.Width - 1, r.Height - 1), radio))
+            using (var pen = new Pen(Color.FromArgb(255, 255, 255), 1.5f))
+                g.DrawPath(pen, p);
+            // insinuación de línea inferior-derecha para cerrar el relieve
+            using (var p2 = UICards.RoundRect(new Rectangle(r.X, r.Y, r.Width - 1, r.Height - 1), radio))
+            using (var pen2 = new Pen(Color.FromArgb(60, ShadowDark), 1f))
+            {
+                var clip = g.Clip;
+                g.SetClip(new Rectangle(r.X + r.Width / 2, r.Y + r.Height / 2, r.Width, r.Height));
+                g.DrawPath(pen2, p2);
+                g.Clip = clip;
+            }
+            g.SmoothingMode = sm;
         }
 
         private static bool EsAccento(Color bg)
@@ -125,10 +141,12 @@ namespace SistemaGestion
         public static void BotonSuave(Button b, Color? tinta = null, int radio = 12)
         {
             b.FlatStyle = FlatStyle.Flat;
-            b.FlatAppearance.BorderSize = 0;
-            b.BackColor = Surface;
+            // Tono ligeramente más claro que el fondo + borde blanco = pastilla nítida
+            b.BackColor = SurfaceHi;
             b.ForeColor = tinta ?? Ink;
-            b.FlatAppearance.MouseOverBackColor = SurfaceHi;
+            b.FlatAppearance.BorderSize = 1;
+            b.FlatAppearance.BorderColor = Color.FromArgb(255, 255, 255);
+            b.FlatAppearance.MouseOverBackColor = Color.FromArgb(240, 245, 252);
             b.FlatAppearance.MouseDownBackColor = Color.FromArgb(210, 219, 232);
             b.Tag = TagNeo(b.Tag);
             Redondear(b, radio);

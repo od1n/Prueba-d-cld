@@ -307,40 +307,13 @@ namespace SistemaGestion
 
         private Panel ConstruirStripInfo()
         {
-            var p = new Panel { Dock = DockStyle.Fill, BackColor = UINeo.Ground };
-
-            var fila = new TableLayoutPanel
-            {
-                Dock = DockStyle.Fill, RowCount = 1, ColumnCount = 4,
-                BackColor = UINeo.Ground, Padding = new Padding(10, 8, 10, 8)
-            };
-            // Sombra de relieve neumórfico bajo cada sub-tarjeta del strip
-            fila.Paint += (s, e) =>
-            {
-                var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias;
-                foreach (Control c in fila.Controls)
-                    if (c.Visible && (c is Panel || (c.Tag as string) == "neo"))
-                        UINeo.SombraAuto(g, c, 14);
-            };
-            fila.Layout += (s, e) => fila.Invalidate();
-            // Convierte un panel en sub-tarjeta elevada (esquinas redondeadas)
-            void Relieve(Control c, int radio = 14)
-            {
-                c.Margin = new Padding(8, 6, 8, 14);
-                void redib() { if (c.Width > 0 && c.Height > 0) {
-                    using var pt = RoundRect(new Rectangle(0, 0, c.Width, c.Height), radio);
-                    c.Region = new Region(pt); } }
-                c.Resize += (s2, e2) => redib();
-                redib();
-            }
-            fila.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 320f));   // saludo + fecha
-            fila.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 300f));   // BCV/Paralelo
-            fila.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));    // alertas
-            fila.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180f));   // boton actualizar tasa
+            // Panel normal (NO TableLayoutPanel) para que las sombras neumórficas
+            // se pinten completas detrás de cada tarjeta, igual que la grilla.
+            var cont = new Panel { Dock = DockStyle.Fill, BackColor = UINeo.Ground };
 
             // Saludo + fecha
-            var pnlSaludo = new Panel { Dock = DockStyle.Fill, BackColor = UINeo.Surface,
-                Padding = new Padding(14, 6, 6, 6) };
+            var pnlSaludo = new Panel { BackColor = UINeo.Surface,
+                Padding = new Padding(16, 8, 8, 8) };
             var lblSaludo = new Label
             {
                 Text = SaludoSegunHora() + ", " + (PrimerNombre() ?? "Admin"),
@@ -355,17 +328,14 @@ namespace SistemaGestion
                 ForeColor = CTextoTen, AutoSize = false, Dock = DockStyle.Top, Height = 18
             };
             pnlSaludo.Controls.Add(lblFecha); pnlSaludo.Controls.Add(lblSaludo);
-            fila.Controls.Add(pnlSaludo, 0, 0);
-            Relieve(pnlSaludo);
 
             // KPI BCV/Paralelo (mismo widget que el dashboard)
             var pnlBcv = KpiBcvParalelo();
-            fila.Controls.Add(pnlBcv, 1, 0);
-            Relieve(pnlBcv);
+            pnlBcv.Dock = DockStyle.None;
 
             // Alertas resumidas
-            var pnlA = new Panel { Dock = DockStyle.Fill, BackColor = UINeo.Surface,
-                Padding = new Padding(10, 6, 6, 6) };
+            var pnlA = new Panel { BackColor = UINeo.Surface,
+                Padding = new Padding(10, 8, 8, 8) };
             var bar = new Panel { Dock = DockStyle.Left, Width = 3, BackColor = CWarn };
             var lblTit = new Label { Text = "ALERTAS",
                 Font = new Font("Segoe UI", 7.5f, FontStyle.Bold),
@@ -383,18 +353,13 @@ namespace SistemaGestion
                 catch (Exception ex) { MessageBox.Show(ex.Message); }
             };
             pnlA.Controls.Add(_lblAlertas); pnlA.Controls.Add(lblTit); pnlA.Controls.Add(bar);
-            fila.Controls.Add(pnlA, 2, 0);
-            Relieve(pnlA);
 
-            // Boton "Actualizar tasa" — altura fija, anclado horizontal y centrado vertical
+            // Boton "Actualizar tasa"
             var btnTasa = new Button
             {
                 Text = "↻  Actualizar tasa",
-                Anchor = AnchorStyles.Left | AnchorStyles.Right,
-                Height = 38,
                 FlatStyle = FlatStyle.Flat, BackColor = CAzul, ForeColor = Color.White,
                 Font = new Font("Segoe UI", 9.5f, FontStyle.Bold), Cursor = Cursors.Hand,
-                Margin = new Padding(6, 29, 12, 29),  // strip 96 - botón 38 = 58 / 2 = 29 cada lado
                 TextAlign = ContentAlignment.MiddleCenter
             };
             UINeo.BotonAccento(btnTasa, CAzul, CAzulSec);
@@ -411,10 +376,51 @@ namespace SistemaGestion
                         "Tasa", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             };
-            fila.Controls.Add(btnTasa, 3, 0);
 
-            p.Controls.Add(fila);
-            return p;
+            // Región redondeada + borde nítido para cada tarjeta
+            void Tarjeta(Panel c, int radio = 14)
+            {
+                void redib() { if (c.Width > 0 && c.Height > 0) {
+                    using var pt = RoundRect(new Rectangle(0, 0, c.Width, c.Height), radio);
+                    c.Region = new Region(pt); } }
+                c.Resize += (s2, e2) => redib();
+                redib();
+            }
+            Tarjeta(pnlSaludo); Tarjeta(pnlBcv); Tarjeta(pnlA);
+
+            cont.Controls.Add(pnlSaludo);
+            cont.Controls.Add(pnlBcv);
+            cont.Controls.Add(pnlA);
+            cont.Controls.Add(btnTasa);
+
+            void Reposicionar()
+            {
+                int W = cont.ClientSize.Width, H = cont.ClientSize.Height;
+                if (W <= 0 || H <= 0) return;
+                int top = 12, h = H - 24;                 // 12 px de aire arriba y abajo
+                int gap = 14, x = 14;
+                int wSaludo = 300, wBcv = 280, wBtn = 180;
+                pnlSaludo.SetBounds(x, top, wSaludo, h); x += wSaludo + gap;
+                pnlBcv.SetBounds(x, top, wBcv, h);       x += wBcv + gap;
+                int xBtn = W - wBtn - 14;
+                int wA = xBtn - gap - x; if (wA < 140) wA = 140;
+                pnlA.SetBounds(x, top, wA, h);
+                int btnH = 40, btnTop = top + (h - btnH) / 2;
+                btnTasa.SetBounds(xBtn, btnTop, wBtn, btnH);
+            }
+            cont.SizeChanged += (s, e) => { Reposicionar(); cont.Invalidate(); };
+            cont.HandleCreated += (s, e) => Reposicionar();
+
+            // Sombra neumórfica detrás de cada tarjeta (panel normal = se pinta completa)
+            cont.Paint += (s, e) =>
+            {
+                var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias;
+                foreach (Control c in cont.Controls)
+                    if (c.Visible && (c is Panel || (c.Tag as string) == "neo"))
+                        UINeo.SombraAuto(g, c, 14);
+            };
+
+            return cont;
         }
 
         private Panel KpiBcvParalelo()

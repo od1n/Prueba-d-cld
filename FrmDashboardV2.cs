@@ -155,44 +155,63 @@ namespace SistemaGestion
 
         private Panel ConstruirStripKPIs()
         {
-            var p = new Panel { Dock = DockStyle.Fill, BackColor = UINeo.Ground };
-            var fila = new TableLayoutPanel
+            // Panel normal (NO TableLayoutPanel) para que las sombras se pinten completas.
+            var cont = new Panel { Dock = DockStyle.Fill, BackColor = UINeo.Ground };
+
+            var c0 = KpiCell("VENTAS HOY", out _lblVentasHoy, "$ 0,00", CAzul);
+            var c1 = KpiCell("MES",        out _lblVentasMes, "$ 0,00", CAzul);
+            var c2 = KpiCell("PEND",       out _lblPend,      "0",      CWarn);
+            var c3 = KpiCell("STK",        out _lblStock,     "0",      CDang);
+            var c4 = KpiCell("CxC",        out _lblCxC,       "$ 0,00", CAzul);
+            var pnlBcv = KpiBcvParalelo();
+            var btnIA  = BotonAnalizarIA();
+            var btnAct = BotonActualizar();
+            foreach (var c in new Control[] { c0, c1, c2, c3, c4, pnlBcv, btnIA, btnAct })
+                { c.Dock = DockStyle.None; c.Anchor = AnchorStyles.Top | AnchorStyles.Left; }
+
+            cont.Controls.Add(c0); cont.Controls.Add(c1); cont.Controls.Add(c2);
+            cont.Controls.Add(c3); cont.Controls.Add(c4); cont.Controls.Add(pnlBcv);
+            cont.Controls.Add(btnIA); cont.Controls.Add(btnAct);
+
+            var celdas = new Control[] { c0, c1, c2, c3, c4, pnlBcv };
+            int[] pesos = { 14, 13, 9, 9, 15, 26 };  // suma 86
+            void Reposicionar()
             {
-                Dock = DockStyle.Fill, RowCount = 1, ColumnCount = 9,
-                BackColor = UINeo.Ground, Padding = new Padding(10, 8, 10, 8)
-            };
-            // Sombra neumórfica bajo cada celda KPI marcada con Tag "neo"
-            fila.Paint += (s, e) =>
+                int W = cont.ClientSize.Width, H = cont.ClientSize.Height;
+                if (W <= 0 || H <= 0) return;
+                int top = 12, h = H - 24, gap = 10, left = 14, right = 14;
+                int wIA = 120, wAct = 150, btnGap = 10, btnH = 40;
+                int btnTop = top + (h - btnH) / 2;
+                int xAct = W - right - wAct;
+                int xIA  = xAct - btnGap - wIA;
+                btnIA.SetBounds(xIA, btnTop, wIA, btnH);
+                btnAct.SetBounds(xAct, btnTop, wAct, btnH);
+
+                int limite = xIA - 16;                    // fin de las celdas
+                int nGaps = celdas.Length - 1;
+                int avail = limite - left - nGaps * gap;
+                if (avail < 320) avail = 320;
+                int suma = 0; foreach (var pz in pesos) suma += pz;
+                int x = left;
+                for (int k = 0; k < celdas.Length; k++)
+                {
+                    int w = avail * pesos[k] / suma;
+                    celdas[k].SetBounds(x, top, w, h);
+                    x += w + gap;
+                }
+            }
+            cont.SizeChanged += (s, e) => { Reposicionar(); cont.Invalidate(); };
+            cont.HandleCreated += (s, e) => Reposicionar();
+
+            cont.Paint += (s, e) =>
             {
                 var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias;
-                foreach (Control c in fila.Controls)
+                foreach (Control c in cont.Controls)
                     if (c.Visible && (c.Tag as string) == "neo")
                         UINeo.SombraAuto(g, c, 12);
             };
-            fila.Layout += (s, e) => fila.Invalidate();
-            // KPIs proporcionales + botones fijos (responsive a cualquier tamaño)
-            fila.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 14f));   // Ventas Hoy
-            fila.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 13f));   // Mes
-            fila.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,  9f));   // Pend
-            fila.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,  9f));   // Stk
-            fila.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 15f));   // CxC
-            fila.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 26f));   // BCV/Par
-            fila.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 14f));   // spacer
-            fila.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120f)); // btn IA
-            fila.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130f)); // btn Actualizar
 
-            fila.Controls.Add(KpiCell("VENTAS HOY",  out _lblVentasHoy, "$ 0,00",  CAzul),    0, 0);
-            fila.Controls.Add(KpiCell("MES",         out _lblVentasMes, "$ 0,00",  CAzul),    1, 0);
-            fila.Controls.Add(KpiCell("PEND",        out _lblPend,      "0",       CWarn),    2, 0);
-            fila.Controls.Add(KpiCell("STK",         out _lblStock,     "0",       CDang),    3, 0);
-            fila.Controls.Add(KpiCell("CxC",         out _lblCxC,       "$ 0,00",  CAzul),    4, 0);
-            fila.Controls.Add(KpiBcvParalelo(),                                              5, 0);
-            fila.Controls.Add(new Panel { BackColor = UINeo.Ground },                          6, 0);
-            fila.Controls.Add(BotonAnalizarIA(),                                              7, 0);
-            fila.Controls.Add(BotonActualizar(),                                              8, 0);
-
-            p.Controls.Add(fila);
-            return p;
+            return cont;
         }
 
         private Panel KpiCell(string etiqueta, out Label lblValor, string valorIni, Color barra)
