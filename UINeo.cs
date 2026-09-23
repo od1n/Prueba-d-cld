@@ -142,27 +142,29 @@ namespace SistemaGestion
         public static void BotonSuave(Button b, Color? tinta = null, int radio = 12)
         {
             b.FlatStyle = FlatStyle.Flat;
-            // Tono ligeramente más claro que el fondo + borde blanco = pastilla nítida
-            b.BackColor = SurfaceHi;
-            b.ForeColor = tinta ?? Ink;
-            b.FlatAppearance.BorderSize = 1;
-            b.FlatAppearance.BorderColor = Color.FromArgb(255, 255, 255);
-            b.FlatAppearance.MouseOverBackColor = Color.FromArgb(240, 245, 252);
-            b.FlatAppearance.MouseDownBackColor = Color.FromArgb(210, 219, 232);
-            b.Tag = TagNeo(b.Tag);
+            b.FlatAppearance.BorderSize = 0;
+            b.BackColor = Ground;                 // mismo tono del fondo (sin relleno)
+            b.ForeColor = tinta ?? Ink;           // color/tinta va en el TEXTO
+            b.FlatAppearance.MouseOverBackColor = SurfaceHi;
+            b.FlatAppearance.MouseDownBackColor = Color.FromArgb(206, 216, 230);
             Redondear(b, radio);
+            b.Paint += (s, e) =>
+                Tema.BevelNeo(e.Graphics, new Rectangle(0, 0, b.Width, b.Height), radio);
         }
 
         /// <summary>Botón de acento: relleno de color + texto blanco + relieve.</summary>
         public static void BotonAccento(Button b, Color fondo, Color hover, int radio = 12)
         {
+            // Sin relleno de color: mismo tono del fondo + relieve + color en el texto.
             b.FlatStyle = FlatStyle.Flat;
             b.FlatAppearance.BorderSize = 0;
-            b.BackColor = fondo;
-            b.ForeColor = Color.White;
-            b.FlatAppearance.MouseOverBackColor = hover;
-            b.Tag = TagNeo(b.Tag);
+            b.BackColor = Ground;
+            b.ForeColor = fondo;                  // el color de acento va en el TEXTO
+            b.FlatAppearance.MouseOverBackColor = SurfaceHi;
+            b.FlatAppearance.MouseDownBackColor = Color.FromArgb(206, 216, 230);
             Redondear(b, radio);
+            b.Paint += (s, e) =>
+                Tema.BevelNeo(e.Graphics, new Rectangle(0, 0, b.Width, b.Height), radio);
         }
 
         // ── Pozo hundido (para gráficas / datos) ────────────────────────────
