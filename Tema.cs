@@ -111,6 +111,43 @@ namespace SistemaGestion
                 try { Estilizar(c); } catch { /* nunca romper una ventana por estilo */ }
                 if (c.HasChildren) Recorrer(c);
             }
+            try { RepararAnclas(parent); } catch { }
+        }
+
+        // Centraliza el COMPORTAMIENTO de redimensionado: los controles que
+        // quedaron con el ancla por defecto (Top|Left) y están pegados a un
+        // borde se re-anclan a ese borde, para que sigan a la ventana en vez
+        // de desaparecer o quedar fuera. Solo toca lo que el formulario no
+        // definió explícitamente.
+        private static void RepararAnclas(Control cont)
+        {
+            int W = cont.ClientSize.Width, H = cont.ClientSize.Height;
+            if (W < 60 || H < 60) return;
+            const AnchorStyles PorDefecto = AnchorStyles.Top | AnchorStyles.Left;
+            foreach (Control c in cont.Controls)
+            {
+                if (c.Dock != DockStyle.None) continue;
+                if (c.Anchor != PorDefecto) continue;   // el form ya lo definió: respetar
+
+                if (c is DataGridView || c is ListView || c is TreeView ||
+                    c is TabControl || c is RichTextBox)
+                {
+                    c.Anchor = AnchorStyles.Top | AnchorStyles.Bottom |
+                               AnchorStyles.Left | AnchorStyles.Right;
+                    continue;
+                }
+                if (c is Button || c is TextBox || c is ComboBox ||
+                    c is DateTimePicker || c is NumericUpDown)
+                {
+                    int gl = c.Left, gr = W - c.Right, gt = c.Top, gb = H - c.Bottom;
+                    AnchorStyles a = (gl <= gr ? AnchorStyles.Left : AnchorStyles.Right)
+                                   | (gt <= gb ? AnchorStyles.Top  : AnchorStyles.Bottom);
+                    // Cajas de texto/combos anchos: estirar horizontalmente
+                    if ((c is TextBox || c is ComboBox) && c.Width > W * 0.4)
+                        a |= AnchorStyles.Left | AnchorStyles.Right;
+                    c.Anchor = a;
+                }
+            }
         }
 
         // Aplica el tema tambien a los controles que se crean DESPUES de cargar
@@ -155,15 +192,21 @@ namespace SistemaGestion
             bool top = p.Dock == DockStyle.Top;
             Color? acc = MapearAcento(bg);
 
-            // ENCABEZADO (barra superior oscura o azul/morada) -> azul uniforme + texto blanco
+            // ENCABEZADO (barra superior oscura o azul/morada) -> CLARO + titulo oscuro
             if (top && (lum < 132 || acc == Primario || acc == Morado))
             {
-                p.BackColor = Primario;
+                p.BackColor = Fondo;
                 p.Tag = "tema-hecho";
+                var pnl = p;
+                pnl.Paint += (s, e) =>
+                {
+                    using var pen = new Pen(Color.FromArgb(120, Sombra), 1f);
+                    e.Graphics.DrawLine(pen, 0, pnl.Height - 1, pnl.Width, pnl.Height - 1);
+                };
+                pnl.Invalidate();
                 foreach (Control h in Descendientes(p))
                     if (h is Label lb)
-                        lb.ForeColor = (lb.Font.Bold && lb.Font.Size >= 11f)
-                            ? Color.White : Color.FromArgb(216, 230, 248);
+                        lb.ForeColor = lb.Font.Bold ? Tinta : TintaSuave;
             }
             // TILE de color (tarjeta con número) -> mismo color mapeado + redondeado
             else if (acc != null && p.Dock == DockStyle.None && lum < 200)
