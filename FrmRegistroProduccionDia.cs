@@ -166,12 +166,19 @@ namespace SistemaGestion
             var split = new SplitContainer {
                 Dock = DockStyle.Fill, Orientation = Orientation.Vertical,
                 BackColor = Color.FromArgb(220, 230, 245) };
+            split.FixedPanel = FixedPanel.Panel2;   // el panel de material mantiene su ancho
+            split.Panel2MinSize = 360;
 
-            Load += (s, e) => {
-                int dist = (int)(split.Width * 0.73);
-                if (dist > split.Panel1MinSize && dist < split.Width - split.Panel2MinSize)
-                    split.SplitterDistance = dist;
-            };
+            void AjustarSplit()
+            {
+                int panel2 = 470;                    // ancho fijo del panel de material
+                int dist = split.Width - panel2;
+                if (dist < split.Panel1MinSize) dist = split.Panel1MinSize;
+                int max = split.Width - split.Panel2MinSize;
+                if (dist > max) dist = max;
+                if (dist > 0) split.SplitterDistance = dist;
+            }
+            Load += (s, e) => AjustarSplit();
 
             // ── Izquierda: grid moldes ────────────────────────────────────
             var pnlMoldes = new Panel { Dock = DockStyle.Fill, BackColor = Color.White };
@@ -274,7 +281,7 @@ namespace SistemaGestion
                 ForeColor = Color.White, Font = new Font("Segoe UI", 9f, FontStyle.Bold),
                 AutoSize = true, Location = new Point(8, 9) });
 
-            var pnlMat = new Panel { Dock = DockStyle.Fill,
+            var pnlMat = new Panel { Dock = DockStyle.Fill, AutoScroll = true,
                 BackColor = Color.FromArgb(255, 252, 248), Padding = new Padding(10) };
 
             int my = 10;
