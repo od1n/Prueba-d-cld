@@ -27,6 +27,8 @@ namespace SistemaGestion
 {
     public class MenuPrincipalV2 : FormBase
     {
+        protected override bool TemaAutomatico => false;
+
         // Paleta clara unificada con FrmDashboardV2
         private static readonly Color CFondo    = Color.FromArgb(223, 230, 241); // = UINeo.Ground
         private static readonly Color CSurf     = Color.White;
@@ -399,7 +401,7 @@ namespace SistemaGestion
                 if (W <= 0 || H <= 0) return;
                 int top = 12, h = H - 24;                 // 12 px de aire arriba y abajo
                 int gap = 14, x = 14;
-                int wSaludo = 300, wBcv = 280, wBtn = 180;
+                int wSaludo = 320, wBcv = 330, wBtn = 180;
                 pnlSaludo.SetBounds(x, top, wSaludo, h); x += wSaludo + gap;
                 pnlBcv.SetBounds(x, top, wBcv, h);       x += wBcv + gap;
                 int xBtn = W - wBtn - 14;

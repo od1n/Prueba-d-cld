@@ -24,7 +24,7 @@ namespace SistemaGestion
         public static readonly Color Cyan        = Color.FromArgb(  0, 180, 216); // #00B4D8
         public static readonly Color Texto       = Color.FromArgb( 30,  30,  45);
         public static readonly Color TextoTenue  = Color.FromArgb(100, 110, 125);
-        public static readonly Color Fondo       = Color.FromArgb(245, 247, 252);
+        public static readonly Color Fondo       = Color.FromArgb(221, 229, 240); // = UINeo.Ground
         public static readonly Color FondoCard   = Color.White;
         public static readonly Color Borde       = Color.FromArgb(215, 222, 230);
         public static readonly Color Verde       = Color.FromArgb( 46, 125,  50);
@@ -57,8 +57,8 @@ namespace SistemaGestion
         {
             if (form is null) return;
             form.Font      = Body;
-            form.BackColor = Fondo;
-            form.ForeColor = Texto;
+            form.BackColor = UINeo.Ground;
+            form.ForeColor = UINeo.Ink;
             // AutoScaleMode = Dpi: el form se reajusta al DPI del monitor.
             form.AutoScaleMode      = AutoScaleMode.Dpi;
             form.AutoScaleDimensions = new SizeF(96f, 96f);
@@ -86,7 +86,7 @@ namespace SistemaGestion
                         if (l.Font.Size < 8.5f) l.Font = Body;
                         break;
                     case Panel p when p.BackColor == SystemColors.Control:
-                        p.BackColor = FondoCard;
+                        p.BackColor = UINeo.Ground;
                         break;
                     case GroupBox g:
                         g.Font      = BodyBold;
@@ -102,24 +102,32 @@ namespace SistemaGestion
 
         public static void EstilizarBoton(Button b)
         {
-            // Solo estilizamos botones que no tengan ya un BackColor custom.
             if (b.Tag is "no-theme") return;
+            if ((b.Tag as string)?.Contains("neo") == true) return; // ya estilizado a mano
 
-            b.FlatStyle              = FlatStyle.Flat;
-            b.FlatAppearance.BorderSize = 0;
-            b.Cursor                 = Cursors.Hand;
-            b.Font                   = Boton;
-            b.MinimumSize            = new Size(0, AlturaBoton);
+            b.Cursor      = Cursors.Hand;
+            b.Font        = Boton;
+            b.MinimumSize = new Size(0, AlturaBoton);
 
-            if (b.BackColor == SystemColors.Control)
-            {
-                // Botón "primario" por defecto = azul
-                b.BackColor = Azul;
-                b.ForeColor = Color.White;
-                b.FlatAppearance.MouseOverBackColor = AzulHover;
-                b.FlatAppearance.MouseDownBackColor = AzulOscuro;
-            }
+            Color bg = b.BackColor;
+            if (bg == SystemColors.Control)                 // por defecto = primario azul
+                UINeo.BotonAccento(b, Azul, AzulHover);
+            else if (EsRojizo(bg))                          // peligro / eliminar
+                UINeo.BotonAccento(b, Rojo, Color.FromArgb(150, 30, 30));
+            else if (EsVerdoso(bg))                         // confirmar / ok
+                UINeo.BotonAccento(b, Verde, Color.FromArgb(30, 95, 45));
+            else if (EsCyan(bg))                            // acento cian
+                UINeo.BotonAccento(b, Cyan, Color.FromArgb(0, 150, 183));
+            else if (EsClaro(bg))                           // secundario claro -> suave
+                UINeo.BotonSuave(b, Azul);
+            else                                            // azulado u otro -> primario
+                UINeo.BotonAccento(b, Azul, AzulHover);
         }
+
+        private static bool EsRojizo(Color c) => c.R > 150 && c.G < 110 && c.B < 110;
+        private static bool EsVerdoso(Color c) => c.G > 110 && c.G > c.R + 20 && c.G > c.B + 20;
+        private static bool EsCyan(Color c)    => c.B > 150 && c.G > 140 && c.R < 110;
+        private static bool EsClaro(Color c)   => c.R > 205 && c.G > 205 && c.B > 205;
 
         public static void EstilizarInput(TextBox t)
         {

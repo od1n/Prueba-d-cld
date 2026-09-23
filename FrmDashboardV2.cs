@@ -26,6 +26,8 @@ namespace SistemaGestion
 {
     public class FrmDashboardV2 : FormBase
     {
+        protected override bool TemaAutomatico => false;
+
         // ── Paleta (claro, alineado a UITheme + propuestas mockup) ──────────
         private static readonly Color CFondo     = Color.FromArgb(223, 230, 241); // = UINeo.Ground
         private static readonly Color CSurf      = Color.White;
