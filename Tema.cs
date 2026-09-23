@@ -85,9 +85,14 @@ namespace SistemaGestion
         //  2) APLICADOR GLOBAL  — reestila cualquier formulario.
         // ══════════════════════════════════════════════════════════════════
 
-        public static void Aplicar(Form form)
+        private static bool _paneles = true;
+
+        public static void Aplicar(Form form) => Aplicar(form, true);
+
+        public static void Aplicar(Form form, bool normalizarPaneles)
         {
             if (form is null) return;
+            _paneles = normalizarPaneles && NormalizarAgresivo;
             try
             {
                 form.Font       = Body;
@@ -184,7 +189,7 @@ namespace SistemaGestion
         // ── Paneles: header oscuro → claro; tile de color → redondeado; claro → fondo
         private static void EstilizarPanel(Panel p)
         {
-            if (!NormalizarAgresivo) return;
+            if (!_paneles) return;
             if ((p.Tag as string) == "tema-hecho") return;
 
             Color bg = p.BackColor;

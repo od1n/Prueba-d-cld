@@ -11,6 +11,8 @@ namespace SistemaGestion
     // ══════════════════════════════════════════════════════════════════════════
     public class FrmNomina : FormBase
     {
+        protected override bool NormalizarPaneles => false;
+
         public FrmNomina()
         {
             Text = "Nómina";
@@ -21,9 +23,14 @@ namespace SistemaGestion
             BackColor = Color.FromArgb(240, 244, 250);
 
             // ── Header ────────────────────────────────────────────────────
-            var hdr = new Panel { Dock = DockStyle.Top, Height = 50, BackColor = Color.FromArgb(26, 74, 138) };
+            var hdr = new Panel { Dock = DockStyle.Top, Height = 50, BackColor = UITheme.Fondo };
+            hdr.Paint += (s, e) =>
+            {
+                using var pen = new Pen(Color.FromArgb(120, 170, 182, 200), 1f);
+                e.Graphics.DrawLine(pen, 0, hdr.Height - 1, hdr.Width, hdr.Height - 1);
+            };
             hdr.Controls.Add(new Label {
-                Text = "Módulo de Nómina", ForeColor = Color.White,
+                Text = "Módulo de Nómina", ForeColor = UITheme.Texto, BackColor = Color.Transparent,
                 Font = new Font("Segoe UI", 12f, FontStyle.Bold),
                 AutoSize = true, Location = new Point(16, 13) });
 

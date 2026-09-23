@@ -38,10 +38,17 @@ namespace SistemaGestion
         /// </summary>
         protected virtual bool TemaAutomatico => true;
 
+        /// <summary>
+        /// Ventanas con diseño propio de tarjetas (lanzadores) lo ponen en
+        /// false: reciben fondo, botones, tablas y anclas, pero el aplicador
+        /// NO recolorea sus paneles/encabezados/tarjetas.
+        /// </summary>
+        protected virtual bool NormalizarPaneles => true;
+
         protected override void OnLoad(EventArgs e)
         {
             base.OnLoad(e);
-            if (TemaAutomatico) Tema.Aplicar(this);
+            if (TemaAutomatico) Tema.Aplicar(this, NormalizarPaneles);
 
             // ── Persistencia de tamaño/posición ─────────────────────────────
             // Restaurar antes de mostrar, guardar con debounce al cambiar.

@@ -7,6 +7,8 @@ namespace SistemaGestion
 {
     public class FrmTransacciones : FormBase
     {
+        protected override bool NormalizarPaneles => false;
+
         public FrmTransacciones()
         {
             Text = "Transacciones";
@@ -22,17 +24,20 @@ namespace SistemaGestion
             var hdr = new Panel
             {
                 Dock = DockStyle.Top, Height = 60,
-                BackColor = UITheme.AzulOscuro
+                BackColor = UITheme.Fondo
             };
             hdr.Paint += (s, e) =>
             {
                 e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
                 using var fTit = new Font("Segoe UI", 14f, FontStyle.Bold);
-                e.Graphics.DrawString("Transacciones", fTit, Brushes.White, 20, 12);
+                using var brTit = new SolidBrush(UITheme.Texto);
+                e.Graphics.DrawString("Transacciones", fTit, brTit, 20, 12);
                 using var fSub = new Font("Segoe UI", 9.5f);
-                using var brSub = new SolidBrush(Color.FromArgb(168, 177, 187));
+                using var brSub = new SolidBrush(UITheme.TextoTenue);
                 e.Graphics.DrawString("Operaciones de venta, cobros, precios y egresos",
                     fSub, brSub, 22, 34);
+                using var penDiv = new Pen(Color.FromArgb(120, 170, 182, 200), 1f);
+                e.Graphics.DrawLine(penDiv, 0, hdr.Height - 1, hdr.Width, hdr.Height - 1);
             };
 
             // ── Footer claro unificado ──────────────────────────────────────
