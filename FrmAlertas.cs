@@ -111,10 +111,12 @@ namespace SistemaGestion
                 using var fIco = new Font("Segoe UI", 22f);
                 g.DrawString("⚠", fIco, new SolidBrush(cWarn), 16, 14);
                 using var fTit = new Font("Segoe UI", 14f, FontStyle.Bold);
-                g.DrawString("Alertas Pendientes", fTit, Brushes.White, 56, 12);
+                using var brTit = new SolidBrush(UITheme.Texto);
+                g.DrawString("Alertas Pendientes", fTit, brTit, 56, 12);
                 using var fSub = new Font("Segoe UI", 9.5f);
+                using var brSub = new SolidBrush(UITheme.TextoTenue);
                 g.DrawString($"Revisa los items que requieren atención — {DateTime.Now:dd/MM/yyyy}",
-                    fSub, new SolidBrush(Color.FromArgb(168, 177, 187)), 58, 36);
+                    fSub, brSub, 58, 36);
             };
 
             // --- Badges resumen ---

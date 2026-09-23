@@ -40,9 +40,10 @@ namespace SistemaGestion
             hdr.Paint += (s, e) =>
             {
                 using var f = new Font("Segoe UI", 14f, FontStyle.Bold);
-                e.Graphics.DrawString("Abonos de Clientes", f, Brushes.White, 20, 10);
+                using var brT = new SolidBrush(UITheme.Texto);
+                e.Graphics.DrawString("Abonos de Clientes", f, brT, 20, 10);
                 using var fs = new Font("Segoe UI", 9f);
-                using var br = new SolidBrush(Color.FromArgb(168, 177, 187));
+                using var br = new SolidBrush(UITheme.TextoTenue);
                 e.Graphics.DrawString("Registro, comprobantes y estado de cuenta", fs, br, 22, 33);
             };
 
