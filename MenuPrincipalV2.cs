@@ -443,7 +443,7 @@ namespace SistemaGestion
         private Panel ConstruirContenido()
         {
             // Envoltorio con split horizontal: grid (Fill) + chat (Right, ancho 0 inicial)
-            var wrapper = new Panel { Dock = DockStyle.Fill, BackColor = Color.FromArgb(208, 216, 230) };
+            var wrapper = new Panel { Dock = DockStyle.Fill, BackColor = UINeo.Ground };
 
             _pnlChat = ConstruirPanelChat();
             _pnlChat.Dock  = DockStyle.Right;
@@ -452,7 +452,7 @@ namespace SistemaGestion
 
             // Fondo MEDIO-oscuro de la zona: gris azulado claro pero
             // notablemente distinto a los washes pastel de las tarjetas.
-            Color fondoZona = Color.FromArgb(208, 216, 230);
+            Color fondoZona = UINeo.Ground;
             var p = new Panel { Dock = DockStyle.Fill, BackColor = fondoZona,
                 Padding = new Padding(20, 16, 20, 4) };
 
@@ -468,16 +468,7 @@ namespace SistemaGestion
                 {
                     if (c is Panel card && card.Visible)
                     {
-                        // 3 capas con alpha decreciente para sombra suave
-                        for (int off = 1; off <= 3; off++)
-                        {
-                            using var br = new SolidBrush(Color.FromArgb(8 - (off - 1) * 2,
-                                40, 60, 90));
-                            using var path = RoundRect(
-                                new Rectangle(card.Left + off, card.Top + off + 1,
-                                              card.Width, card.Height), 10);
-                            g.FillPath(br, path);
-                        }
+                        UINeo.SombraRelieve(g, new Rectangle(card.Left, card.Top, card.Width, card.Height), 14);
                     }
                 }
             };
@@ -805,13 +796,9 @@ namespace SistemaGestion
             // Wash MUY claro del color del modulo: mezcla colorAcento al ~10%
             // sobre blanco. Mucho mas amable que el color sólido y permite
             // que el texto sea legible.
-            Color washCard = tieneAcceso
-                ? Mezclar(colorAcento, Color.White, 0.92f)
-                : Color.FromArgb(238, 240, 244);
+            Color washCard = tieneAcceso ? UINeo.Surface : Color.FromArgb(224, 228, 235);
             // Borde mas saturado para que perimetro se note bien.
-            Color bordeCard = tieneAcceso
-                ? Mezclar(colorAcento, Color.White, 0.55f)
-                : Color.FromArgb(195, 200, 210);
+            Color bordeCard = tieneAcceso ? Color.FromArgb(250, 252, 255) : Color.FromArgb(214, 218, 226);
 
             var card = new Panel
             {
@@ -821,7 +808,7 @@ namespace SistemaGestion
             // Region clipped al RoundRect para esquinas perfectas.
             card.Resize += (s, e) =>
             {
-                using var path = RoundRect(new Rectangle(0, 0, card.Width, card.Height), 10);
+                using var path = RoundRect(new Rectangle(0, 0, card.Width, card.Height), 14);
                 card.Region = new Region(path);
             };
             card.Paint += (s, e) =>
@@ -829,7 +816,7 @@ namespace SistemaGestion
                 var g = e.Graphics;
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 using var pen = new Pen(bordeCard, 1.2f);
-                using var path = RoundRect(new Rectangle(0, 0, card.Width - 1, card.Height - 1), 10);
+                using var path = RoundRect(new Rectangle(0, 0, card.Width - 1, card.Height - 1), 14);
                 g.DrawPath(pen, path);
             };
 
@@ -847,8 +834,8 @@ namespace SistemaGestion
             // Fondo del icono: blanco solido para que el glifo destaque
             // contra el wash de la tarjeta.
             Color fondoIco = tieneAcceso
-                ? Mezclar(colorAcento, Color.White, 0.78f)   // mas saturado que el wash de la card
-                : Color.FromArgb(228, 230, 236);
+                ? Mezclar(colorAcento, UINeo.Surface, 0.80f)   // chip con tinte del color del modulo
+                : Color.FromArgb(226, 230, 236);
             pnlIco.Paint += (s, e) =>
             {
                 var g = e.Graphics;
@@ -930,7 +917,7 @@ namespace SistemaGestion
             {
                 // Hover: wash MAS saturado del color del modulo
                 // (perceptiblemente mas intenso que el reposo).
-                Color colorHover = Mezclar(colorAcento, Color.White, 0.85f);
+                Color colorHover = UINeo.SurfaceHi;
                 void Pintar(Control c, Color bg)
                 {
                     // bar (lateral) y fondo del icono mantienen su propio color
