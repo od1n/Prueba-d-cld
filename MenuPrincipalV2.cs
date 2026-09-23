@@ -104,11 +104,11 @@ namespace SistemaGestion
                 BackColor = CFondo
             };
             root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 42f));   // navbar
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 50f));   // navbar
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 28f));   // banner NE (oculto por default)
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 80f));   // strip info
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 96f));   // strip info
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));   // grid
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 56f));   // bottom
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 64f));   // bottom
 
             root.Controls.Add(ConstruirNavbar(),    0, 0);
             root.Controls.Add(ConstruirBannerNE(),  0, 1);
@@ -152,13 +152,18 @@ namespace SistemaGestion
 
         private Panel ConstruirNavbar()
         {
-            var p = new Panel { Dock = DockStyle.Fill, BackColor = CAzulOsc };
+            var p = new Panel { Dock = DockStyle.Fill, BackColor = UINeo.Ground };
+            p.Paint += (s, e) =>
+            {
+                using var pen = new Pen(Color.FromArgb(120, UINeo.ShadowDark), 1f);
+                e.Graphics.DrawLine(pen, 0, p.Height - 1, p.Width, p.Height - 1);
+            };
 
             var lblLogo = new Label
             {
                 Text = "  ⚙  SistemaGestion",
                 Font = new Font("Segoe UI", 11f, FontStyle.Bold),
-                ForeColor = Color.White, BackColor = CAzulOsc,
+                ForeColor = CAzul, BackColor = Color.Transparent,
                 AutoSize = false, TextAlign = ContentAlignment.MiddleLeft,
                 Dock = DockStyle.Left, Width = 220
             };
@@ -167,16 +172,11 @@ namespace SistemaGestion
             var btnLogout = new Button
             {
                 Text = "Cerrar sesión",
-                FlatStyle = FlatStyle.Flat,
-                BackColor = Color.FromArgb(180, 50, 50),
-                ForeColor = Color.White,
                 Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
                 Cursor = Cursors.Hand,
-                Width = 120, Dock = DockStyle.Right,
-                Margin = new Padding(0)
+                Width = 130, Dock = DockStyle.Right
             };
-            btnLogout.FlatAppearance.BorderSize = 0;
-            btnLogout.FlatAppearance.MouseOverBackColor = Color.FromArgb(150, 30, 30);
+            UINeo.BotonAccento(btnLogout, UITheme.Rojo, Color.FromArgb(150, 30, 30), 8);
             btnLogout.Click += BtnCerrarSesion_Click;
 
             // Label de usuario - Dock.Right despues (queda a la izq del boton)
@@ -185,7 +185,7 @@ namespace SistemaGestion
                 Text = (Sesion.NombreCompleto ?? Sesion.NombreUsuario ?? "") +
                        "  ·  " + (Sesion.Rol ?? "—") + "  ",
                 Font = new Font("Segoe UI", 9f),
-                ForeColor = Color.FromArgb(168, 177, 187), BackColor = CAzulOsc,
+                ForeColor = UINeo.InkSoft, BackColor = Color.Transparent,
                 AutoSize = false, TextAlign = ContentAlignment.MiddleRight,
                 Padding = new Padding(0, 0, 12, 0),
                 Width = 240, Dock = DockStyle.Right
@@ -196,9 +196,15 @@ namespace SistemaGestion
             {
                 Dock = DockStyle.Right, AutoSize = false,
                 FlowDirection = FlowDirection.LeftToRight,
-                BackColor = CAzulOsc, Padding = new Padding(0, 7, 8, 7),
-                WrapContents = false, Width = 320
+                BackColor = UINeo.Ground, Padding = new Padding(0, 8, 8, 8),
+                WrapContents = false, Width = 360
             };
+            pnlAcc.Paint += (s, e) =>
+            {
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                UINeo.SombrasHijos(e.Graphics, pnlAcc, 9);
+            };
+            pnlAcc.Layout += (s, e) => pnlAcc.Invalidate();
             pnlAcc.Controls.Add(BotonNav("F3 Buscar",   () => new FrmBuscador().ShowDialog()));
             pnlAcc.Controls.Add(BotonNav("Mi perfil",   () => new FrmPerfil().ShowDialog()));
             pnlAcc.Controls.Add(BotonNav("?  Ayuda",    () => AyudaService.Mostrar(this, "MenuPrincipal")));
@@ -214,7 +220,7 @@ namespace SistemaGestion
                 _btnToggleNE.Width = 110;
                 _btnToggleNE.Click += (s, e) => ToggleVistaNE();
                 pnlAcc.Controls.Add(_btnToggleNE);
-                pnlAcc.Width = 430;  // espacio para el botón extra
+                pnlAcc.Width = 480;  // espacio para el botón extra
                 ActualizarBotonNE();
             }
 
@@ -233,18 +239,14 @@ namespace SistemaGestion
         {
             var b = new Button
             {
-                Text = texto, FlatStyle = FlatStyle.Flat,
-                BackColor = Color.FromArgb(31, 58, 95),
-                ForeColor = Color.White,
-                Font = new Font("Segoe UI", 8.5f),
+                Text = texto,
+                Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
                 Cursor = Cursors.Hand,
-                Width = 96, Height = 26,
-                Margin = new Padding(3, 0, 3, 0),
+                Width = 100, Height = 30,
+                Margin = new Padding(4, 0, 4, 0),
                 TextAlign = ContentAlignment.MiddleCenter
             };
-            b.FlatAppearance.BorderSize = 0;
-            b.FlatAppearance.MouseOverBackColor = Color.FromArgb(45, 80, 130);
-            UINeo.PastillaBoton(b, 8);
+            UINeo.BotonSuave(b, UINeo.Ink, 9);
             if (accion != null) b.Click += (s, e) => accion();
             return b;
         }
@@ -284,13 +286,15 @@ namespace SistemaGestion
             {
                 _btnToggleNE.Text = "🔓 Vista NE: ON";
                 _btnToggleNE.BackColor = Color.FromArgb(180, 100, 30);
+                _btnToggleNE.ForeColor = Color.White;
                 _btnToggleNE.FlatAppearance.MouseOverBackColor = Color.FromArgb(210, 130, 50);
             }
             else
             {
                 _btnToggleNE.Text = "Vista NE: OFF";
-                _btnToggleNE.BackColor = Color.FromArgb(31, 58, 95);
-                _btnToggleNE.FlatAppearance.MouseOverBackColor = Color.FromArgb(45, 80, 130);
+                _btnToggleNE.BackColor = UINeo.Surface;
+                _btnToggleNE.ForeColor = UINeo.Ink;
+                _btnToggleNE.FlatAppearance.MouseOverBackColor = UINeo.SurfaceHi;
             }
         }
 
@@ -315,20 +319,18 @@ namespace SistemaGestion
             {
                 var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias;
                 foreach (Control c in fila.Controls)
-                    if (c is Panel sp && sp.Visible)
-                        UINeo.SombraRelieve(g, sp.Bounds, 12);
+                    if (c.Visible && (c is Panel || (c.Tag as string) == "neo"))
+                        UINeo.SombraRelieve(g, c.Bounds, 14);
             };
             fila.Layout += (s, e) => fila.Invalidate();
             // Convierte un panel en sub-tarjeta elevada (esquinas redondeadas)
-            void Relieve(Control c, int radio = 12)
+            void Relieve(Control c, int radio = 14)
             {
-                c.Margin = new Padding(6, 5, 6, 5);
+                c.Margin = new Padding(8, 8, 8, 8);
                 void redib() { if (c.Width > 0 && c.Height > 0) {
                     using var pt = RoundRect(new Rectangle(0, 0, c.Width, c.Height), radio);
                     c.Region = new Region(pt); } }
                 c.Resize += (s2, e2) => redib();
-                c.Paint += (s2, e2) => UINeo.BordeClaro(e2.Graphics,
-                    new Rectangle(0, 0, c.Width, c.Height), radio);
                 redib();
             }
             fila.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 320f));   // saludo + fecha
@@ -392,11 +394,10 @@ namespace SistemaGestion
                 Height = 38,
                 FlatStyle = FlatStyle.Flat, BackColor = CAzul, ForeColor = Color.White,
                 Font = new Font("Segoe UI", 9.5f, FontStyle.Bold), Cursor = Cursors.Hand,
-                Margin = new Padding(6, 21, 12, 21),  // strip 80 - botón 38 = 42 / 2 = 21 cada lado
+                Margin = new Padding(6, 29, 12, 29),  // strip 96 - botón 38 = 58 / 2 = 29 cada lado
                 TextAlign = ContentAlignment.MiddleCenter
             };
-            btnTasa.FlatAppearance.BorderSize = 0;
-            btnTasa.FlatAppearance.MouseOverBackColor = CAzulSec;
+            UINeo.BotonAccento(btnTasa, CAzul, CAzulSec);
             btnTasa.Click += (s, e) =>
             {
                 try
@@ -1003,9 +1004,15 @@ namespace SistemaGestion
             var fila = new FlowLayoutPanel
             {
                 Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight,
-                BackColor = UINeo.Ground, Padding = new Padding(20, 10, 20, 10),
+                BackColor = UINeo.Ground, Padding = new Padding(20, 12, 20, 12),
                 AutoSize = false, WrapContents = false
             };
+            fila.Paint += (s, e) =>
+            {
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                UINeo.SombrasHijos(e.Graphics, fila, 12);
+            };
+            fila.Layout += (s, e) => fila.Invalidate();
 
             fila.Controls.Add(BotonInferior("▤  Reportes",       () => new FrmReportes().ShowDialog()));
             fila.Controls.Add(BotonInferior("$  Tasa de cambio", () => new FrmTasaCambio().ShowDialog()));
@@ -1015,16 +1022,12 @@ namespace SistemaGestion
             _btnToggleChat = new Button
             {
                 Text = "🤖  Chat IA",
-                Width = 130, Height = 36,
-                FlatStyle = FlatStyle.Flat,
-                BackColor = CMorado, ForeColor = Color.White,
+                Width = 130, Height = 38,
                 Font = new Font("Segoe UI", 10f, FontStyle.Bold),
                 Cursor = Cursors.Hand,
-                Margin = new Padding(0, 0, 8, 0)
+                Margin = new Padding(0, 4, 8, 4)
             };
-            _btnToggleChat.FlatAppearance.BorderSize = 0;
-            _btnToggleChat.FlatAppearance.MouseOverBackColor = Color.FromArgb(60, 52, 145);
-            UINeo.PastillaBoton(_btnToggleChat);
+            UINeo.BotonAccento(_btnToggleChat, CMorado, Color.FromArgb(60, 52, 145));
             _btnToggleChat.Click += (s, e) => ToggleChat();
             fila.Controls.Add(_btnToggleChat);
 
@@ -1035,17 +1038,12 @@ namespace SistemaGestion
             var btnSalir = new Button
             {
                 Text = "✕  Salir",
-                Width = 130, Height = 36,
-                FlatStyle = FlatStyle.Flat,
-                BackColor = UITheme.Rojo,
-                ForeColor = Color.White,
+                Width = 130, Height = 38,
                 Font = new Font("Segoe UI", 10f, FontStyle.Bold),
                 Cursor = Cursors.Hand,
-                Margin = new Padding(8, 0, 0, 0)
+                Margin = new Padding(8, 4, 0, 4)
             };
-            btnSalir.FlatAppearance.BorderSize = 0;
-            btnSalir.FlatAppearance.MouseOverBackColor = Color.FromArgb(150, 30, 30);
-            UINeo.PastillaBoton(btnSalir);
+            UINeo.BotonAccento(btnSalir, UITheme.Rojo, Color.FromArgb(150, 30, 30));
             btnSalir.Click += BtnSalir_Click;
             fila.Controls.Add(btnSalir);
 
@@ -1058,18 +1056,12 @@ namespace SistemaGestion
             // Botón primario azul sólido — buen contraste sobre fondo claro
             var b = new Button
             {
-                Text = texto, Width = 160, Height = 36,
-                FlatStyle = FlatStyle.Flat,
-                BackColor = UITheme.Azul,
-                ForeColor = Color.White,
+                Text = texto, Width = 160, Height = 38,
                 Font = new Font("Segoe UI", 10f, FontStyle.Bold),
                 Cursor = Cursors.Hand,
-                Margin = new Padding(0, 0, 8, 0)
+                Margin = new Padding(0, 4, 10, 4)
             };
-            b.FlatAppearance.BorderSize = 0;
-            b.FlatAppearance.MouseOverBackColor = UITheme.AzulHover;
-            b.FlatAppearance.MouseDownBackColor = UITheme.AzulOscuro;
-            UINeo.PastillaBoton(b);
+            UINeo.BotonSuave(b, UINeo.Ink, 12);
             b.Click += (s, e) => { try { accion(); } catch (Exception ex) { MessageBox.Show(this, ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error); } };
             return b;
         }

@@ -94,10 +94,10 @@ namespace SistemaGestion
                 BackColor = CFondo
             };
             root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 42f));   // navbar (igual menu)
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 90f));   // strip KPIs
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 50f));   // navbar (igual menu)
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 100f));  // strip KPIs
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));   // contenido
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 50f));   // bottom (cerrar)
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 60f));   // bottom (cerrar)
 
             root.Controls.Add(ConstruirNavbar(),  0, 0);
             root.Controls.Add(ConstruirStripKPIs(), 0, 1);
@@ -109,13 +109,18 @@ namespace SistemaGestion
         // Header consistente con MenuPrincipalV2 (logo + acciones + user + cerrar)
         private Panel ConstruirNavbar()
         {
-            var p = new Panel { Dock = DockStyle.Fill, BackColor = CAzulOsc };
+            var p = new Panel { Dock = DockStyle.Fill, BackColor = UINeo.Ground };
+            p.Paint += (s, e) =>
+            {
+                using var pen = new Pen(Color.FromArgb(120, UINeo.ShadowDark), 1f);
+                e.Graphics.DrawLine(pen, 0, p.Height - 1, p.Width, p.Height - 1);
+            };
 
             var lblLogo = new Label
             {
                 Text = "  ⚙  SistemaGestion",
                 Font = new Font("Segoe UI", 11f, FontStyle.Bold),
-                ForeColor = Color.White, BackColor = CAzulOsc,
+                ForeColor = CAzul, BackColor = Color.Transparent,
                 AutoSize = false, TextAlign = ContentAlignment.MiddleLeft,
                 Dock = DockStyle.Left, Width = 220
             };
@@ -123,15 +128,11 @@ namespace SistemaGestion
             var btnVolver = new Button
             {
                 Text = "← Volver al menú",
-                FlatStyle = FlatStyle.Flat,
-                BackColor = Color.FromArgb(120, 30, 30),
-                ForeColor = Color.White,
                 Font = new Font("Segoe UI", 9f, FontStyle.Bold),
                 Cursor = Cursors.Hand,
-                Width = 150, Dock = DockStyle.Right
+                Width = 160, Dock = DockStyle.Right
             };
-            btnVolver.FlatAppearance.BorderSize = 0;
-            btnVolver.FlatAppearance.MouseOverBackColor = Color.FromArgb(160, 40, 40);
+            UINeo.BotonAccento(btnVolver, UITheme.Rojo, Color.FromArgb(160, 40, 40), 8);
             btnVolver.Click += (s, e) => Close();
 
             var lblUser = new Label
@@ -139,7 +140,7 @@ namespace SistemaGestion
                 Text = (Sesion.NombreCompleto ?? Sesion.NombreUsuario ?? "") +
                        "  ·  " + (Sesion.Rol ?? "—") + "  ",
                 Font = new Font("Segoe UI", 9.5f),
-                ForeColor = Color.FromArgb(168, 177, 187), BackColor = CAzulOsc,
+                ForeColor = UINeo.InkSoft, BackColor = Color.Transparent,
                 AutoSize = false, TextAlign = ContentAlignment.MiddleRight,
                 Padding = new Padding(0, 0, 12, 0),
                 Width = 260, Dock = DockStyle.Right
@@ -166,7 +167,7 @@ namespace SistemaGestion
                 var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias;
                 foreach (Control c in fila.Controls)
                     if (c is Panel sp && (sp.Tag as string) == "neo" && sp.Visible)
-                        UINeo.SombraRelieve(g, sp.Bounds, 10);
+                        UINeo.SombraRelieve(g, sp.Bounds, 12);
             };
             fila.Layout += (s, e) => fila.Invalidate();
             // KPIs proporcionales + botones fijos (responsive a cualquier tamaño)
@@ -197,10 +198,10 @@ namespace SistemaGestion
         private Panel KpiCell(string etiqueta, out Label lblValor, string valorIni, Color barra)
         {
             var p = new Panel { Dock = DockStyle.Fill, BackColor = UINeo.Surface,
-                Padding = new Padding(8, 5, 5, 5), Tag = "neo",
-                Margin = new Padding(5, 4, 5, 4) };
+                Padding = new Padding(8, 6, 5, 6), Tag = "neo",
+                Margin = new Padding(6, 8, 6, 8) };
             p.Resize += (s2, e2) => { if (p.Width > 0 && p.Height > 0) {
-                using var pt = UICards.RoundRect(new Rectangle(0, 0, p.Width, p.Height), 10);
+                using var pt = UICards.RoundRect(new Rectangle(0, 0, p.Width, p.Height), 12);
                 p.Region = new Region(pt); } };
             var bar = new Panel { Dock = DockStyle.Left, Width = 4, BackColor = barra };
             var lblEt = new Label { Text = etiqueta, Font = new Font("Segoe UI", 7.5f, FontStyle.Bold),
@@ -219,10 +220,10 @@ namespace SistemaGestion
         private Panel KpiBcvParalelo()
         {
             var p = new Panel { Dock = DockStyle.Fill, BackColor = UINeo.Surface,
-                Padding = new Padding(10, 2, 6, 2), Tag = "neo",
-                Margin = new Padding(5, 4, 5, 4) };
+                Padding = new Padding(10, 4, 6, 4), Tag = "neo",
+                Margin = new Padding(6, 8, 6, 8) };
             p.Resize += (s2, e2) => { if (p.Width > 0 && p.Height > 0) {
-                using var pt = UICards.RoundRect(new Rectangle(0, 0, p.Width, p.Height), 10);
+                using var pt = UICards.RoundRect(new Rectangle(0, 0, p.Width, p.Height), 12);
                 p.Region = new Region(pt); } };
             var bar = new Panel { Dock = DockStyle.Left, Width = 4, BackColor = COk };
 
@@ -274,9 +275,7 @@ namespace SistemaGestion
                 Margin = new Padding(4, 13, 12, 13),
                 TextAlign = ContentAlignment.MiddleCenter
             };
-            b.FlatAppearance.BorderSize = 0;
-            b.FlatAppearance.MouseOverBackColor = CHoverBg;
-            UINeo.PastillaBoton(b);
+            UINeo.BotonAccento(b, CAzul, CHoverBg);
             b.Click += async (s, e) => await CargarDatosAsync();
             return b;
         }
@@ -329,9 +328,7 @@ namespace SistemaGestion
                 Margin    = new Padding(4, 13, 4, 13),
                 TextAlign = ContentAlignment.MiddleCenter
             };
-            _btnAnalizarIA.FlatAppearance.BorderSize = 0;
-            _btnAnalizarIA.FlatAppearance.MouseOverBackColor = Color.FromArgb(60, 52, 145);
-            UINeo.PastillaBoton(_btnAnalizarIA);
+            UINeo.BotonAccento(_btnAnalizarIA, CMorado, Color.FromArgb(60, 52, 145));
             _btnAnalizarIA.Click += async (s, e) => await AnalizarConIAAsync();
             return _btnAnalizarIA;
         }
@@ -574,8 +571,7 @@ namespace SistemaGestion
                 Font = new Font("Segoe UI", 9f), Cursor = Cursors.Hand,
                 Margin = new Padding(4)
             };
-            _btnPin.FlatAppearance.BorderColor = CBorde;
-            UINeo.PastillaBoton(_btnPin, 8);
+            UINeo.BotonSuave(_btnPin, CAzul, 8);
             _btnPin.Click += (s, e) => ToggleFijar();
 
             var btnNext = new Button
@@ -584,8 +580,7 @@ namespace SistemaGestion
                 FlatStyle = FlatStyle.Flat, BackColor = CSurf, ForeColor = CTexto,
                 Font = new Font("Segoe UI", 12f, FontStyle.Bold), Cursor = Cursors.Hand
             };
-            btnNext.FlatAppearance.BorderColor = CBorde;
-            UINeo.PastillaBoton(btnNext, 8);
+            UINeo.BotonSuave(btnNext, CTexto, 8);
             btnNext.Click += (s, e) => CambiarGrafica(+1);
 
             var btnPrev = new Button
@@ -594,8 +589,7 @@ namespace SistemaGestion
                 FlatStyle = FlatStyle.Flat, BackColor = CSurf, ForeColor = CTexto,
                 Font = new Font("Segoe UI", 12f, FontStyle.Bold), Cursor = Cursors.Hand
             };
-            btnPrev.FlatAppearance.BorderColor = CBorde;
-            UINeo.PastillaBoton(btnPrev, 8);
+            UINeo.BotonSuave(btnPrev, CTexto, 8);
             btnPrev.Click += (s, e) => CambiarGrafica(-1);
 
             header.Controls.Add(_lblTituloGrafica);
@@ -686,9 +680,7 @@ namespace SistemaGestion
                 Width = 130, Height = 36,
                 Margin = new Padding(0, 7, 16, 7)
             };
-            btnCerrar.FlatAppearance.BorderSize = 0;
-            btnCerrar.FlatAppearance.MouseOverBackColor = UITheme.AzulHover;
-            UINeo.PastillaBoton(btnCerrar);
+            UINeo.BotonAccento(btnCerrar, UITheme.Azul, UITheme.AzulHover);
             btnCerrar.Click += (s, e) => Close();
 
             var flowR = new FlowLayoutPanel
@@ -696,10 +688,16 @@ namespace SistemaGestion
                 Dock = DockStyle.Right,
                 FlowDirection = FlowDirection.RightToLeft,
                 BackColor = UINeo.Ground,
-                Width = 170,
+                Width = 180,
                 WrapContents = false,
                 Padding = new Padding(0)
             };
+            flowR.Paint += (s, e) =>
+            {
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                UINeo.SombrasHijos(e.Graphics, flowR, 12);
+            };
+            flowR.Layout += (s, e) => flowR.Invalidate();
             flowR.Controls.Add(btnCerrar);
 
             // Orden importante: Dock=Fill primero, Dock=Right al final
@@ -890,7 +888,7 @@ namespace SistemaGestion
                 dots += (i == _idxGrafica ? "●" : "○") + " ";
             _lblDots.Text = dots.Trim();
             _btnPin.Text = _fijada ? "📌 Fijada" : "📌 Fijar";
-            _btnPin.BackColor = _fijada ? Color.FromArgb(232, 240, 250) : CSurf;
+            _btnPin.BackColor = _fijada ? Color.FromArgb(206, 224, 245) : UINeo.Surface;
         }
 
         // ── Pintado de gráficas ─────────────────────────────────────────────

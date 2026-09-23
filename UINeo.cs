@@ -1,12 +1,15 @@
 // ════════════════════════════════════════════════════════════════════════
 // ARCHIVO: UINeo.cs  →  raíz del proyecto
 //
-// Tema "neumórfico a color" para el rediseño de la app de escritorio.
-// Base neumórfica (relieve suave, mismo tono) sobre un fondo gris-azulado,
-// con acentos de color de EHP donde ayudan a leer (íconos, barras, datos).
+// Tema "neumórfico a color" (variante aprobada en el mockup).
+// Principio clave: la SUPERFICIE es del MISMO color que el FONDO; el relieve
+// lo produce solo la doble sombra (oscura abajo-derecha + luz arriba-izq).
+// El color de EHP entra como acento (íconos, barras, números, botón primario).
 //
-// Reutiliza UICards.RoundRect y UICards.Mezclar para no duplicar lógica.
-// Piloto: MenuPrincipalV2 y FrmDashboardV2.
+// Paleta tomada del mockup:
+//   --app-bg / --surf : #dde5f0     sombra oscura : #bfc9d8
+//   tinta            : #26374f      luz           : #f6faff
+//   tinta suave      : #6a7890
 // ════════════════════════════════════════════════════════════════════════
 
 using System;
@@ -19,22 +22,24 @@ namespace SistemaGestion
     public static class UINeo
     {
         // ── Paleta neumórfica ────────────────────────────────────────────────
-        public static readonly Color Ground   = Color.FromArgb(223, 230, 241); // fondo gris-azulado
-        public static readonly Color Surface   = Color.FromArgb(234, 239, 247); // tarjeta "elevada"
-        public static readonly Color SurfaceHi  = Color.FromArgb(243, 247, 252); // hover / realce
-        public static readonly Color ShadowDark = Color.FromArgb( 38,  60,  96); // sombra (con alpha)
-        public static readonly Color ShadowLight= Color.FromArgb(255, 255, 255); // luz (con alpha)
-        public static readonly Color Ink        = Color.FromArgb( 30,  42,  63);
-        public static readonly Color InkSoft     = Color.FromArgb( 96, 110, 132);
+        public static readonly Color Ground     = Color.FromArgb(221, 229, 240); // #dde5f0
+        public static readonly Color Surface     = Color.FromArgb(221, 229, 240); // = fondo (neumorfismo)
+        public static readonly Color SurfaceHi    = Color.FromArgb(231, 238, 247); // hover / realce
+        public static readonly Color ShadowDark   = Color.FromArgb(185, 197, 214); // #b9c5d6 (sombra)
+        public static readonly Color ShadowLight  = Color.FromArgb(248, 251, 255); // #f8fbff (luz)
+        public static readonly Color Ink          = Color.FromArgb( 38,  55,  79); // #26374f
+        public static readonly Color InkSoft      = Color.FromArgb(106, 120, 144); // #6a7890
 
         /// <summary>Tinte suave de un color de acento sobre la superficie neumórfica.</summary>
         public static Color Tinte(Color acento, float pesoSuperficie = 0.82f)
             => UICards.Mezclar(acento, Surface, pesoSuperficie);
 
+        // ── Relieve (tarjeta elevada) ───────────────────────────────────────
         /// <summary>
-        /// Pinta la sombra neumórfica DOBLE de una tarjeta "elevada" ubicada en
-        /// cardRect, directamente sobre el Graphics del contenedor (detrás de la
-        /// tarjeta). Sombra oscura abajo-derecha + luz arriba-izquierda.
+        /// Pinta la doble sombra neumórfica de un elemento "elevado" ubicado en
+        /// cardRect, sobre el Graphics del CONTENEDOR (detrás del elemento).
+        /// El elemento debe ser del mismo color que el fondo y tener margen
+        /// suficiente para que la sombra no se recorte (≥ 8 px por lado).
         /// </summary>
         public static void SombraRelieve(Graphics g, Rectangle cardRect, int radio)
         {
@@ -42,53 +47,83 @@ namespace SistemaGestion
             var smAnt = g.SmoothingMode;
             g.SmoothingMode = SmoothingMode.AntiAlias;
 
-            // Sombra oscura (abajo-derecha)
-            for (int off = 1; off <= 6; off++)
+            // Sombra oscura (abajo-derecha) — de lejos (tenue) a cerca (fuerte)
+            for (int o = 8; o >= 1; o--)
             {
-                int a = 11 - off; if (a < 2) a = 2;
+                int a = (int)(58 * (1.0 - (o - 1) / 8.0)); if (a < 6) a = 6;
                 using var br = new SolidBrush(Color.FromArgb(a, ShadowDark));
                 using var p = UICards.RoundRect(
-                    new Rectangle(cardRect.X + off, cardRect.Y + off + 1, cardRect.Width, cardRect.Height), radio);
+                    new Rectangle(cardRect.X + o, cardRect.Y + o, cardRect.Width, cardRect.Height), radio);
                 g.FillPath(br, p);
             }
             // Luz (arriba-izquierda)
-            for (int off = 1; off <= 6; off++)
+            for (int o = 8; o >= 1; o--)
             {
-                int a = 26 - off * 3; if (a < 3) a = 3;
+                int a = (int)(72 * (1.0 - (o - 1) / 8.0)); if (a < 7) a = 7;
                 using var br = new SolidBrush(Color.FromArgb(a, ShadowLight));
                 using var p = UICards.RoundRect(
-                    new Rectangle(cardRect.X - off, cardRect.Y - off, cardRect.Width, cardRect.Height), radio);
+                    new Rectangle(cardRect.X - o, cardRect.Y - o, cardRect.Width, cardRect.Height), radio);
                 g.FillPath(br, p);
             }
             g.SmoothingMode = smAnt;
         }
 
         /// <summary>
-        /// Pinta un "pozo" hundido (inset) — para contenedores de datos/gráficas:
-        /// sombra interior arriba-izquierda + luz interior abajo-derecha.
+        /// Recorre los hijos de un contenedor y pinta el relieve detrás de los
+        /// marcados como neumórficos (Tag contiene "neo"). Llamar desde el
+        /// Paint del contenedor.
         /// </summary>
-        /// <summary>Convierte un botón plano en "pastilla" redondeada, conservando su color de acento.</summary>
-        public static void PastillaBoton(Button b, int radio = 10)
+        public static void SombrasHijos(Graphics g, Control contenedor, int radio)
         {
-            b.FlatStyle = FlatStyle.Flat;
-            b.FlatAppearance.BorderSize = 0;
-            void redib() { if (b.Width > 0 && b.Height > 0) {
-                using var p = UICards.RoundRect(new Rectangle(0, 0, b.Width, b.Height), radio);
-                b.Region = new Region(p); } }
-            b.Resize += (s, e) => redib();
+            foreach (Control c in contenedor.Controls)
+                if (c.Visible && EsNeo(c))
+                    SombraRelieve(g, c.Bounds, radio);
+        }
+
+        private static bool EsNeo(Control c) => (c.Tag as string)?.Contains("neo") == true;
+        private static string TagNeo(object? actual)
+        {
+            string s = actual as string ?? "";
+            return s.Contains("neo") ? s : (s.Length == 0 ? "neo" : s + " neo");
+        }
+
+        // ── Redondeo de región ──────────────────────────────────────────────
+        public static void Redondear(Control c, int radio)
+        {
+            void redib() { if (c.Width > 0 && c.Height > 0) {
+                using var p = UICards.RoundRect(new Rectangle(0, 0, c.Width, c.Height), radio);
+                c.Region = new Region(p); } }
+            c.Resize += (s, e) => redib();
             redib();
         }
 
-        /// <summary>Dibuja un borde claro redondeado en el borde del control (realce de tarjeta elevada).</summary>
-        public static void BordeClaro(Graphics g, Rectangle r, int radio)
+        // ── Botones neumórficos ─────────────────────────────────────────────
+        /// <summary>Botón "suave": mismo color que el fondo + relieve (lo pinta el padre) + texto tinta.</summary>
+        public static void BotonSuave(Button b, Color? tinta = null, int radio = 12)
         {
-            var sm = g.SmoothingMode; g.SmoothingMode = SmoothingMode.AntiAlias;
-            using var pen = new Pen(Color.FromArgb(252, 253, 255), 1.4f);
-            using var p = UICards.RoundRect(new Rectangle(r.X, r.Y, r.Width - 1, r.Height - 1), radio);
-            g.DrawPath(pen, p);
-            g.SmoothingMode = sm;
+            b.FlatStyle = FlatStyle.Flat;
+            b.FlatAppearance.BorderSize = 0;
+            b.BackColor = Surface;
+            b.ForeColor = tinta ?? Ink;
+            b.FlatAppearance.MouseOverBackColor = SurfaceHi;
+            b.FlatAppearance.MouseDownBackColor = Color.FromArgb(210, 219, 232);
+            b.Tag = TagNeo(b.Tag);
+            Redondear(b, radio);
         }
 
+        /// <summary>Botón de acento: relleno de color + texto blanco + relieve.</summary>
+        public static void BotonAccento(Button b, Color fondo, Color hover, int radio = 12)
+        {
+            b.FlatStyle = FlatStyle.Flat;
+            b.FlatAppearance.BorderSize = 0;
+            b.BackColor = fondo;
+            b.ForeColor = Color.White;
+            b.FlatAppearance.MouseOverBackColor = hover;
+            b.Tag = TagNeo(b.Tag);
+            Redondear(b, radio);
+        }
+
+        // ── Pozo hundido (para gráficas / datos) ────────────────────────────
         public static void PozoHundido(Graphics g, Rectangle r, int radio)
         {
             if (r.Width <= 0 || r.Height <= 0) return;
@@ -103,13 +138,15 @@ namespace SistemaGestion
             using (var path = UICards.RoundRect(r, radio))
             {
                 g.SetClip(path);
-                for (int off = 1; off <= 5; off++)
+                for (int o = 1; o <= 6; o++)
                 {
-                    int a = 16 - off * 2; if (a < 2) a = 2;
+                    int a = 40 - o * 5; if (a < 5) a = 5;
                     using var penD = new Pen(Color.FromArgb(a, ShadowDark), 2f);
-                    g.DrawArc(penD, r.X - off, r.Y - off, radio * 2 + off, radio * 2 + off, 150, 120);
-                    g.DrawLine(penD, r.X, r.Y + off, r.Right, r.Y + off);
-                    g.DrawLine(penD, r.X + off, r.Y, r.X + off, r.Bottom);
+                    g.DrawLine(penD, r.X, r.Y + o, r.Right, r.Y + o);
+                    g.DrawLine(penD, r.X + o, r.Y, r.X + o, r.Bottom);
+                    using var penL = new Pen(Color.FromArgb(a, ShadowLight), 2f);
+                    g.DrawLine(penL, r.X, r.Bottom - o, r.Right, r.Bottom - o);
+                    g.DrawLine(penL, r.Right - o, r.Y, r.Right - o, r.Bottom);
                 }
                 g.Clip = clip;
             }
