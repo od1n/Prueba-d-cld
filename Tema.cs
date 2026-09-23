@@ -144,13 +144,18 @@ namespace SistemaGestion
                 if (c is Button || c is TextBox || c is ComboBox ||
                     c is DateTimePicker || c is NumericUpDown)
                 {
-                    int gl = c.Left, gr = W - c.Right, gt = c.Top, gb = H - c.Bottom;
-                    AnchorStyles a = (gl <= gr ? AnchorStyles.Left : AnchorStyles.Right)
-                                   | (gt <= gb ? AnchorStyles.Top  : AnchorStyles.Bottom);
-                    // Cajas de texto/combos anchos: estirar horizontalmente
-                    if ((c is TextBox || c is ComboBox) && c.Width > W * 0.4)
-                        a |= AnchorStyles.Left | AnchorStyles.Right;
-                    c.Anchor = a;
+                    // SOLO re-anclar lo que está realmente pegado a un borde
+                    // (evita mover controles de layouts absolutos a media ventana).
+                    int gr = W - c.Right, gb = H - c.Bottom;
+                    AnchorStyles a = AnchorStyles.Top | AnchorStyles.Left;
+                    if (gr <= 44 && c.Left > W * 0.30)
+                        a = (a & ~AnchorStyles.Left) | AnchorStyles.Right;   // pegado a la derecha
+                    if (gb <= 44 && c.Top > H * 0.45)
+                        a = (a & ~AnchorStyles.Top) | AnchorStyles.Bottom;   // pegado abajo
+                    if ((c is TextBox || c is ComboBox) && c.Width > W * 0.45)
+                        a |= AnchorStyles.Left | AnchorStyles.Right;         // caja ancha: estira
+                    if (a != (AnchorStyles.Top | AnchorStyles.Left))
+                        c.Anchor = a;
                 }
             }
         }

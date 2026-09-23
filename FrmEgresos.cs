@@ -67,12 +67,17 @@ namespace SistemaGestion
 
         private Panel ConstruirHeader()
         {
-            var p = new Panel { Dock = DockStyle.Fill, BackColor = UITheme.AzulOscuro };
+            var p = new Panel { Dock = DockStyle.Fill, BackColor = UITheme.Fondo };
+            p.Paint += (s, e) =>
+            {
+                using var pen = new Pen(Color.FromArgb(120, 170, 182, 200), 1f);
+                e.Graphics.DrawLine(pen, 0, p.Height - 1, p.Width, p.Height - 1);
+            };
             p.Controls.Add(new Label
             {
                 Text = "  Egresos del negocio",
                 Font = new Font("Segoe UI", 14f, FontStyle.Bold),
-                ForeColor = Color.White, BackColor = UITheme.AzulOscuro,
+                ForeColor = UITheme.Texto, BackColor = Color.Transparent,
                 Dock = DockStyle.Fill, AutoSize = false,
                 TextAlign = ContentAlignment.MiddleLeft,
                 Padding = new Padding(20, 6, 0, 0)
@@ -81,7 +86,7 @@ namespace SistemaGestion
             {
                 Text = "  Compras de materia prima · servicios · mantenimiento · oficina · cuentas por pagar",
                 Font = new Font("Segoe UI", 9.5f, FontStyle.Italic),
-                ForeColor = Color.FromArgb(168, 177, 187), BackColor = UITheme.AzulOscuro,
+                ForeColor = UITheme.TextoTenue, BackColor = Color.Transparent,
                 Dock = DockStyle.Bottom, Height = 22,
                 TextAlign = ContentAlignment.MiddleLeft,
                 Padding = new Padding(20, 0, 0, 4)
