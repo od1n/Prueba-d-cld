@@ -167,9 +167,11 @@ namespace SistemaGestion
             if (!_enganchados.Add(cont)) return;
             cont.ControlAdded += (s, e) =>
             {
-                try { Estilizar(e.Control); } catch { }
-                if (e.Control.HasChildren) Recorrer(e.Control);
-                EngancharDinamico(e.Control);
+                var nc = e.Control;
+                if (nc == null) return;
+                try { Estilizar(nc); } catch { }
+                if (nc.HasChildren) Recorrer(nc);
+                EngancharDinamico(nc);
             };
             cont.Disposed += (s, e) => _enganchados.Remove(cont);
         }

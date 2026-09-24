@@ -121,11 +121,6 @@ namespace SistemaGestion
         }
 
         private static bool EsNeo(Control c) => (c.Tag as string)?.Contains("neo") == true;
-        private static string TagNeo(object? actual)
-        {
-            string s = actual as string ?? "";
-            return s.Contains("neo") ? s : (s.Length == 0 ? "neo" : s + " neo");
-        }
 
         // ── Redondeo de región ──────────────────────────────────────────────
         public static void Redondear(Control c, int radio)

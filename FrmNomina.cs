@@ -308,9 +308,6 @@ namespace SistemaGestion
                 AutoSize = true, Font = new Font("Segoe UI", 9f, FontStyle.Bold) });
             TextBox T(string v = "") { var tb = new TextBox { Text = v,
                 Location = new Point(215, y), Size = new Size(315, 24) }; Controls.Add(tb); return tb; }
-            NumericUpDown N(decimal v, decimal max = 99999) { var n = new NumericUpDown {
-                Location = new Point(215, y), Size = new Size(200, 24),
-                Maximum = max, DecimalPlaces = 2, Value = v }; Controls.Add(n); return n; }
 
             L("Cedula:");        txtCedula   = T(e?.Cedula   ?? ""); y += 32;
             L("Nombre:");        txtNombre   = T(e?.Nombre   ?? ""); y += 32;
