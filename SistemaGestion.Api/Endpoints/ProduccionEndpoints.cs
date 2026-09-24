@@ -198,7 +198,7 @@ namespace SistemaGestion.Api.Endpoints
                         ins.ExecuteNonQuery();
                         var rid = c.CreateCommand(); rid.Transaction = tx;
                         rid.CommandText = "SELECT last_insert_rowid()";
-                        regId = (int)(long)rid.ExecuteScalar();
+                        regId = (int)(long)(rid.ExecuteScalar() ?? 0L);
                     }
 
                     // 2. Detalle por molde (CodigoProducto = producto base del molde)

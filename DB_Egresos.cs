@@ -162,10 +162,10 @@ namespace SistemaGestion
             bool tieneLineas = g.Detalles != null && g.Detalles.Count > 0;
             if (tieneLineas)
             {
-                if (g.Detalles.Any(d => d.Cantidad <= 0))
+                if (g.Detalles!.Any(d => d.Cantidad <= 0))
                     throw new Exception("Cada línea debe tener una cantidad mayor que cero.");
                 // El header conserva, como referencia, la primera línea de MP.
-                var primeraMP = g.Detalles.FirstOrDefault(d => d.EsMateriaPrima && d.IdArticulo > 0);
+                var primeraMP = g.Detalles!.FirstOrDefault(d => d.EsMateriaPrima && d.IdArticulo > 0);
                 g.IdInsumo = primeraMP != null ? primeraMP.IdArticulo : (int?)null;
                 g.Cantidad = primeraMP != null ? primeraMP.Cantidad : 0m;
                 if (!g.PrecioPendiente)
@@ -315,7 +315,7 @@ namespace SistemaGestion
             // tocan las líneas ni el Kardex, igual que antes.)
             if (esNuevo && tieneLineas)
             {
-                foreach (var d in g.Detalles)
+                foreach (var d in g.Detalles!)
                 {
                     try
                     {
