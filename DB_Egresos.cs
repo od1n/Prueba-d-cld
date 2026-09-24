@@ -169,7 +169,7 @@ namespace SistemaGestion
                 g.IdInsumo = primeraMP != null ? primeraMP.IdArticulo : (int?)null;
                 g.Cantidad = primeraMP != null ? primeraMP.Cantidad : 0m;
                 if (!g.PrecioPendiente)
-                    g.MontoOriginal = g.Detalles.Sum(d => d.Subtotal);
+                    g.MontoOriginal = g.Detalles!.Sum(d => d.Subtotal);
             }
 
             // Con precio pendiente el monto llega en 0 (nota de entrega sin montos);
