@@ -297,9 +297,17 @@ app.Use(async (ctx, next) =>
         && string.Equals(ctx.Request.Host.Host, sgPublicHost, StringComparison.OrdinalIgnoreCase);
     if (esExterno && esApi && !RutaContenidoPermitida(path))
     {
-        ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
-        await ctx.Response.WriteAsJsonAsync(new { error = "Este modulo solo esta disponible en la red local." });
-        return;
+        // Excepcion: un usuario autenticado con rol Admin SI puede usar todo el
+        // ERP a traves del tunel. El resto (anonimos y rol Redes) sigue
+        // limitado al area de contenido; el ERP no sale de la LAN para ellos.
+        bool esAdminAutenticado = autenticado
+            && SistemaGestion.Api.Auth.TokenService.EsAdmin(ctx.User!);
+        if (!esAdminAutenticado)
+        {
+            ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await ctx.Response.WriteAsJsonAsync(new { error = "Este modulo solo esta disponible en la red local." });
+            return;
+        }
     }
 
     // (2) El area de contenido: solo Admin o Redes (los hooks de n8n usan
