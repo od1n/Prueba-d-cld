@@ -263,6 +263,7 @@ async function cargarIvaConfig() {
 
 function abrirNueva() {
     itemsFactura = [];
+    precioAjustadoBcv = false;
     comprobantesFactura = [];
     const hoy = new Date().toISOString().slice(0,10);
     const drawer = document.getElementById('drawerForm');
@@ -317,8 +318,40 @@ function abrirNueva() {
         placeholder="Buscar articulo..." autocomplete="off" oninput="dropArticulos(this.value)">
       <div id="ddArt" class="autocomplete-drop" style="display:none"></div>
       <input id="fArtCant" type="number" class="input-field" style="width:70px" placeholder="Cant" value="1" min="0.001" step="0.001">
-      <input id="fArtPrecio" type="number" class="input-field" style="width:90px" placeholder="Precio" min="0" step="0.01">
+      <input id="fArtPrecio" type="number" class="input-field" style="width:90px" placeholder="Precio" min="0" step="0.01" oninput="precioAjustadoBcv=false">
+      <button class="btn btn-sm btn-ghost" style="border:1px solid var(--cyan);color:var(--cyan);white-space:nowrap"
+        title="Calcular el precio a tasa BCV que equivale al precio a tasa paralela" onclick="toggleCalcBcv()">&#8644; BCV</button>
       <button class="btn btn-sm btn-primary" onclick="addItemFactura()">+</button>
+    </div>
+    <div id="calcBcv" class="card" style="display:none;padding:12px;margin-bottom:10px;font-size:10pt">
+      <div class="bold mb-8">Precio a tasa paralela &rarr; precio a registrar a tasa BCV</div>
+      <div class="form-grid-2 mb-8">
+        <div class="form-group">
+          <label class="form-label">Precio del art&iacute;culo (USD a tasa paralela)</label>
+          <input id="cbPrecio" type="number" class="input-field" min="0" step="0.01" oninput="calcBcv()">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Tasa paralela (Bs/USD)</label>
+          <input id="cbPar" type="number" class="input-field" min="0" step="0.01" oninput="calcBcv()">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Tasa BCV (Bs/USD)</label>
+          <input id="cbBcv" type="number" class="input-field" min="0" step="0.0001" oninput="calcBcv()">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Fecha de las tasas</label>
+          <div id="cbFecha" class="text-dim" style="padding:8px 0">&mdash;</div>
+        </div>
+      </div>
+      <div class="flex-between mb-4"><span>Monto en Bs (precio &times; tasa paralela)</span><span id="cbBs" class="mono">&mdash;</span></div>
+      <div class="flex-between mb-4 bold"><span>Precio a registrar en la factura (USD a tasa BCV)</span><span id="cbUsdBcv" class="mono text-cyan" style="font-size:12pt">&mdash;</span></div>
+      <div class="flex-between mb-8 text-dim text-sm"><span>Comprobaci&oacute;n: precio a registrar &times; tasa BCV</span><span id="cbCheck" class="mono">&mdash;</span></div>
+      <div class="text-dim text-sm mb-8">La factura se guarda en USD y se imprime en Bs a tasa BCV. Con este precio, el monto en Bs de la factura es el mismo que costar&iacute;a el art&iacute;culo a tasa paralela.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-sm btn-primary" style="flex:1" onclick="usarPrecioBcv()">Usar este precio</button>
+        <button class="btn btn-sm btn-ghost" style="flex:1;border:1px solid var(--borde)" onclick="ajustarTodosBcv()"
+          title="Convierte a tasa BCV el precio de todos los art&iacute;culos ya agregados que a&uacute;n no fueron ajustados">Ajustar todos los art&iacute;culos agregados</button>
+      </div>
     </div>
     <div id="tablaFactItems" style="margin-bottom:12px"></div>
     <div class="card" style="padding:12px;margin-bottom:12px;font-size:10pt">
@@ -412,6 +445,7 @@ function selArticulo(codigo, desc, precio) {
     const inp = document.getElementById('fArtInput');
     inp.value = desc; inp.dataset.codigo = codigo;
     document.getElementById('fArtPrecio').value = precio || '';
+    precioAjustadoBcv = false;
     document.getElementById('ddArt').style.display = 'none';
 }
 
@@ -427,7 +461,8 @@ function addItemFactura() {
     if (precio <= 0) { alert('Precio debe ser mayor a 0.'); return; }
     const idx = itemsFactura.findIndex(i => i.codigo === codigo && codigo !== '');
     if (idx >= 0) { itemsFactura[idx].cantidad += cant; }
-    else { itemsFactura.push({ codigo, descripcion: desc, cantidad: cant, precio }); }
+    else { itemsFactura.push({ codigo, descripcion: desc, cantidad: cant, precio, ajusteBcv: precioAjustadoBcv }); }
+    precioAjustadoBcv = false;
     inp.value = ''; inp.dataset.codigo = '';
     document.getElementById('fArtCant').value = '1';
     document.getElementById('fArtPrecio').value = '';
@@ -448,7 +483,7 @@ function renderTablaFactItems() {
         <div class="list-item" style="padding:8px 12px;border-bottom:1px solid var(--borde)">
           <div class="list-item-main">
             <div class="list-item-title">${esh(it.descripcion||it.codigo)}</div>
-            <div class="list-item-sub">${formatNum(it.cantidad,3)} x ${formatUSD(it.precio)}</div>
+            <div class="list-item-sub">${formatNum(it.cantidad,3)} x ${formatUSD(it.precio)}${it.ajusteBcv ? ' <span class="tag" style="font-size:8pt;color:var(--cyan)">a tasa BCV</span>' : ''}</div>
           </div>
           <div style="display:flex;align-items:center;gap:10px">
             <span class="mono">${formatUSD(it.cantidad*it.precio)}</span>
@@ -469,6 +504,80 @@ function recalcFactura() {
     const tot = base + iva;
     const set = (id,v) => { const el=document.getElementById(id); if(el) el.textContent=formatUSD(v); };
     set('fSub', sub); set('fDsc', desc); set('fIva2', iva); set('fTot', tot);
+}
+
+// -- Calculadora paralelo -> BCV -------------------------------------------
+// Ejemplo: fuste a 25 USD con paralela 1000 Bs/USD = 25.000 Bs. Si la BCV
+// esta en 400 Bs/USD, el precio a registrar es 25.000 / 400 = 62,50 USD,
+// que al imprimirse a tasa BCV vuelve a dar 25.000 Bs.
+let precioAjustadoBcv = false;
+let tasasBcvCargadas  = false;
+let tasasBcvFecha     = '';
+
+async function toggleCalcBcv() {
+    const box = document.getElementById('calcBcv');
+    if (!box) return;
+    const abrir = box.style.display === 'none';
+    box.style.display = abrir ? 'block' : 'none';
+    if (!abrir) return;
+    const pr = parseFloat(document.getElementById('fArtPrecio')?.value) || 0;
+    if (pr > 0 && !precioAjustadoBcv) document.getElementById('cbPrecio').value = pr;
+    const fechaFact = document.getElementById('fFecha')?.value || '';
+    if (!tasasBcvCargadas || tasasBcvFecha !== fechaFact) {
+        try {
+            const t = await apiGet('/api/facturas/tasas-cambio' + (fechaFact ? '?fecha=' + encodeURIComponent(fechaFact) : ''));
+            if (t) {
+                if (t.tasaParalela > 0) document.getElementById('cbPar').value = Number(t.tasaParalela).toFixed(2);
+                if (t.tasaBCV > 0)      document.getElementById('cbBcv').value = Number(t.tasaBCV).toFixed(4);
+                document.getElementById('cbFecha').textContent = t.fecha ? formatFecha(String(t.fecha).slice(0,10)) : 'Sin tasa registrada';
+                tasasBcvCargadas = true;
+                tasasBcvFecha = fechaFact;
+            }
+        } catch { /* el usuario puede escribir las tasas a mano */ }
+    }
+    calcBcv();
+}
+
+function leerCalcBcv() {
+    const precio = parseFloat(document.getElementById('cbPrecio')?.value) || 0;
+    const par    = parseFloat(document.getElementById('cbPar')?.value) || 0;
+    const bcv    = parseFloat(document.getElementById('cbBcv')?.value) || 0;
+    return { precio, par, bcv, ok: precio > 0 && par > 0 && bcv > 0 };
+}
+
+function calcBcv() {
+    const { precio, par, bcv, ok } = leerCalcBcv();
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+    if (!ok) { set('cbBs','—'); set('cbUsdBcv','—'); set('cbCheck','—'); return; }
+    const bs     = precio * par;
+    const usdBcv = Math.round((bs / bcv) * 100) / 100;
+    set('cbBs', formatNum(bs, 2) + ' Bs');
+    set('cbUsdBcv', formatUSD(usdBcv));
+    set('cbCheck', formatNum(usdBcv * bcv, 2) + ' Bs');
+}
+
+function usarPrecioBcv() {
+    const { precio, par, bcv, ok } = leerCalcBcv();
+    if (!ok) { alert('Indica el precio, la tasa paralela y la tasa BCV.'); return; }
+    const usdBcv = Math.round((precio * par / bcv) * 100) / 100;
+    document.getElementById('fArtPrecio').value = usdBcv.toFixed(2);
+    precioAjustadoBcv = true;
+    document.getElementById('calcBcv').style.display = 'none';
+}
+
+function ajustarTodosBcv() {
+    const { par, bcv } = leerCalcBcv();
+    if (!(par > 0 && bcv > 0)) { alert('Indica la tasa paralela y la tasa BCV.'); return; }
+    const pendientes = itemsFactura.filter(it => !it.ajusteBcv);
+    if (!pendientes.length) { alert('No hay artículos pendientes por ajustar.'); return; }
+    if (!confirm(`Se convertirá a tasa BCV el precio de ${pendientes.length} artículo(s).\n` +
+                 `Factor: ${formatNum(par,2)} / ${formatNum(bcv,4)} = ${formatNum(par/bcv,4)}`)) return;
+    pendientes.forEach(it => {
+        it.precio = Math.round((it.precio * par / bcv) * 100) / 100;
+        it.ajusteBcv = true;
+    });
+    renderTablaFactItems();
+    recalcFactura();
 }
 
 // -- Guardar factura (con vista previa) ------------------------------------

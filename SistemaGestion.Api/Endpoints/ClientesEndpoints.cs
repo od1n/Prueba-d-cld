@@ -300,6 +300,30 @@ namespace SistemaGestion.Api.Endpoints
                 return Results.Ok(lista);
             }).RequireAuthorization();
 
+            // ── GET tasas del día (calculadora paralelo → BCV) ────────────
+            // La factura se registra en USD y se imprime en Bs a tasa BCV.
+            // El portal usa estas tasas para calcular el precio en USD que,
+            // multiplicado por la BCV, da los mismos Bs que el precio
+            // original a tasa paralela.
+            app.MapGet("/api/facturas/tasas-cambio", (string? fecha) =>
+            {
+                using var c = Db.Conn();
+                var cmd = c.CreateCommand();
+                // Misma regla que el snapshot al guardar: la última tasa con
+                // Fecha <= fecha de la factura (sin fecha → la más reciente).
+                if (DateTime.TryParse(fecha, out var fFact))
+                {
+                    cmd.CommandText = "SELECT COALESCE(TasaBCV,0), COALESCE(TasaParalelo,0), Fecha FROM TasaCambio WHERE Fecha <= $f ORDER BY Fecha DESC LIMIT 1";
+                    cmd.Parameters.AddWithValue("$f", fFact.ToString("yyyy-MM-dd"));
+                }
+                else
+                    cmd.CommandText = "SELECT COALESCE(TasaBCV,0), COALESCE(TasaParalelo,0), Fecha FROM TasaCambio ORDER BY Fecha DESC LIMIT 1";
+                using var r = cmd.ExecuteReader();
+                if (r.Read())
+                    return Results.Ok(new { tasaBCV = r.GetDouble(0), tasaParalela = r.GetDouble(1), fecha = r.IsDBNull(2) ? null : r.GetValue(2)?.ToString() });
+                return Results.Ok(new { tasaBCV = 0.0, tasaParalela = 0.0, fecha = (string?)null });
+            }).RequireAuthorization();
+
             // ── GET detalle ───────────────────────────────────────────────
             app.MapGet("/api/facturas/{numero}", (string numero) =>
             {
@@ -395,12 +419,28 @@ namespace SistemaGestion.Api.Endpoints
                     decimal ivaMonto  = baseIva * (req.PctIva / 100m);
                     decimal total     = baseIva + ivaMonto;
 
+                    // Snapshot de la tasa vigente a la fecha de la factura (igual
+                    // que la app de escritorio): la factura se imprime en Bs a
+                    // TasaBCVUsada. Sin tasa registrada queda en 0 (auditable).
+                    long idTasa = 0; double tBcv = 0, tPar = 0;
+                    try
+                    {
+                        var qt = c.CreateCommand(); qt.Transaction = tx;
+                        qt.CommandText = @"SELECT Id, COALESCE(TasaBCV,0), COALESCE(TasaParalelo,0)
+                            FROM TasaCambio WHERE Fecha <= $f ORDER BY Fecha DESC LIMIT 1";
+                        qt.Parameters.AddWithValue("$f", fecha.Length >= 10 ? fecha.Substring(0, 10) : fecha);
+                        using var rt = qt.ExecuteReader();
+                        if (rt.Read()) { idTasa = rt.GetInt64(0); tBcv = rt.GetDouble(1); tPar = rt.GetDouble(2); }
+                    }
+                    catch { /* sin tabla o sin tasa: se guarda en 0 */ }
+
                     // Insertar cabecera
                     var ins = c.CreateCommand(); ins.Transaction = tx;
                     string tipoDoc = req.PctIva > 0 ? "FacturaConIVA" : "NotaEntrega";
                     ins.CommandText = @"INSERT INTO Facturas
-                        (NumeroF,Fecha,Codigo,Descuento,FormaDePago,Abono,IvaF,DiasCreditoF,TotalF,Observaciones,TipoDocumento)
-                        VALUES($n,$f,$cl,$desc,$fp,$ab,$iva,$dc,$tot,$obs,$tipo)";
+                        (NumeroF,Fecha,Codigo,Descuento,FormaDePago,Abono,IvaF,DiasCreditoF,TotalF,Observaciones,TipoDocumento,
+                         IdTasaCambio,TasaBCVUsada,TasaParaleloUsada)
+                        VALUES($n,$f,$cl,$desc,$fp,$ab,$iva,$dc,$tot,$obs,$tipo,$idt,$tbcv,$tpar)";
                     ins.Parameters.AddWithValue("$n",   numF);
                     ins.Parameters.AddWithValue("$f",   fecha);
                     ins.Parameters.AddWithValue("$cl",  req.CodigoCliente ?? "");
@@ -412,6 +452,9 @@ namespace SistemaGestion.Api.Endpoints
                     ins.Parameters.AddWithValue("$tot", (double)total);
                     ins.Parameters.AddWithValue("$obs", req.Observaciones ?? "");
                     ins.Parameters.AddWithValue("$tipo", tipoDoc);
+                    ins.Parameters.AddWithValue("$idt",  idTasa);
+                    ins.Parameters.AddWithValue("$tbcv", tBcv);
+                    ins.Parameters.AddWithValue("$tpar", tPar);
                     ins.ExecuteNonQuery();
 
                     // Obtener rowid

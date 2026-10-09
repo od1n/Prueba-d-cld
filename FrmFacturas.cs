@@ -1035,6 +1035,19 @@ CargarDatos();
             };
             btnQuitarLinea.FlatAppearance.BorderSize = 0;
 
+            // Calculadora precio a tasa paralela → precio a tasa BCV (DlgPrecioBcv.cs)
+            var btnPrecioBcv = new Button
+            {
+                Text = "⇄ Precio BCV", Location = new Point(248, 28), Size = new Size(120, 26),
+                BackColor = Color.FromArgb(0, 140, 160), ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8f, FontStyle.Bold),
+                Visible = !soloLectura
+            };
+            btnPrecioBcv.FlatAppearance.BorderSize = 0;
+            new ToolTip().SetToolTip(btnPrecioBcv,
+                "Calcula el precio a registrar a tasa BCV para que la factura en Bs " +
+                "equivalga al precio del artículo a tasa paralela");
+
             // Grid de lineas
             dgvLineas = new DataGridView
             {
@@ -1083,7 +1096,7 @@ CargarDatos();
             };
 
             panelDer.Controls.AddRange(new Control[]
-                { lblLineas, btnAgregar, btnQuitarLinea, dgvLineas, lblTotalLineas });
+                { lblLineas, btnAgregar, btnQuitarLinea, btnPrecioBcv, dgvLineas, lblTotalLineas });
 
             // ── Botones inferiores ────────────────────────────────────────
             var panelBtns = new Panel
@@ -1176,9 +1189,14 @@ CargarDatos();
                 RecalcularTotal();
             };
 
+            btnPrecioBcv.Click += (s, e) => AbrirCalculadoraBcv();
+
             dgvLineas.CellEndEdit += (s, e) =>
             {
                 var col = dgvLineas.Columns[e.ColumnIndex].Name;
+                // Si el usuario cambia a mano un precio ya ajustado a BCV,
+                // deja de considerarse ajustado.
+                if (col == "PrecioUnit") MarcarAjusteBcv(dgvLineas.Rows[e.RowIndex], false);
                 if (col == "Cantidad" || col == "PrecioUnit")
                     RecalcularFila(e.RowIndex);
 
@@ -1239,6 +1257,65 @@ CargarDatos();
             RecalcularTotal();
             dgvLineas.CurrentCell = dgvLineas.Rows[idx].Cells["Cantidad"];
             dgvLineas.BeginEdit(true);
+        }
+
+        // ── Calculadora paralelo → BCV ─────────────────────────────────────
+        // La factura se guarda en USD y se imprime en Bs a tasa BCV. El precio
+        // a registrar es (precio USD × paralela) ÷ BCV, para que los Bs de la
+        // factura sean los mismos que a tasa paralela. Las filas ajustadas
+        // llevan Tag = "BCV" para no ajustarlas dos veces.
+        private const string TAG_BCV = "BCV";
+
+        private void AbrirCalculadoraBcv()
+        {
+            dgvLineas.EndEdit();
+            var fila = dgvLineas.CurrentRow;
+            string desc = "";
+            decimal precio = 0;
+            if (fila != null)
+            {
+                desc   = (fila.Cells["Codigo"].Value?.ToString() ?? "") + " — " +
+                         (fila.Cells["Descripcion"].Value?.ToString() ?? "");
+                precio = ParseDecimal(fila.Cells["PrecioUnit"].Value?.ToString());
+                if (Equals(fila.Tag, TAG_BCV))
+                    desc += "  (ya ajustada a BCV)";
+            }
+
+            int pendientes = 0;
+            foreach (DataGridViewRow r in dgvLineas.Rows)
+                if (!Equals(r.Tag, TAG_BCV)) pendientes++;
+
+            using var dlg = new DlgPrecioBcv(Equals(fila?.Tag, TAG_BCV) ? 0 : precio,
+                                             dtpFecha.Value.Date, desc, pendientes);
+            if (dlg.ShowDialog(this) != DialogResult.OK) return;
+
+            if (dlg.AplicarATodas)
+            {
+                foreach (DataGridViewRow r in dgvLineas.Rows)
+                {
+                    if (Equals(r.Tag, TAG_BCV)) continue;
+                    decimal p = ParseDecimal(r.Cells["PrecioUnit"].Value?.ToString());
+                    r.Cells["PrecioUnit"].Value =
+                        Math.Round(p * dlg.Factor, 2, MidpointRounding.AwayFromZero).ToString("F2");
+                    MarcarAjusteBcv(r, true);
+                    RecalcularFila(r.Index);
+                }
+            }
+            else if (fila != null)
+            {
+                fila.Cells["PrecioUnit"].Value = dlg.PrecioBcv.ToString("F2");
+                MarcarAjusteBcv(fila, true);
+                RecalcularFila(fila.Index);
+            }
+        }
+
+        private static void MarcarAjusteBcv(DataGridViewRow fila, bool ajustada)
+        {
+            fila.Tag = ajustada ? TAG_BCV : null;
+            var celda = fila.Cells["PrecioUnit"];
+            celda.Style.ForeColor = ajustada ? Color.FromArgb(0, 120, 140) : Color.Empty;
+            celda.Style.Font      = ajustada ? new Font("Segoe UI", 9f, FontStyle.Bold) : null;
+            celda.ToolTipText     = ajustada ? "Precio ajustado a tasa BCV" : "";
         }
 
         private int AgregarFilaLinea(string codigo, string desc, decimal cant,
