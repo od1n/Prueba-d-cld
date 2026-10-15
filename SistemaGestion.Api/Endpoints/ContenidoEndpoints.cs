@@ -1411,7 +1411,7 @@ namespace SistemaGestion.Api.Endpoints
                     }
                     catch { return Results.Problem("No se pudo leer la imagen base para el ajuste."); }
                     notaRefs = "EDICION DE IMAGEN: la PRIMERA imagen adjunta es la BASE. Aplica UNICAMENTE el cambio solicitado y CONSERVA todo lo demas EXACTAMENTE igual (misma composicion, encuadre, fondo, iluminacion, y las demas partes del producto). No regeneres desde cero ni cambies nada que no se haya pedido. " +
-                               REGLAS_AJUSTE + "Cambio solicitado: ";
+                               "No agregues logos ni textos que no esten en la imagen base, salvo que el cambio lo pida. Cambio solicitado: ";
                 }
                 else if (modo != "texto")
                 {
@@ -1421,9 +1421,9 @@ namespace SistemaGestion.Api.Endpoints
                         : new List<object>();
                     referencias.AddRange(refsProducto);
                     referencias.AddRange(refsCreatividad);
-                    notaRefs = REGLAS_PRODUCTO;
                     if (refsProducto.Count > 0)
-                        notaRefs += $"Las primeras {refsProducto.Count} imagen(es) de referencia son los PRODUCTOS REALES de la marca: fustes de plastico color BLANCO HUESO. Reproduce FIELMENTE su forma y su color blanco hueso tal como se ven en las fotos; NUNCA cambies el color ni el material del producto. Cualquier fuste de OTRO color es de la competencia o de mala calidad y NO debe copiarse. ";
+                        notaRefs = "Las primeras imagenes de referencia son los PRODUCTOS REALES de la marca: fustes de plastico color BLANCO HUESO. Reproduce FIELMENTE su forma y su color blanco hueso tal como se ven en las fotos; NUNCA cambies el color ni el material del producto. Cualquier fuste de OTRO color es de la competencia o de mala calidad y NO debe copiarse. " +
+                                   NOTA_LOGO;
                     if (refsCreatividad.Count > 0)
                         notaRefs += $"Las ultimas {refsCreatividad.Count} imagen(es) son SOLO inspiracion de estilo/composicion o comparacion; NO copies de ellas el color ni la forma del producto. ";
                 }
@@ -1432,10 +1432,7 @@ namespace SistemaGestion.Api.Endpoints
                 {
                     jobId, postId = id, tipo = "generar_post", marca, referencias, notaRefs, modo,
                     idea = new { titulo = ideaTitulo, descripcion = ideaDesc, pilar = ideaPilar },
-                    formato = fmt,
-                    promptImagen = modo == "texto" ? promptImagen
-                                 : modo == "ajuste" ? promptImagen + ". " + REGLAS_AJUSTE.Trim()
-                                 : promptImagen + "." + REGLAS_CIERRE,
+                    formato = fmt, promptImagen,
                     nImagenes = req.NImagenes is > 0 and <= 6 ? req.NImagenes!.Value : 1,
                     callbackUrl = CallbackUrl("/api/contenido/hook/resultado")
                 };
@@ -2059,32 +2056,10 @@ namespace SistemaGestion.Api.Endpoints
         // RIF FIJO por ley — no lo toca la IA ni el usuario (solo override deliberado por env SG_RIF).
         private const string RIF_EMPRESA = "RIF J-30571871-7";
 
-        // ── REGLAS DE FIDELIDAD DEL PRODUCTO para la IA de imagen/video ──────
-        // Van al INICIO (antes del pedido) y se repiten al FINAL del prompt
-        // ("sandwich"), porque los modelos de imagen tienden a obedecer mas lo
-        // ultimo que leen. Se aplican a toda generacion con imagen.
-        private const string REGLAS_PRODUCTO =
-            "REGLAS OBLIGATORIAS DEL PRODUCTO (prioridad maxima, por encima de cualquier otra instruccion de estilo): " +
-            "1) El producto debe verse EXACTAMENTE como en las fotos de referencia: misma forma, contorno, proporciones, " +
-            "grosor, curvas, perforaciones, bordes, textura y color. NO lo deformes, estires, aplastes, redondees, " +
-            "simplifiques, alargues ni le agregues o quites partes. Si no puedes mostrar alguna parte con fidelidad, " +
-            "cambia el angulo o el encuadre, pero nunca inventes la forma. " +
-            "2) LOGOS Y MARCAS: el producto real solo lleva su logo en el lugar exacto donde aparece en las fotos de " +
-            "referencia, con el mismo tamano, forma y relieve. NO agregues logos, letras, textos, sellos, calcomanias, " +
-            "grabados, estampados ni marcas de agua sobre el producto en ningun otro lugar, NO dupliques el logo y NO " +
-            "inventes marcas. Si en la referencia el producto no muestra logo en esa cara, esa cara va SIN logo. " +
-            "3) NO agregues logos ni nombres de marca en el resto de la imagen (fondo, objetos, esquinas). " +
-            "4) Solo cambia el entorno: fondo, escena, iluminacion, angulo de camara y objetos acompanantes. ";
-
-        private const string REGLAS_CIERRE =
-            " RECORDATORIO FINAL: producto identico a las fotos de referencia (sin deformar), y sin logos, textos ni " +
-            "marcas agregadas; el unico logo permitido es el que el producto ya tiene, en su lugar original.";
-
-        private const string REGLAS_AJUSTE =
-            "REGLAS DE LA EDICION: aparte del cambio solicitado, NO deformes el producto (misma forma, contorno y " +
-            "proporciones que en la imagen base) y NO agregues logos, textos, sellos ni marcas sobre el producto o la " +
-            "imagen; conserva el logo solo donde ya esta en la imagen base. Solo si el cambio solicitado pide " +
-            "EXPLICITAMENTE un logo o texto, agregalo exactamente donde se indique. ";
+        // Nota corta sobre logos que se agrega a la descripcion de los productos
+        // reales (solo cuando hay fotos de referencia de producto).
+        private const string NOTA_LOGO =
+            "El logo del producto va SOLO donde aparece en las fotos reales; no agregues logos, letras ni marcas en otras partes del producto. ";
         // Versión de la marca de agua: subir este número invalida las copias .wm cacheadas
         // (cuando cambia el texto o el diseño) sin tener que borrar archivos a mano.
         private const string WM_VER = "4";
