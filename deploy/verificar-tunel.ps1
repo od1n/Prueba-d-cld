@@ -8,7 +8,8 @@
 #      para eso PowerShell debe estar abierto como Administrador)
 #   2) La API escuchando en el puerto 5443 (origen del tunel)
 #   3) La API respondiendo localmente: https://localhost:5443
-#   4) SG_PUBLIC_HOST configurado en sg-env.cmd (activa la puerta del tunel)
+#   4) SG_PUBLIC_HOST configurado (variable de entorno Machine/User o
+#      sg-env.cmd) y cargado en el proceso de la API (activa la puerta)
 #   5) El portal respondiendo por el tunel: https://api-sg.hato-pascher.com
 #      (y que ya tenga la version nueva de facturas.js)
 #   6) Sin sesion, el ERP por el tunel debe responder 403 (puerta activa)
@@ -47,6 +48,8 @@ function Codigo($url, $session = $null, [switch]$Local) {
 
 Write-Host ""
 Write-Host "  === Verificar tunel Cloudflare ($dominio) ===" -ForegroundColor Cyan
+$esAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+Write-Host "  Usuario: $([Security.Principal.WindowsIdentity]::GetCurrent().Name)   Administrador: $esAdmin" -ForegroundColor DarkGray
 Write-Host ""
 
 # 1. Servicio cloudflared
@@ -63,7 +66,18 @@ if (-not $svc) {
         if ($svc.Status -eq 'Running') { Ok "cloudflared iniciado." }
         else { Bad "cloudflared no quedo en ejecucion (estado: $($svc.Status))." }
     } catch {
-        Bad "No se pudo iniciar cloudflared: $($_.Exception.Message). Abre PowerShell como Administrador y vuelve a correr el script."
+        if (-not $esAdmin) {
+            Bad "No se pudo iniciar cloudflared: esta ventana NO es de Administrador. Abre PowerShell 7 como Administrador y vuelve a correr el script."
+        } else {
+            Bad "No se pudo iniciar cloudflared: $($_.Exception.InnerException.Message) $($_.Exception.Message)"
+            Write-Host "       Ultimos eventos del servicio cloudflared:" -ForegroundColor DarkGray
+            Get-WinEvent -FilterHashtable @{ LogName = 'System'; ProviderName = 'Service Control Manager'; StartTime = (Get-Date).AddDays(-7) } -ErrorAction SilentlyContinue |
+                Where-Object { $_.Message -match 'cloudflared|Cloudflared' } | Select-Object -First 5 |
+                ForEach-Object { Write-Host "       $($_.TimeCreated)  $($_.Message)" -ForegroundColor DarkGray }
+            Get-WinEvent -FilterHashtable @{ LogName = 'Application'; ProviderName = 'cloudflared'; StartTime = (Get-Date).AddDays(-7) } -ErrorAction SilentlyContinue |
+                Select-Object -First 5 |
+                ForEach-Object { Write-Host "       $($_.TimeCreated)  $($_.Message)" -ForegroundColor DarkGray }
+        }
     }
 } else {
     Ok "cloudflared en ejecucion (inicio: $((Get-Service cloudflared).StartType))."
@@ -86,15 +100,26 @@ $r = Codigo "https://localhost:5443/index.html" -Local
 if ($r.Code -eq 200) { Ok "API local responde 200." }
 else { Bad "API local no responde bien (codigo $($r.Code)). $($r.Body)" }
 
-# 4. SG_PUBLIC_HOST
-Info "4/7  SG_PUBLIC_HOST en sg-env.cmd..."
+# 4. SG_PUBLIC_HOST (puede venir de la variable Machine/User o de sg-env.cmd)
+Info "4/7  SG_PUBLIC_HOST..."
+$vMachine = [Environment]::GetEnvironmentVariable('SG_PUBLIC_HOST', 'Machine')
+$vUser    = [Environment]::GetEnvironmentVariable('SG_PUBLIC_HOST', 'User')
+$vArchivo = $null
 if (Test-Path $sgEnv) {
     $linea = Select-String -Path $sgEnv -Pattern 'SG_PUBLIC_HOST' -SimpleMatch | Select-Object -First 1
-    if ($linea -and $linea.Line -match [regex]::Escape($dominio)) { Ok "SG_PUBLIC_HOST = $dominio" }
-    elseif ($linea) { Warn "SG_PUBLIC_HOST tiene otro valor: $($linea.Line.Trim())" }
-    else { Bad "sg-env.cmd no define SG_PUBLIC_HOST: la puerta del tunel NO esta activa (todo el ERP quedaria expuesto)." }
+    if ($linea -and $linea.Line -notmatch '^\s*rem') { $vArchivo = ($linea.Line -split '=', 2)[1].Trim() }
+}
+$origenes = @()
+if ($vMachine) { $origenes += "Machine=$vMachine" }
+if ($vUser)    { $origenes += "User=$vUser" }
+if ($vArchivo) { $origenes += "sg-env.cmd=$vArchivo" }
+$valor = @($vArchivo, $vUser, $vMachine) | Where-Object { $_ } | Select-Object -First 1
+if (-not $valor) {
+    Bad "SG_PUBLIC_HOST no esta definida (ni Machine, ni User, ni sg-env.cmd): la puerta del tunel NO esta activa."
+} elseif ($valor -ne $dominio) {
+    Warn "SG_PUBLIC_HOST tiene otro valor: $($origenes -join ' | ')"
 } else {
-    Bad "No existe $sgEnv"
+    Ok "SG_PUBLIC_HOST = $dominio  ($($origenes -join ' | '))"
 }
 
 # 5. Portal por el tunel
