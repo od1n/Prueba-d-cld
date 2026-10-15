@@ -47,6 +47,11 @@ namespace SistemaGestion
         // Controles persistidos
         private Label _lblBcv = null!, _lblPara = null!, _lblBcvSello = null!;
         private Button _btnToggleNE = null!;
+        // Indicador del túnel Cloudflare (solo Admin, solo en el equipo con cloudflared)
+        private Button? _btnTunel;
+        private System.Windows.Forms.Timer? _timerTunel;
+        private EstadoTunel? _estadoTunel;
+        private bool _tunelOcupado;
         private Panel  _pnlBannerNE = null!;
         private Label _lblAlertas = null!;
         private Panel _pnlGrid   = null!;
@@ -79,7 +84,7 @@ namespace SistemaGestion
             timerPrefs.Tick     += (s, e) => { timerPrefs.Stop(); VentanaPrefs.Guardar(this); };
             SizeChanged         += (s, e) => { timerPrefs.Stop(); timerPrefs.Start(); };
             LocationChanged     += (s, e) => { timerPrefs.Stop(); timerPrefs.Start(); };
-            FormClosed          += (s, e) => { timerPrefs.Stop(); timerPrefs.Dispose(); };
+            FormClosed          += (s, e) => { timerPrefs.Stop(); timerPrefs.Dispose(); DetenerTimerTunel(); };
 
             KeyPreview = true;
             KeyDown += (s, ev) => { if (ev.KeyCode == Keys.F3) new FrmBuscador().ShowDialog(); };
@@ -99,6 +104,9 @@ namespace SistemaGestion
         private void ConstruirUI()
         {
             _toastMostrado = false;   // resetear al reconstruir (nuevo login)
+            DetenerTimerTunel();      // el indicador del túnel se recrea si el nuevo usuario es Admin
+            _btnTunel = null;
+            _estadoTunel = null;
 
             var root = new TableLayoutPanel
             {
@@ -224,6 +232,17 @@ namespace SistemaGestion
                 pnlAcc.Controls.Add(_btnToggleNE);
                 pnlAcc.Width = 480;  // espacio para el botón extra
                 ActualizarBotonNE();
+
+                // ── Indicador del túnel Cloudflare (TunelService.cs) ──────
+                // Oculto hasta la primera consulta; si este equipo no tiene
+                // el servicio cloudflared (p. ej. SERVO), queda oculto.
+                _btnTunel = BotonNav("Túnel: ...", null);
+                _btnTunel.Width = 120;
+                _btnTunel.Visible = false;
+                _btnTunel.Click += async (s, e) => await ClickTunelAsync();
+                pnlAcc.Controls.Add(_btnTunel);
+                pnlAcc.Width += 128;
+                IniciarTimerTunel();
             }
 
             // En WinForms, con multiples Dock.Right, el ULTIMO agregado queda
@@ -233,6 +252,106 @@ namespace SistemaGestion
             p.Controls.Add(lblUser);   // Dock.Right (intermedio)
             p.Controls.Add(btnLogout); // Dock.Right (ultimo -> mas a la derecha) ✓
             return p;
+        }
+
+        // ── Túnel Cloudflare: indicador + levantar si está caído ──────────
+        private void IniciarTimerTunel()
+        {
+            DetenerTimerTunel();
+            // Primera consulta a los 2 s (el formulario ya está visible);
+            // después, cada 60 s.
+            var t = new System.Windows.Forms.Timer { Interval = 2000 };
+            t.Tick += async (s, e) =>
+            {
+                t.Interval = 60000;
+                await RefrescarTunelAsync();
+            };
+            _timerTunel = t;
+            t.Start();
+        }
+
+        private void DetenerTimerTunel()
+        {
+            if (_timerTunel == null) return;
+            _timerTunel.Stop();
+            _timerTunel.Dispose();
+            _timerTunel = null;
+        }
+
+        private async System.Threading.Tasks.Task RefrescarTunelAsync()
+        {
+            if (_btnTunel == null || _btnTunel.IsDisposed || _tunelOcupado) return;
+            _tunelOcupado = true;
+            try
+            {
+                var est = await TunelService.ConsultarAsync();
+                if (_btnTunel == null || _btnTunel.IsDisposed) return;
+                _estadoTunel = est;
+                if (!est.Instalado) { _btnTunel.Visible = false; DetenerTimerTunel(); return; }
+                _btnTunel.Visible = true;
+                switch (est.Nivel)
+                {
+                    case NivelTunel.Arriba:
+                        _btnTunel.Text = "● Túnel OK";      _btnTunel.ForeColor = Tema.Ok; break;
+                    case NivelTunel.Degradado:
+                        _btnTunel.Text = "● Túnel: revisar"; _btnTunel.ForeColor = Tema.Advertencia; break;
+                    default:
+                        _btnTunel.Text = "● Túnel CAÍDO";    _btnTunel.ForeColor = Tema.Peligro; break;
+                }
+                new ToolTip().SetToolTip(_btnTunel, est.Detalle);
+            }
+            catch { /* el indicador nunca debe romper el menú */ }
+            finally { _tunelOcupado = false; }
+        }
+
+        private async System.Threading.Tasks.Task ClickTunelAsync()
+        {
+            if (_btnTunel == null || _tunelOcupado) return;
+            var est = _estadoTunel;
+            if (est == null) { await RefrescarTunelAsync(); est = _estadoTunel; if (est == null) return; }
+
+            bool caido = est.Nivel == NivelTunel.Caido;
+            string pregunta = est.Detalle + "\n\n" +
+                "Servicio: " + est.Servicio + "   Inicio: " + est.Inicio +
+                "   Respuesta pública: " + (est.CodigoPublico == 0 ? "sin respuesta" : est.CodigoPublico.ToString()) + "\n\n" +
+                (caido ? "¿Levantar el túnel ahora?" : "¿Reiniciar el túnel ahora?");
+            var r = MessageBox.Show(this, pregunta, "Túnel Cloudflare",
+                MessageBoxButtons.YesNo, caido ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
+            if (r != DialogResult.Yes) return;
+
+            _tunelOcupado = true;
+            string textoAntes = _btnTunel.Text;
+            _btnTunel.Text = "Levantando...";
+            _btnTunel.Enabled = false;
+            bool ok = false;
+            try
+            {
+                ok = await TunelService.LevantarAsync(reiniciar: !caido,
+                                                      deshabilitado: est.Inicio == "Disabled");
+                try
+                {
+                    DatabaseService.RegistrarAuditoria(caido ? "TUNEL_LEVANTAR" : "TUNEL_REINICIAR", "Sistema",
+                        "Resultado: " + (ok ? "en ejecución" : "falló") + " — usuario " + (Sesion.NombreUsuario ?? "?"));
+                }
+                catch { }
+            }
+            finally
+            {
+                _tunelOcupado = false;
+                if (_btnTunel != null && !_btnTunel.IsDisposed) { _btnTunel.Enabled = true; _btnTunel.Text = textoAntes; }
+            }
+
+            if (!ok)
+                MessageBox.Show(this,
+                    "No se pudo levantar el servicio cloudflared.\n\n" +
+                    "Si cancelaste la ventana de permisos de Windows, vuelve a intentarlo y acéptala. " +
+                    "Si el problema sigue, ejecuta en PowerShell como Administrador:\n" +
+                    "& 'C:\\SistemaGestion\\deploy\\verificar-tunel.ps1'",
+                    "Túnel Cloudflare", MessageBoxButtons.OK, MessageBoxIcon.Error);
+
+            // Cloudflare tarda unos segundos en registrar la conexión
+            await System.Threading.Tasks.Task.Delay(ok ? 8000 : 0);
+            await RefrescarTunelAsync();
         }
 
         // accion es nullable: pasa null si vas a registrar el handler aparte
