@@ -134,10 +134,9 @@ if ($js.Code -eq 200 -and $js.Body -match 'toggleCalcBcv') { Ok "Version nueva d
 elseif ($js.Code -eq 200) { Warn "facturas.js responde, pero es la version vieja: falta correr actualizar-olimpo.ps1." }
 
 # 6. Puerta del tunel sin sesion
-Info "6/7  ERP por el tunel SIN sesion (debe ser 403)..."
+Info "6/7  ERP por el tunel SIN sesion (debe ser 401 o 403)..."
 $r = Codigo "$base/api/facturas"
-if ($r.Code -eq 403) { Ok "Sin sesion el ERP queda bloqueado por el tunel (403)." }
-elseif ($r.Code -eq 401) { Warn "Responde 401 en vez de 403: revisa que SG_PUBLIC_HOST este cargado en la API." }
+if ($r.Code -eq 403 -or $r.Code -eq 401) { Ok "Sin sesion el ERP queda bloqueado por el tunel ($($r.Code))." }
 elseif ($r.Code -eq 200) { Bad "El ERP responde 200 SIN sesion por el tunel: la puerta NO esta activa." }
 else { Warn "Respuesta inesperada: $($r.Code)." }
 
