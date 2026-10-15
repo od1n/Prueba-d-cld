@@ -2792,10 +2792,23 @@ namespace SistemaGestion.Api.Endpoints
             return list;
         }
 
+        // Decodificadores permitidos: SOLO PNG, JPEG y WebP, sin leer metadatos.
+        // Mitiga los avisos de ImageSharp 3.1.x (GHSA-wmxv-xphr-5c9g: BigTIFF;
+        // GHSA-gwg2-r3hj-4w44: perfiles ICC embebidos). Un TIFF renombrado a .jpg
+        // se rechaza en vez de decodificarse, y el perfil ICC nunca se lee.
+        private static readonly SixLabors.ImageSharp.Formats.DecoderOptions _opcionesDecodificacion = new()
+        {
+            Configuration = new Configuration(
+                new SixLabors.ImageSharp.Formats.Png.PngConfigurationModule(),
+                new SixLabors.ImageSharp.Formats.Jpeg.JpegConfigurationModule(),
+                new SixLabors.ImageSharp.Formats.Webp.WebpConfigurationModule()),
+            SkipMetadata = true
+        };
+
         /// <summary>Redimensiona una imagen a un lado maximo y la re-codifica como JPEG.</summary>
         private static byte[] RedimensionarJpeg(byte[] datos, int maxLado, int calidad)
         {
-            using var image = Image.Load(datos);
+            using var image = Image.Load(_opcionesDecodificacion, datos);
             int mayor = Math.Max(image.Width, image.Height);
             if (mayor > maxLado)
             {
