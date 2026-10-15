@@ -297,12 +297,13 @@ app.Use(async (ctx, next) =>
         && string.Equals(ctx.Request.Host.Host, sgPublicHost, StringComparison.OrdinalIgnoreCase);
     if (esExterno && esApi && !RutaContenidoPermitida(path))
     {
-        // Excepcion: un usuario autenticado con rol Admin SI puede usar todo el
-        // ERP a traves del tunel. El resto (anonimos y rol Redes) sigue
-        // limitado al area de contenido; el ERP no sale de la LAN para ellos.
-        bool esAdminAutenticado = autenticado
-            && SistemaGestion.Api.Auth.TokenService.EsAdmin(ctx.User!);
-        if (!esAdminAutenticado)
+        // Excepcion: un usuario autenticado con rol Admin, Ventas o Contabilidad
+        // (personal de oficina) SI puede usar el ERP a traves del tunel; los
+        // permisos de cada endpoint siguen aplicando. El resto (anonimos, rol
+        // Redes y demas roles) sigue limitado al area de contenido.
+        bool puedeErpPorTunel = autenticado
+            && SistemaGestion.Api.Auth.TokenService.PuedeUsarErpPorTunel(ctx.User!);
+        if (!puedeErpPorTunel)
         {
             ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
             await ctx.Response.WriteAsJsonAsync(new { error = "Este modulo solo esta disponible en la red local." });

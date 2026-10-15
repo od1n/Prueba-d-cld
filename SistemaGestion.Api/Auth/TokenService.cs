@@ -116,6 +116,13 @@ namespace SistemaGestion.Api.Auth
             u.FindAll(ClaimTypes.Role).Any(c => roles.Contains(c.Value));
 
         public static bool EsAdmin(ClaimsPrincipal u) => TieneRol(u, "Admin");
+        /// <summary>
+        /// Roles que pueden usar el ERP completo a traves del tunel Cloudflare
+        /// (SG_PUBLIC_HOST): Admin y personal de oficina (Ventas, Contabilidad).
+        /// Los permisos de cada endpoint siguen aplicando igual que en la LAN.
+        /// </summary>
+        public static bool PuedeUsarErpPorTunel(ClaimsPrincipal u) =>
+            TieneRol(u, "Admin", "Ventas", "Contabilidad");
         public static bool PuedeEscribirKardex(ClaimsPrincipal u) =>
             TieneRol(u, "Admin", "Almacen");
         public static bool PuedeAjustarKardex(ClaimsPrincipal u) => EsAdmin(u);
