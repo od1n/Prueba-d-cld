@@ -60,9 +60,14 @@ namespace SistemaGestion
                 {
                     string obs = S(r, 5);
                     string doc = "";
-                    // "Doc: NE 0747 | ..." → "NE 0747"
+                    // "Doc: NE 0747 | ..." → "NE 0747" (se corta antes del texto del OCR)
                     if (obs.StartsWith("Doc:", StringComparison.OrdinalIgnoreCase))
-                        doc = obs.Substring(4).Split('|')[0].Trim();
+                    {
+                        doc = obs.Substring(4).Split('|', '\n', '\r')[0].Trim();
+                        int iOcr = doc.IndexOf("Líneas", StringComparison.OrdinalIgnoreCase);
+                        if (iOcr >= 0) doc = doc.Substring(0, iOcr).Trim();
+                        if (doc.Length > 24) doc = doc.Substring(0, 24).Trim();
+                    }
                     string estado = S(r, 9);
                     decimal total = D(r, 7), pagado = D(r, 8);
                     if (estado == "Pagado" && pagado <= 0) pagado = total;   // egresos viejos sin PagadoUSD
@@ -119,6 +124,27 @@ namespace SistemaGestion
 
             list.Sort((a, b) => a.Fecha.CompareTo(b.Fecha));
             return list;
+        }
+
+        /// <summary>
+        /// Totales de egresos no anulados (todas las fechas), separados en
+        /// materia prima (incluye el módulo Compras) y demás egresos. Mismo criterio
+        /// que el reporte de Compras y Ganancias/Pérdidas.
+        /// </summary>
+        public static (decimal MateriaPrima, decimal Otros) ObtenerTotalesEgresos()
+        {
+            using var c = Conn();
+            using var cmd = c.CreateCommand();
+            cmd.CommandText = @"
+                SELECT
+                  COALESCE(SUM(CASE WHEN COALESCE(cg.EsMateriaPrima,0) = 1 THEN g.MontoUSD ELSE 0 END),0)
+                    + (SELECT COALESCE(SUM(TotalC),0) FROM Compras),
+                  COALESCE(SUM(CASE WHEN COALESCE(cg.EsMateriaPrima,0) = 0 THEN g.MontoUSD ELSE 0 END),0)
+                FROM Gastos g
+                LEFT JOIN CategoriasGasto cg ON cg.Id = g.IdCategoria
+                WHERE COALESCE(g.Estado,'') <> 'Anulado'";
+            using var r = cmd.ExecuteReader();
+            return r.Read() ? (D(r, 0), D(r, 1)) : (0m, 0m);
         }
     }
 }
