@@ -3,9 +3,13 @@
 #  Carga la producción 2026 (semanas pagadas del 09/01 al 16/10/2026,
 #  hoja Nominas) repartida por modelo, y deja cuadrados los Kardex:
 #
-#   - Un registro de producción por semana (fecha = viernes de pago),
-#     con el detalle por modelo y calidad (primera, segunda, reciclado).
-#     NO se registran participantes: no afecta el bono de nómina.
+#   - Un registro de producción por semana (fecha = viernes de pago; la
+#     semana es de lunes a viernes), con el detalle por modelo y calidad
+#     (primera, segunda, reciclado) y como participantes los obreros
+#     activos ya ingresados esa semana, para que el sistema pueda calcular
+#     el bono de producción de esas semanas igual que la hoja Nominas.
+#   - Crea las tarifas de bono por producto (historial por fecha) donde no
+#     hay ninguna; las tarifas que ya existen no se tocan (solo avisa diferencias).
 #   - Descuenta la resina virgen (peso x unidades, mitad 6200B y mitad
 #     2706). Los reciclados no consumen resina comprada.
 #   - Suma el producto terminado al costo de fabricación de la semana:
@@ -273,7 +277,59 @@ function MovsPT([string]$cod) {
 $simPT = @{}
 foreach ($c in $codsPT.Keys) { $mv = MovsPT $c; $simPT[$c] = @{ Movs=$mv; Res=(Recalc $mv) } }
 
+# ── 4b) Obreros participantes y tarifas de bono ───────────────────────
+$obreros = Filas 'SELECT Id, COALESCE(FechaIngreso,'''') AS Ingreso, COALESCE(Nombre,'''') || '' '' || COALESCE(Apellido,'''') AS Nombre FROM Empleados WHERE COALESCE(Activo,1)=1 AND TipoEmpleado=''Obrero'' ORDER BY Id' $null
+foreach ($p in $prod) {
+  $vie = [datetime]::ParseExact($p.f,'yyyy-MM-dd',$inv)
+  $part = @($obreros | Where-Object { $fi = Fecha $_.Ingreso; (-not $fi) -or $fi -le $vie })
+  $p | Add-Member -NotePropertyName part -NotePropertyValue $part -Force
+}
+# Tarifas: periodos consecutivos con la misma tarifa (desde el lunes de la primera semana)
+function Periodos([string]$campo) {
+  $per = @(); $act = $null
+  foreach ($w in ($semanas | Where-Object { $_.fu -gt 0 -or $_.es -gt 0 })) {
+    $lun = ([datetime]::ParseExact($w.f,'yyyy-MM-dd',$inv)).AddDays(-4).ToString('yyyy-MM-dd')
+    if ($act -and $act.t -eq $w[$campo]) { $act.hasta = $w.f } else { if ($act) { $per += $act }; $act = @{ t=$w[$campo]; desde=$lun; hasta=$w.f } } }
+  if ($act) { $per += $act }
+  # que los periodos queden pegados (cada uno empieza el lunes siguiente al anterior) y el último abierto
+  for ($i=0; $i -lt $per.Count - 1; $i++) { $per[$i].hasta = ([datetime]::ParseExact($per[$i+1].desde,'yyyy-MM-dd',$inv)).AddDays(-1).ToString('yyyy-MM-dd') }
+  $per[-1].hasta = $null
+  return ,$per }
+$perF = Periodos 'tf'; $perE = Periodos 'te'
+$tarifasExist = Filas 'SELECT CodigoProducto, TarifaBs, FechaDesde, FechaHasta FROM TarifaProductoProduccion' $null
+$tarifasNuevas = @(); $tarifasAviso = @()
+foreach ($m in ($mixFustes + $mixEstribos)) {
+  $per = if ($mixEstribos.cod -contains $m.cod) { $perE } else { $perF }
+  $ex = @($tarifasExist | Where-Object { $_.CodigoProducto -eq $m.cod })
+  if ($ex.Count -eq 0) { foreach ($x in $per) { $tarifasNuevas += [pscustomobject]@{ cod=$m.cod; t=$x.t; desde=$x.desde; hasta=$x.hasta } } }
+  else {
+    # Completa el historial ANTES de la primera tarifa que ya existe (sin tocar las existentes)
+    $min = ($ex | ForEach-Object { [string]$_.FechaDesde } | Sort-Object | Select-Object -First 1)
+    $tope = ([datetime]::ParseExact($min.Substring(0,10),'yyyy-MM-dd',$inv)).AddDays(-1).ToString('yyyy-MM-dd')
+    foreach ($x in $per) { if ($x.desde -le $tope) {
+      $h = if (-not $x.hasta -or $x.hasta -gt $tope) { $tope } else { $x.hasta }
+      $tarifasNuevas += [pscustomobject]@{ cod=$m.cod; t=$x.t; desde=$x.desde; hasta=$h }
+      $ex += [pscustomobject]@{ CodigoProducto=$m.cod; TarifaBs=$x.t; FechaDesde=$x.desde; FechaHasta=$h } } }
+    foreach ($w in ($semanas | Where-Object { $_.fu -gt 0 -or $_.es -gt 0 })) {
+      $need = if ($mixEstribos.cod -contains $m.cod) { $w.te } else { $w.tf }
+      $vig = @($ex | Where-Object { [string]$_.FechaDesde -le $w.f -and (-not $_.FechaHasta -or [string]$_.FechaHasta -ge $w.f) })
+      $tv = if ($vig.Count -gt 0) { [decimal]$vig[0].TarifaBs } else { $null }
+      if ($null -eq $tv -or $tv -ne [decimal]$need) { $tarifasAviso += "$($m.cod) semana $($w.f): sistema $(if ($null -eq $tv) {'sin tarifa'} else {$tv}) / nómina $need" } } }
+}
+
 # ── 5) Reporte ───────────────────────────────────────────────────────
+Titulo 'Obreros participantes por semana (vs. empleados de la hoja Nominas)'
+foreach ($p in $prod) { $n = $p.part.Count
+  $col = if ($n -ne $p.w.emp) { 'Yellow' } else { 'Gray' }
+  Write-Host ("  {0}  sistema {1}  nómina {2}  {3}" -f $p.f, $n, $p.w.emp, (($p.part | ForEach-Object { $_.Nombre.Trim() }) -join ', ')) -ForegroundColor $col }
+Titulo 'Tarifas de bono de producción'
+if ($tarifasNuevas.Count -gt 0) { Write-Host "  Se crean $($tarifasNuevas.Count) tarifas (productos sin tarifa, o semanas anteriores a su primera tarifa):"
+  $tarifasNuevas | Group-Object cod | ForEach-Object { Write-Host ("    {0}: {1}" -f $_.Name, (($_.Group | ForEach-Object { "$($_.t) Bs desde $($_.desde)" + $(if ($_.hasta) {" hasta $($_.hasta)"} else {' (vigente)'}) }) -join '; ')) } }
+if ($tarifasAviso.Count -gt 0) { Write-Host "  Productos que YA tienen tarifas distintas a la hoja Nominas (no se tocan):" -ForegroundColor Yellow
+  $tarifasAviso | Select-Object -First 60 | ForEach-Object { Write-Host "    $_" -ForegroundColor Yellow }
+  if ($tarifasAviso.Count -gt 60) { Write-Host "    ... y $($tarifasAviso.Count - 60) más" -ForegroundColor Yellow } }
+if ($tarifasNuevas.Count -eq 0 -and $tarifasAviso.Count -eq 0) { Write-Host '  Las tarifas del sistema coinciden con la hoja Nominas.' }
+
 Titulo 'Producción por semana (repartida por modelo)'
 foreach ($p in $prod) {
   $fu = ($p.lineas | Where-Object { $mixFustes.cod -contains $_.cod } | Measure-Object q -Sum).Sum
@@ -331,6 +387,10 @@ try {
   # b) Quitar las salidas por ventas actuales (se rehacen con la fecha de la factura)
   foreach ($k in $kxPTfact) { Ejec 'DELETE FROM MovimientosInventario WHERE IdMovimiento=$i' @{'$i'=[long]$k.IdMovimiento} }
 
+  # c0) Tarifas de bono para productos que no tenían
+  foreach ($t in $tarifasNuevas) {
+    Ejec 'INSERT INTO TarifaProductoProduccion (CodigoProducto,TarifaBs,FechaDesde,FechaHasta,Usuario) VALUES ($c,$t,$d,$h,$u)' @{'$c'=$t.cod; '$t'=[double]$t.t; '$d'=$t.desde; '$h'=$t.hasta; '$u'=$USUARIO} }
+
   # c) Pesos
   foreach ($c in $pesos.Keys) { Ejec 'UPDATE Inventario SET PesoKg=$p WHERE Codigo=$c' @{'$p'=[double]$pesos[$c]; '$c'=$c} }
 
@@ -346,6 +406,7 @@ try {
       $usar = @($v.Keys | Where-Object { $colDet -contains $_ }); $h = @{}; foreach ($k in $usar) { $h['$' + $k] = $v[$k] }
       Ejec ('INSERT INTO DetalleProduccionMolde (' + ($usar -join ',') + ') VALUES (' + (($usar | ForEach-Object { '$' + $_ }) -join ',') + ')') $h }
     foreach ($c in $codesMP) { Ejec 'INSERT INTO MaterialProduccionDia (IdRegistro,CodigoInsumo,Cantidad) VALUES ($i,$c,$q)' @{'$i'=$idR; '$c'=$c; '$q'=[double]($p.kg/2)} }
+    foreach ($o in $p.part) { Ejec 'INSERT INTO ParticipantesProduccionDia (IdRegistro,IdEmpleado) VALUES ($i,$e)' @{'$i'=$idR; '$e'=[long]$o.Id} }
   }
 
   # e) Movimientos nuevos de resina (consumo y ajuste)
