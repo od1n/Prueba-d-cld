@@ -282,6 +282,9 @@ $obreros = Filas 'SELECT Id, COALESCE(FechaIngreso,'''') AS Ingreso, COALESCE(No
 foreach ($p in $prod) {
   $vie = [datetime]::ParseExact($p.f,'yyyy-MM-dd',$inv)
   $part = @($obreros | Where-Object { $fi = Fecha $_.Ingreso; (-not $fi) -or $fi -le $vie })
+  # Si la hoja Nominas usó menos obreros esa semana (alguien faltó), se reparte entre esa
+  # cantidad: quedan los de ingreso más antiguo (sale el más reciente).
+  if ($part.Count -gt $p.w.emp) { $part = @($part | Sort-Object { $fi = Fecha $_.Ingreso; if ($fi) { $fi } else { [datetime]::MinValue } }, Id | Select-Object -First $p.w.emp) }
   $p | Add-Member -NotePropertyName part -NotePropertyValue $part -Force
 }
 # Tarifas: periodos consecutivos con la misma tarifa (desde el lunes de la primera semana)
