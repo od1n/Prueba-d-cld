@@ -5,11 +5,12 @@
 #
 #   - Un registro de producción por semana (fecha = viernes de pago; la
 #     semana es de lunes a viernes), con el detalle por modelo y calidad
-#     (primera, segunda, reciclado) y como participantes los obreros
-#     activos ya ingresados esa semana, para que el sistema pueda calcular
-#     el bono de producción de esas semanas igual que la hoja Nominas.
-#   - Crea las tarifas de bono por producto (historial por fecha) donde no
-#     hay ninguna; las tarifas que ya existen no se tocan (solo avisa diferencias).
+#     (primera, segunda, reciclado) y los obreros que trabajaron, para que
+#     el sistema calcule el bono de esas semanas igual que la hoja Nominas.
+#   - Reemplaza las tarifas de bono 2026 de esos productos por el historial
+#     de la hoja Nominas (75, 100, 135 y 175 Bs por fuste según la fecha).
+#   - Participantes según la plantilla real de obreros 2026 (ver $plantilla);
+#     crea a Nicar (retirado) como obrero inactivo si no existe.
 #   - Descuenta la resina virgen (peso x unidades, mitad 6200B y mitad
 #     2706). Los reciclados no consumen resina comprada.
 #   - Suma el producto terminado al costo de fabricación de la semana:
@@ -278,13 +279,32 @@ $simPT = @{}
 foreach ($c in $codsPT.Keys) { $mv = MovsPT $c; $simPT[$c] = @{ Movs=$mv; Res=(Recalc $mv) } }
 
 # ── 4b) Obreros participantes y tarifas de bono ───────────────────────
-$obreros = Filas 'SELECT Id, COALESCE(FechaIngreso,'''') AS Ingreso, COALESCE(Nombre,'''') || '' '' || COALESCE(Apellido,'''') AS Nombre FROM Empleados WHERE COALESCE(Activo,1)=1 AND TipoEmpleado=''Obrero'' ORDER BY Id' $null
+# Plantilla de obreros de producción 2026 (confirmada por Jacques):
+#   José Román y Jeison Paredes todo el año; Nicar (retirado) hasta la semana del 31/07;
+#   Juan Silva desde la semana del 19/06; Omar Javier desde la semana del 07/08 (entró por Nicar).
+$plantilla = @(
+  [pscustomobject]@{ clave='ROMAN';  desde=$null;        hasta=$null;        orden=1 }
+  [pscustomobject]@{ clave='JEISON'; desde=$null;        hasta=$null;        orden=2 }
+  [pscustomobject]@{ clave='NICAR';  desde=$null;        hasta='2026-07-31'; orden=3 }
+  [pscustomobject]@{ clave='SILVA';  desde='2026-06-19'; hasta=$null;        orden=4 }
+  [pscustomobject]@{ clave='OMAR';   desde='2026-08-07'; hasta=$null;        orden=5 }
+)
+function SinAcentos([string]$t) { $n = $t.Normalize([Text.NormalizationForm]::FormD)
+  (-join ($n.ToCharArray() | Where-Object { [Globalization.CharUnicodeInfo]::GetUnicodeCategory($_) -ne 'NonSpacingMark' })).ToUpper() }
+$emps = Filas 'SELECT Id, COALESCE(Nombre,'''') || '' '' || COALESCE(Apellido,'''') AS Nombre, COALESCE(Activo,1) AS Activo, COALESCE(TipoEmpleado,'''') AS Tipo FROM Empleados ORDER BY Id' $null
+$crearNicar = $false
+foreach ($x in $plantilla) {
+  $m = @($emps | Where-Object { (SinAcentos $_.Nombre) -match "\b$($x.clave)\b" })
+  if ($m.Count -gt 1) { $m = @($m | Where-Object { $_.Tipo -eq 'Obrero' }) }
+  if ($m.Count -eq 1) { $x | Add-Member Id ([long]$m[0].Id); $x | Add-Member Nombre ([string]$m[0].Nombre).Trim() }
+  elseif ($m.Count -eq 0 -and $x.clave -eq 'NICAR') { $crearNicar = $true; $x | Add-Member Id ([long]-1); $x | Add-Member Nombre 'NICAR (se crea como obrero inactivo)' }
+  else { Write-Host "[ERROR] No pude identificar un único empleado para '$($x.clave)' (encontrados: $($m.Count))." -ForegroundColor Red; $m | ForEach-Object { Write-Host "   Id $($_.Id) $($_.Nombre)" }; exit 1 }
+}
 foreach ($p in $prod) {
-  $vie = [datetime]::ParseExact($p.f,'yyyy-MM-dd',$inv)
-  $part = @($obreros | Where-Object { $fi = Fecha $_.Ingreso; (-not $fi) -or $fi -le $vie })
+  $part = @($plantilla | Where-Object { (-not $_.desde -or $_.desde -le $p.f) -and (-not $_.hasta -or $_.hasta -ge $p.f) } | Sort-Object orden)
   # Si la hoja Nominas usó menos obreros esa semana (alguien faltó), se reparte entre esa
-  # cantidad: quedan los de ingreso más antiguo (sale el más reciente).
-  if ($part.Count -gt $p.w.emp) { $part = @($part | Sort-Object { $fi = Fecha $_.Ingreso; if ($fi) { $fi } else { [datetime]::MinValue } }, Id | Select-Object -First $p.w.emp) }
+  # cantidad: sale el de ingreso más reciente.
+  if ($part.Count -gt $p.w.emp) { $part = @($part | Select-Object -First $p.w.emp) }
   $p | Add-Member -NotePropertyName part -NotePropertyValue $part -Force
 }
 # Tarifas: periodos consecutivos con la misma tarifa (desde el lunes de la primera semana)
@@ -300,38 +320,36 @@ function Periodos([string]$campo) {
   return ,$per }
 $perF = Periodos 'tf'; $perE = Periodos 'te'
 $tarifasExist = Filas 'SELECT CodigoProducto, TarifaBs, FechaDesde, FechaHasta FROM TarifaProductoProduccion' $null
-$tarifasNuevas = @(); $tarifasAviso = @()
+$tarifasNuevas = @(); $tarifasRecortar = @(); $tarifasBorrar = @()
+$INI_TARIFA = (@($perF) + @($perE) | ForEach-Object { $_.desde } | Sort-Object | Select-Object -First 1)
 foreach ($m in ($mixFustes + $mixEstribos)) {
   $per = if ($mixEstribos.cod -contains $m.cod) { $perE } else { $perF }
-  $ex = @($tarifasExist | Where-Object { $_.CodigoProducto -eq $m.cod })
-  if ($ex.Count -eq 0) { foreach ($x in $per) { $tarifasNuevas += [pscustomobject]@{ cod=$m.cod; t=$x.t; desde=$x.desde; hasta=$x.hasta } } }
-  else {
-    # Completa el historial ANTES de la primera tarifa que ya existe (sin tocar las existentes)
-    $min = ($ex | ForEach-Object { [string]$_.FechaDesde } | Sort-Object | Select-Object -First 1)
-    $tope = ([datetime]::ParseExact($min.Substring(0,10),'yyyy-MM-dd',$inv)).AddDays(-1).ToString('yyyy-MM-dd')
-    foreach ($x in $per) { if ($x.desde -le $tope) {
-      $h = if (-not $x.hasta -or $x.hasta -gt $tope) { $tope } else { $x.hasta }
-      $tarifasNuevas += [pscustomobject]@{ cod=$m.cod; t=$x.t; desde=$x.desde; hasta=$h }
-      $ex += [pscustomobject]@{ CodigoProducto=$m.cod; TarifaBs=$x.t; FechaDesde=$x.desde; FechaHasta=$h } } }
-    foreach ($w in ($semanas | Where-Object { $_.fu -gt 0 -or $_.es -gt 0 })) {
-      $need = if ($mixEstribos.cod -contains $m.cod) { $w.te } else { $w.tf }
-      $vig = @($ex | Where-Object { [string]$_.FechaDesde -le $w.f -and (-not $_.FechaHasta -or [string]$_.FechaHasta -ge $w.f) })
-      $tv = if ($vig.Count -gt 0) { [decimal]$vig[0].TarifaBs } else { $null }
-      if ($null -eq $tv -or $tv -ne [decimal]$need) { $tarifasAviso += "$($m.cod) semana $($w.f): sistema $(if ($null -eq $tv) {'sin tarifa'} else {$tv}) / nómina $need" } } }
+  # Se reemplaza el historial 2026 por el de la hoja: lo que empieza desde el primer lunes se borra
+  # y lo que venía de antes y seguía vigente se cierra el día anterior.
+  foreach ($e in @($tarifasExist | Where-Object { $_.CodigoProducto -eq $m.cod })) {
+    if ([string]$e.FechaDesde -ge $INI_TARIFA) { $tarifasBorrar += $e }
+    elseif (-not $e.FechaHasta -or [string]$e.FechaHasta -ge $INI_TARIFA) { $tarifasRecortar += $e } }
+  foreach ($x in $per) { $tarifasNuevas += [pscustomobject]@{ cod=$m.cod; t=$x.t; desde=$x.desde; hasta=$x.hasta } }
 }
+$FIN_TARIFA_PREVIA = ([datetime]::ParseExact($INI_TARIFA,'yyyy-MM-dd',$inv)).AddDays(-1).ToString('yyyy-MM-dd')
 
 # ── 5) Reporte ───────────────────────────────────────────────────────
 Titulo 'Obreros participantes por semana (vs. empleados de la hoja Nominas)'
 foreach ($p in $prod) { $n = $p.part.Count
   $col = if ($n -ne $p.w.emp) { 'Yellow' } else { 'Gray' }
   Write-Host ("  {0}  sistema {1}  nómina {2}  {3}" -f $p.f, $n, $p.w.emp, (($p.part | ForEach-Object { $_.Nombre.Trim() }) -join ', ')) -ForegroundColor $col }
-Titulo 'Tarifas de bono de producción'
-if ($tarifasNuevas.Count -gt 0) { Write-Host "  Se crean $($tarifasNuevas.Count) tarifas (productos sin tarifa, o semanas anteriores a su primera tarifa):"
-  $tarifasNuevas | Group-Object cod | ForEach-Object { Write-Host ("    {0}: {1}" -f $_.Name, (($_.Group | ForEach-Object { "$($_.t) Bs desde $($_.desde)" + $(if ($_.hasta) {" hasta $($_.hasta)"} else {' (vigente)'}) }) -join '; ')) } }
-if ($tarifasAviso.Count -gt 0) { Write-Host "  Productos que YA tienen tarifas distintas a la hoja Nominas (no se tocan):" -ForegroundColor Yellow
-  $tarifasAviso | Select-Object -First 60 | ForEach-Object { Write-Host "    $_" -ForegroundColor Yellow }
-  if ($tarifasAviso.Count -gt 60) { Write-Host "    ... y $($tarifasAviso.Count - 60) más" -ForegroundColor Yellow } }
-if ($tarifasNuevas.Count -eq 0 -and $tarifasAviso.Count -eq 0) { Write-Host '  Las tarifas del sistema coinciden con la hoja Nominas.' }
+Titulo 'Tarifas de bono de producción (se reemplaza el historial 2026 por el de la hoja Nominas)'
+if ($tarifasBorrar.Count -gt 0 -or $tarifasRecortar.Count -gt 0) {
+  Write-Host "  Tarifas actuales que se quitan: $($tarifasBorrar.Count); que se cierran el ${FIN_TARIFA_PREVIA}: $($tarifasRecortar.Count)"
+  (@($tarifasBorrar) + @($tarifasRecortar)) | Group-Object CodigoProducto | ForEach-Object { Write-Host ("    {0}: {1}" -f $_.Name, (($_.Group | ForEach-Object { "$($_.TarifaBs) Bs desde $($_.FechaDesde)" + $(if ($_.FechaHasta) {" hasta $($_.FechaHasta)"} else {''}) }) -join '; ')) } }
+Write-Host "  Historial que se crea para $(@($tarifasNuevas | Select-Object -ExpandProperty cod -Unique).Count) productos:"
+Write-Host ("    Fustes:   " + (($perF | ForEach-Object { "$($_.t) Bs desde $($_.desde)" }) -join '; '))
+Write-Host ("    Estribos: " + (($perE | ForEach-Object { "$($_.t) Bs desde $($_.desde)" }) -join '; '))
+Write-Host ''
+Write-Host '  Bono de producción que calculará el sistema (piezas x tarifa, igual para cada obrero):'
+foreach ($p in $prod) {
+  $bs = [decimal]0; foreach ($l in $p.lineas) { $bs += [decimal]$l.q * $(if ($mixEstribos.cod -contains $l.cod) { $p.w.te } else { $p.w.tf }) }
+  Write-Host ("    {0}  {1,9} Bs por obrero x {2} = {3,10} Bs" -f $p.f, (N0 $bs), $p.part.Count, (N0 ($bs * $p.part.Count))) }
 
 Titulo 'Producción por semana (repartida por modelo)'
 foreach ($p in $prod) {
@@ -390,7 +408,19 @@ try {
   # b) Quitar las salidas por ventas actuales (se rehacen con la fecha de la factura)
   foreach ($k in $kxPTfact) { Ejec 'DELETE FROM MovimientosInventario WHERE IdMovimiento=$i' @{'$i'=[long]$k.IdMovimiento} }
 
-  # c0) Tarifas de bono para productos que no tenían
+  # c0) Nicar (retirado) como obrero inactivo, si no existe
+  if ($crearNicar) {
+    $colE = Columnas 'Empleados'
+    $v = [ordered]@{ Cedula='SIN-CEDULA-NICAR'; Nombre='NICAR'; Apellido=''; Cargo='Obrero (retirado)'; TipoEmpleado='Obrero'; FechaIngreso='2026-01-01'; Activo=0; EligibleBonoProd=1 }
+    $usar = @($v.Keys | Where-Object { $colE -contains $_ }); $h = @{}; foreach ($k in $usar) { $h['$' + $k] = $v[$k] }
+    Ejec ('INSERT INTO Empleados (' + ($usar -join ',') + ') VALUES (' + (($usar | ForEach-Object { '$' + $_ }) -join ',') + ')') $h
+    $idN = [long](Escalar 'SELECT last_insert_rowid()' $null)
+    ($plantilla | Where-Object { $_.clave -eq 'NICAR' }).Id = $idN
+    Write-Host "  Empleado creado: NICAR (Id $idN, inactivo)" -ForegroundColor Green }
+
+  # c1) Tarifas de bono: historial 2026 de la hoja Nominas
+  foreach ($e in $tarifasBorrar) { Ejec 'DELETE FROM TarifaProductoProduccion WHERE CodigoProducto=$c AND FechaDesde=$d AND TarifaBs=$t' @{'$c'=$e.CodigoProducto; '$d'=$e.FechaDesde; '$t'=$e.TarifaBs} }
+  foreach ($e in $tarifasRecortar) { Ejec 'UPDATE TarifaProductoProduccion SET FechaHasta=$h WHERE CodigoProducto=$c AND FechaDesde=$d AND TarifaBs=$t' @{'$h'=$FIN_TARIFA_PREVIA; '$c'=$e.CodigoProducto; '$d'=$e.FechaDesde; '$t'=$e.TarifaBs} }
   foreach ($t in $tarifasNuevas) {
     Ejec 'INSERT INTO TarifaProductoProduccion (CodigoProducto,TarifaBs,FechaDesde,FechaHasta,Usuario) VALUES ($c,$t,$d,$h,$u)' @{'$c'=$t.cod; '$t'=[double]$t.t; '$d'=$t.desde; '$h'=$t.hasta; '$u'=$USUARIO} }
 
