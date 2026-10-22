@@ -385,12 +385,15 @@ namespace SistemaGestion.Api.Endpoints
                 using var c = Db.Conn();
                 // Obtener insumos con movimientos de materia prima
                 var cmd = c.CreateCommand();
-                cmd.CommandText = @"SELECT i.Codigo, i.Descripcion, i.Unidad,
-                    i.Existencia, i.ExistenMin, i.CostoActual
-                    FROM Inventario i WHERE i.Activo=1
-                    AND i.Codigo IN (SELECT DISTINCT CodigoProducto FROM MovimientosInventario
-                        WHERE TipoKardex='MATERIA_PRIMA')
-                    ORDER BY i.Codigo";
+                // La materia prima vive en ProductosProveedor (INS-xxx), no en Inventario.
+                cmd.CommandText = @"SELECT pp.CodigoInterno, pp.Descripcion, COALESCE(pp.Unidad,'kg'),
+                    COALESCE(pp.StockActual,0), COALESCE(pp.StockMinimo,0),
+                    COALESCE(NULLIF(pp.CostoPromedio,0), pp.PrecioPromedio, pp.PrecioUltCompra, 0)
+                    FROM ProductosProveedor pp WHERE COALESCE(pp.Activo,1)=1
+                    AND (COALESCE(pp.TipoInsumo,'Materia prima')='Materia prima'
+                         OR pp.CodigoInterno IN (SELECT DISTINCT CodigoProducto FROM MovimientosInventario
+                                                 WHERE TipoKardex='MATERIA_PRIMA'))
+                    ORDER BY pp.CodigoInterno";
                 using var r = cmd.ExecuteReader();
                 var insumos = new List<(string cod, string desc, string unidad,
                     decimal stock, decimal min, decimal costo)>();
@@ -404,7 +407,8 @@ namespace SistemaGestion.Api.Endpoints
                     var cmdC = c.CreateCommand();
                     cmdC.CommandText = @"SELECT COALESCE(SUM(Cantidad),0) FROM MovimientosInventario
                         WHERE CodigoProducto=$cod AND TipoKardex='MATERIA_PRIMA'
-                        AND TipoMovimiento='SALIDA' AND FechaHora>=$desde";
+                        AND TipoMovimiento='SALIDA' AND COALESCE(Referencia,'') NOT LIKE 'AJ-%'
+                        AND FechaHora>=$desde";
                     cmdC.Parameters.AddWithValue("$cod", cod);
                     cmdC.Parameters.AddWithValue("$desde", fechaDesde);
                     decimal consumoTotal = Convert.ToDecimal(cmdC.ExecuteScalar() ?? 0.0);
@@ -417,7 +421,8 @@ namespace SistemaGestion.Api.Endpoints
                     var cmdP = c.CreateCommand();
                     cmdP.CommandText = @"SELECT COALESCE(CostoUnitario,0) FROM MovimientosInventario
                         WHERE CodigoProducto=$cod AND TipoKardex='MATERIA_PRIMA'
-                        AND TipoMovimiento='ENTRADA' ORDER BY IdMovimiento DESC LIMIT 1";
+                        AND TipoMovimiento='ENTRADA' AND COALESCE(Referencia,'') LIKE 'Gasto#%'
+                        ORDER BY FechaHora DESC, IdMovimiento DESC LIMIT 1";
                     cmdP.Parameters.AddWithValue("$cod", cod);
                     decimal precioUlt = Convert.ToDecimal(cmdP.ExecuteScalar() ?? 0.0);
                     if (precioUlt == 0) precioUlt = costo;

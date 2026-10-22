@@ -250,38 +250,33 @@ namespace SistemaGestion
 
             // Ingresos brutos: facturas activas del ejercicio
             var cmd = c.CreateCommand();
-            cmd.CommandText = "SELECT COALESCE(SUM(TotalF),0) FROM Facturas WHERE Fecha>=$d AND Fecha<=$h AND Estado!='Anulada'";
+            cmd.CommandText = "SELECT COALESCE(SUM(TotalF),0) FROM Facturas WHERE Fecha>=$d AND Fecha<=$h AND COALESCE(Anulada,0)=0";
             cmd.Parameters.AddWithValue("$d", desde);
             cmd.Parameters.AddWithValue("$h", hasta);
             decimal ingresos = D2(cmd.ExecuteScalar());
 
-            // Costos: compras del ejercicio
+            // Costos: compras del ejercicio (módulo Compras + egresos de materia prima)
             cmd = c.CreateCommand();
-            cmd.CommandText = "SELECT COALESCE(SUM(Total),0) FROM Compras WHERE Fecha>=$d AND Fecha<=$h";
-            cmd.Parameters.AddWithValue("$d", desde);
-            cmd.Parameters.AddWithValue("$h", hasta);
+            cmd.CommandText = SqlComprasPeriodo;
+            cmd.Parameters.AddWithValue("$s", desde);
+            cmd.Parameters.AddWithValue("$e", hasta);
             decimal compras = D2(cmd.ExecuteScalar());
 
-            // Costos: egresos + gastos del ejercicio
+            // Costos: gastos operativos del ejercicio (egresos que no son materia prima)
             cmd = c.CreateCommand();
-            cmd.CommandText = "SELECT COALESCE(SUM(Monto),0) FROM Egresos WHERE Fecha>=$d AND Fecha<=$h AND Estado!='Anulado'";
-            cmd.Parameters.AddWithValue("$d", desde);
-            cmd.Parameters.AddWithValue("$h", hasta);
+            cmd.CommandText = SqlGastosOperativosPeriodo;
+            cmd.Parameters.AddWithValue("$s", desde);
+            cmd.Parameters.AddWithValue("$e", hasta);
             decimal egresos = D2(cmd.ExecuteScalar());
-
-            cmd = c.CreateCommand();
-            cmd.CommandText = "SELECT COALESCE(SUM(Monto),0) FROM Gastos WHERE Fecha>=$d AND Fecha<=$h";
-            cmd.Parameters.AddWithValue("$d", desde);
-            cmd.Parameters.AddWithValue("$h", hasta);
-            decimal gastos = D2(cmd.ExecuteScalar());
+            decimal gastos  = 0m;
 
             // Costos: nomina del ejercicio (neto total pagado)
             cmd = c.CreateCommand();
             cmd.CommandText = @"
-                SELECT COALESCE(SUM(d.TotalDevengado),0)
+                SELECT COALESCE(SUM(d.DevengadoSueldo + d.DevengadoPiezas + d.DevengadoVentas + d.OtrosIngresos),0)
                 FROM DetallesNomina d
                 JOIN PeriodosNomina p ON d.IdPeriodo=p.Id
-                WHERE p.FechaInicio>=$d AND p.FechaInicio<=$h";
+                WHERE p.FechaDesde>=$d AND p.FechaDesde<=$h";
             cmd.Parameters.AddWithValue("$d", desde);
             cmd.Parameters.AddWithValue("$h", hasta);
             decimal nomina = D2(cmd.ExecuteScalar());
@@ -337,6 +332,6 @@ namespace SistemaGestion
         }
 
         private static decimal D2(object? val) =>
-            val == null || val == DBNull.Value ? 0m : (decimal)(double)val;
+            val == null || val == DBNull.Value ? 0m : Convert.ToDecimal(val, System.Globalization.CultureInfo.InvariantCulture);
     }
 }

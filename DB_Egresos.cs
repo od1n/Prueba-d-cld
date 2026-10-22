@@ -756,7 +756,7 @@ namespace SistemaGestion
                        CAST(strftime('%m', Fecha) AS INTEGER) AS Mes,
                        COALESCE(SUM(TotalF), 0) AS Total
                 FROM Facturas
-                WHERE Fecha >= $d AND Fecha <= $h
+                WHERE Fecha >= $d AND Fecha <= $h AND COALESCE(Anulada,0) = 0
                 GROUP BY Ano, Mes
                 ORDER BY Ano, Mes";
             cmd.Parameters.AddWithValue("$d", desde.ToString("yyyy-MM-dd"));

@@ -120,7 +120,7 @@ Controls.AddRange(new Control[] { tabs, hdr, footer });
                         () => DatabaseService.ObtenerResumenGlobal());
                     panel.Controls.Remove(lblCargando);
                     panel.Controls.Add(Card("Total Facturado",  rsm.TotalFact.ToString("C2"), Color.FromArgb(40, 160, 80)));
-                    panel.Controls.Add(Card("Total Compras",    rsm.TotalComp.ToString("C2"), Color.FromArgb(26, 74, 138)));
+                    panel.Controls.Add(Card("Total Compras", rsm.TotalComp.ToString("C2"), Color.FromArgb(26, 74, 138)));
                     panel.Controls.Add(Card("Clientes",         rsm.Clientes.ToString(),      Color.FromArgb(26, 74, 138)));
                     panel.Controls.Add(Card("Proveedores",      rsm.Proveedores.ToString(),   Color.FromArgb(160, 90, 20)));
                     panel.Controls.Add(Card("Productos",        rsm.Productos.ToString(),     Color.FromArgb(30, 120, 80)));
@@ -596,11 +596,19 @@ Controls.AddRange(new Control[] { tabs, hdr, footer });
                         () => DatabaseService.ObtenerFacturasPorPeriodo(
                             dtpD.Value.Date, dtpH.Value.Date, CodCli()),
                         btnVer, btnPdf);
+                    var nombres = DatabaseService.ObtenerClientes()
+                        .GroupBy(c => c.Codigo ?? "").ToDictionary(g => g.Key, g => g.First().Descripcion ?? "");
                     dgv.DataSource = facturas.Select(f => new {
                         f.NumeroF, Fecha = f.Fecha.ToString("dd/MM/yyyy"),
-                        Cliente = f.Codigo, f.FormaDePago,
+                        Codigo = f.Codigo,
+                        Cliente = nombres.TryGetValue(f.Codigo ?? "", out var nom) ? nom : "",
+                        f.FormaDePago,
                         IVA = f.IvaF.ToString("C2"), Total = f.TotalF.ToString("C2")
                     }).ToList();
+                    if (dgv.Columns.Contains("Cliente")) dgv.Columns["Cliente"].FillWeight = 200;
+                    foreach (var n in new[] { "IVA", "Total" })
+                        if (dgv.Columns.Contains(n))
+                            dgv.Columns[n].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
                 }
                 catch (Exception ex) { MsgErr(ex); }
             };
@@ -1097,12 +1105,62 @@ Controls.AddRange(new Control[] { tabs, hdr, footer });
         // ══════════════════════════════════════════════════════════
         private TabPage TabCompras()
         {
+            // Las compras de materia prima (resina) y demás gastos se registran
+            // como egresos; el módulo Compras queda para mercancía. Aquí se ven ambos.
             var tab = new TabPage("Compras");
-            var dgv = Grid(Color.FromArgb(100, 50, 160));
-            dgv.DataSource = DatabaseService.ObtenerCompras().Select(c => new {
-                c.CompraN, Fecha=c.FechaC.ToShortDateString(), Proveedor=c.CodigoP,
-                c.FormaDePago, Total=c.TotalC.ToString("C2") }).ToList();
-            tab.Controls.Add(dgv);
+            var pnl = new Panel { Dock = DockStyle.Fill, BackColor = Color.White };
+            var bar = new Panel { Dock = DockStyle.Top, Height = 48,
+                BackColor = Color.FromArgb(236, 230, 246) };
+            var dtpD = DTP(bar, "Desde:", 8, new DateTime(DateTime.Today.Year, 1, 1), out int fx1);
+            var dtpH = DTP(bar, "Hasta:", fx1, DateTime.Today, out int fx2);
+            var chkMp = new CheckBox { Text = "Solo materia prima", Location = new Point(fx2, 13),
+                AutoSize = true, Font = new Font("Segoe UI", 9f), Checked = false };
+            bar.Controls.Add(chkMp); fx2 += 140;
+            var btnVer = BtnAccion("Ver", Color.FromArgb(100, 50, 160), new Point(fx2, 8));
+            bar.Controls.Add(btnVer);
+
+            var dgv = Grid(Color.FromArgb(100, 50, 160)); dgv.Dock = DockStyle.Fill;
+            var lblTot = new Label { Dock = DockStyle.Bottom, Height = 30,
+                TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(10, 0, 0, 0),
+                BackColor = Color.FromArgb(100, 50, 160), ForeColor = Color.White,
+                Font = new Font("Segoe UI", 9.5f, FontStyle.Bold) };
+
+            async Task Cargar()
+            {
+                try
+                {
+                    var filas = await EjecutarConCarga(
+                        () => DatabaseService.ObtenerComprasReporte(dtpD.Value.Date, dtpH.Value.Date, chkMp.Checked),
+                        btnVer);
+                    dgv.DataSource = filas.Select(f => new {
+                        Fecha     = f.Fecha.ToString("dd/MM/yyyy"),
+                        f.Documento, f.Proveedor, f.Categoria, f.Concepto,
+                        Kg        = f.Kg > 0 ? f.Kg.ToString("N0") : "",
+                        Total     = f.TotalUSD.ToString("C2"),
+                        Pagado    = f.PagadoUSD.ToString("C2"),
+                        Saldo     = f.SaldoUSD > 0.01m ? f.SaldoUSD.ToString("C2") : "",
+                        f.Estado
+                    }).ToList();
+                    foreach (var n in new[] { "Kg", "Total", "Pagado", "Saldo" })
+                        if (dgv.Columns.Contains(n))
+                            dgv.Columns[n].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
+                    if (dgv.Columns.Contains("Concepto")) dgv.Columns["Concepto"].FillWeight = 180;
+                    if (dgv.Columns.Contains("Documento")) dgv.Columns["Documento"].FillWeight = 140;
+                    if (dgv.Columns.Contains("Proveedor")) dgv.Columns["Proveedor"].FillWeight = 140;
+                    decimal kg = filas.Sum(f => f.Kg), tot = filas.Sum(f => f.TotalUSD),
+                            pag = filas.Sum(f => f.PagadoUSD);
+                    lblTot.Text = $"{filas.Count} registros    Kg de materia prima: {kg:N0}    " +
+                                  $"Total: {tot:C2}    Pagado: {pag:C2}    Saldo por pagar: {(tot - pag):C2}";
+                }
+                catch (Exception ex) { MsgErr(ex); }
+            }
+            btnVer.Click += async (s, e) => await Cargar();
+            tab.HandleCreated += async (s, e) => await Cargar();
+
+            pnl.Controls.Add(dgv);
+            pnl.Controls.Add(lblTot);
+            pnl.Controls.Add(bar);
+            tab.Controls.Add(pnl);
             return tab;
         }
 
@@ -1791,10 +1849,10 @@ Controls.AddRange(new Control[] { tabs, hdr, footer });
         // ══════════════════════════════════════════════════════════
         private static List<LineaFactura> ObtenerDetallesPorNumero(string numeroF)
         {
-            var todas = DatabaseService.ObtenerFacturas();
-            int idx   = todas.FindIndex(f => f.NumeroF == numeroF);
-            return idx < 0 ? new List<LineaFactura>()
-                           : DatabaseService.ObtenerDetallesFactura(idx + 1);
+            // El detalle se guarda con el rowid de la factura (no su posición en la lista).
+            int id = DatabaseService.ObtenerIdFactura(numeroF);
+            return id <= 0 ? new List<LineaFactura>()
+                           : DatabaseService.ObtenerDetallesFactura(id);
         }
 
         // Helper: DateTimePicker con label en barra, devuelve siguiente x
@@ -1846,11 +1904,11 @@ Controls.AddRange(new Control[] { tabs, hdr, footer });
 
         private Panel Card(string titulo, string valor, Color color)
         {
-            var p = new Panel { Size = new Size(200, 100), Margin = new Padding(8), BackColor = color };
+            var p = new Panel { Size = new Size(230, 100), Margin = new Padding(8), BackColor = color };
             p.Controls.Add(new Label { Text = titulo, Location = new Point(10, 10), AutoSize = true,
                 ForeColor = Color.White, Font = new Font("Segoe UI", 9f) });
             p.Controls.Add(new Label { Text = valor, Location = new Point(10, 40), AutoSize = true,
-                ForeColor = Color.White, Font = new Font("Segoe UI", 18f, FontStyle.Bold) });
+                ForeColor = Color.White, Font = new Font("Segoe UI", valor.Length > 11 ? 15f : 18f, FontStyle.Bold) });
             return p;
         }
 

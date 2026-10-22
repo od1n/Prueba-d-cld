@@ -56,7 +56,7 @@ namespace SistemaGestion
                 cmd.CommandText = @"
                     SELECT COALESCE(SUM(TotalF), 0)
                     FROM Facturas
-                    WHERE Fecha >= $desde";
+                    WHERE Fecha >= $desde AND COALESCE(Anulada,0) = 0";
                 cmd.Parameters.AddWithValue("$desde", desde);
                 totalVentas = Convert.ToDecimal(cmd.ExecuteScalar() ?? 0m);
             }
@@ -75,11 +75,10 @@ namespace SistemaGestion
             decimal totalCompras = 0;
             using (var cmd = conn.CreateCommand())
             {
-                cmd.CommandText = @"
-                    SELECT COALESCE(SUM(TotalC), 0)
-                    FROM Compras
-                    WHERE FechaC >= $desde";
-                cmd.Parameters.AddWithValue("$desde", desde);
+                // Módulo Compras + egresos de materia prima (no anulados)
+                cmd.CommandText = SqlComprasPeriodo;
+                cmd.Parameters.AddWithValue("$s", desde);
+                cmd.Parameters.AddWithValue("$e", "9999-12-31");
                 totalCompras = Convert.ToDecimal(cmd.ExecuteScalar() ?? 0m);
             }
             if (totalCompras > 0)
@@ -97,10 +96,13 @@ namespace SistemaGestion
             using (var cmd = conn.CreateCommand())
             {
                 cmd.CommandText = @"
-                    SELECT Categoria, COALESCE(SUM(Monto), 0) AS Total
-                    FROM Gastos
-                    WHERE Fecha >= $desde
-                    GROUP BY Categoria
+                    SELECT COALESCE(cg.Nombre,'') AS Categoria, COALESCE(SUM(g.MontoUSD), 0) AS Total
+                    FROM Gastos g
+                    LEFT JOIN CategoriasGasto cg ON cg.Id = g.IdCategoria
+                    WHERE g.Fecha >= $desde
+                      AND COALESCE(cg.EsMateriaPrima,0) = 0
+                      AND COALESCE(g.Estado,'') <> 'Anulado'
+                    GROUP BY COALESCE(cg.Nombre,'')
                     ORDER BY Total DESC";
                 cmd.Parameters.AddWithValue("$desde", desde);
                 using var reader = cmd.ExecuteReader();

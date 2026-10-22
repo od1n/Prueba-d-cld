@@ -43,6 +43,28 @@ namespace SistemaGestion
 
     public static partial class DatabaseService
     {
+        // Compras del período: módulo Compras + egresos de materia prima.
+        internal const string SqlComprasPeriodo = @"
+            SELECT
+              (SELECT COALESCE(SUM(TotalC),0) FROM Compras WHERE FechaC >= $s AND FechaC <= $e)
+              + (SELECT COALESCE(SUM(g.MontoUSD),0) FROM Gastos g
+                   JOIN CategoriasGasto cg ON cg.Id = g.IdCategoria
+                  WHERE COALESCE(cg.EsMateriaPrima,0) = 1 AND COALESCE(g.Estado,'') <> 'Anulado'
+                    AND g.Fecha >= $s AND g.Fecha <= $e),
+              (SELECT COUNT(*) FROM Compras WHERE FechaC >= $s AND FechaC <= $e)
+              + (SELECT COUNT(*) FROM Gastos g
+                   JOIN CategoriasGasto cg ON cg.Id = g.IdCategoria
+                  WHERE COALESCE(cg.EsMateriaPrima,0) = 1 AND COALESCE(g.Estado,'') <> 'Anulado'
+                    AND g.Fecha >= $s AND g.Fecha <= $e),
+              (SELECT COALESCE(SUM(IvaC),0) FROM Compras WHERE FechaC >= $s AND FechaC <= $e)";
+
+        // Gastos operativos del período: egresos que no son materia prima.
+        internal const string SqlGastosOperativosPeriodo = @"
+            SELECT COALESCE(SUM(g.MontoUSD),0) FROM Gastos g
+              LEFT JOIN CategoriasGasto cg ON cg.Id = g.IdCategoria
+             WHERE COALESCE(cg.EsMateriaPrima,0) = 0 AND COALESCE(g.Estado,'') <> 'Anulado'
+               AND g.Fecha >= $s AND g.Fecha <= $e";
+
         public static ComparacionData ObtenerComparacion(
             DateTime p1Desde, DateTime p1Hasta,
             DateTime p2Desde, DateTime p2Hasta)
@@ -59,7 +81,7 @@ namespace SistemaGestion
             using (var cmd = conn.CreateCommand())
             {
                 cmd.CommandText = @"SELECT COALESCE(SUM(TotalF),0), COUNT(*), COALESCE(SUM(IvaF),0)
-                    FROM Facturas WHERE Fecha >= $s AND Fecha <= $e";
+                    FROM Facturas WHERE Fecha >= $s AND Fecha <= $e AND COALESCE(Anulada,0) = 0";
                 cmd.Parameters.AddWithValue("$s", s1);
                 cmd.Parameters.AddWithValue("$e", e1);
                 using var r = cmd.ExecuteReader();
@@ -74,7 +96,7 @@ namespace SistemaGestion
             using (var cmd = conn.CreateCommand())
             {
                 cmd.CommandText = @"SELECT COALESCE(SUM(TotalF),0), COUNT(*), COALESCE(SUM(IvaF),0)
-                    FROM Facturas WHERE Fecha >= $s AND Fecha <= $e";
+                    FROM Facturas WHERE Fecha >= $s AND Fecha <= $e AND COALESCE(Anulada,0) = 0";
                 cmd.Parameters.AddWithValue("$s", s2);
                 cmd.Parameters.AddWithValue("$e", e2);
                 using var r = cmd.ExecuteReader();
@@ -88,8 +110,8 @@ namespace SistemaGestion
             // ── Compras Periodo 1
             using (var cmd = conn.CreateCommand())
             {
-                cmd.CommandText = @"SELECT COALESCE(SUM(TotalC),0), COUNT(*), COALESCE(SUM(IvaC),0)
-                    FROM Compras WHERE FechaC >= $s AND FechaC <= $e";
+                // Compras = módulo Compras + egresos de materia prima (no anulados)
+                cmd.CommandText = SqlComprasPeriodo;
                 cmd.Parameters.AddWithValue("$s", s1);
                 cmd.Parameters.AddWithValue("$e", e1);
                 using var r = cmd.ExecuteReader();
@@ -103,8 +125,8 @@ namespace SistemaGestion
             // ── Compras Periodo 2
             using (var cmd = conn.CreateCommand())
             {
-                cmd.CommandText = @"SELECT COALESCE(SUM(TotalC),0), COUNT(*), COALESCE(SUM(IvaC),0)
-                    FROM Compras WHERE FechaC >= $s AND FechaC <= $e";
+                // Compras = módulo Compras + egresos de materia prima (no anulados)
+                cmd.CommandText = SqlComprasPeriodo;
                 cmd.Parameters.AddWithValue("$s", s2);
                 cmd.Parameters.AddWithValue("$e", e2);
                 using var r = cmd.ExecuteReader();
@@ -118,7 +140,8 @@ namespace SistemaGestion
             // ── Gastos Periodo 1
             using (var cmd = conn.CreateCommand())
             {
-                cmd.CommandText = "SELECT COALESCE(SUM(Monto),0) FROM Gastos WHERE Fecha >= $s AND Fecha <= $e";
+                // Gastos = egresos que no son materia prima (no anulados)
+                cmd.CommandText = SqlGastosOperativosPeriodo;
                 cmd.Parameters.AddWithValue("$s", s1);
                 cmd.Parameters.AddWithValue("$e", e1);
                 data.GastosPer1 = Convert.ToDecimal(cmd.ExecuteScalar() ?? 0m);
@@ -127,7 +150,8 @@ namespace SistemaGestion
             // ── Gastos Periodo 2
             using (var cmd = conn.CreateCommand())
             {
-                cmd.CommandText = "SELECT COALESCE(SUM(Monto),0) FROM Gastos WHERE Fecha >= $s AND Fecha <= $e";
+                // Gastos = egresos que no son materia prima (no anulados)
+                cmd.CommandText = SqlGastosOperativosPeriodo;
                 cmd.Parameters.AddWithValue("$s", s2);
                 cmd.Parameters.AddWithValue("$e", e2);
                 data.GastosPer2 = Convert.ToDecimal(cmd.ExecuteScalar() ?? 0m);

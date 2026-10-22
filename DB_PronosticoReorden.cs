@@ -40,19 +40,19 @@ namespace SistemaGestion
             var resultado = new List<PronosticoReorden>();
             using var c = Conn();
 
-            // 1. Obtener todos los insumos activos del inventario
-            //    (los que se usan como materia prima en producción)
+            // 1. Insumos activos de materia prima. Viven en ProductosProveedor
+            //    (INS-xxx), no en Inventario (que es producto terminado).
             var cmd = c.CreateCommand();
             cmd.CommandText = @"
-                SELECT i.Codigo, i.Descripcion, i.Unidad,
-                       i.Existencia, i.ExistenMin, i.CostoActual
-                FROM Inventario i
-                WHERE i.Activo = 1
-                  AND i.Codigo IN (
-                      SELECT DISTINCT CodigoProducto FROM MovimientosInventario
-                      WHERE TipoKardex = 'MATERIA_PRIMA'
-                  )
-                ORDER BY i.Codigo";
+                SELECT pp.CodigoInterno, pp.Descripcion, COALESCE(pp.Unidad,'kg'),
+                       COALESCE(pp.StockActual,0), COALESCE(pp.StockMinimo,0),
+                       COALESCE(NULLIF(pp.CostoPromedio,0), pp.PrecioPromedio, pp.PrecioUltCompra, 0)
+                FROM ProductosProveedor pp
+                WHERE COALESCE(pp.Activo,1) = 1
+                  AND (COALESCE(pp.TipoInsumo,'Materia prima') = 'Materia prima'
+                       OR pp.CodigoInterno IN (SELECT DISTINCT CodigoProducto FROM MovimientosInventario
+                                               WHERE TipoKardex = 'MATERIA_PRIMA'))
+                ORDER BY pp.CodigoInterno";
             using var r = cmd.ExecuteReader();
             var insumos = new List<(string cod, string desc, string unidad,
                                     decimal stock, decimal min, decimal costo)>();
@@ -71,6 +71,7 @@ namespace SistemaGestion
                     WHERE CodigoProducto = $cod
                       AND TipoKardex = 'MATERIA_PRIMA'
                       AND TipoMovimiento = 'SALIDA'
+                      AND COALESCE(Referencia,'') NOT LIKE 'AJ-%'
                       AND FechaHora >= $desde";
                 cmdC.Parameters.AddWithValue("$cod",   cod);
                 cmdC.Parameters.AddWithValue("$desde", fechaDesde);
@@ -98,7 +99,8 @@ namespace SistemaGestion
                     WHERE CodigoProducto = $cod
                       AND TipoKardex = 'MATERIA_PRIMA'
                       AND TipoMovimiento = 'ENTRADA'
-                    ORDER BY IdMovimiento DESC LIMIT 1";
+                      AND COALESCE(Referencia,'') LIKE 'Gasto#%'
+                    ORDER BY FechaHora DESC, IdMovimiento DESC LIMIT 1";
                 cmdP.Parameters.AddWithValue("$cod", cod);
                 decimal precioUlt = D(cmdP.ExecuteScalar());
                 if (precioUlt == 0) precioUlt = costo;

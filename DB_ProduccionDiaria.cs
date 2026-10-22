@@ -65,7 +65,28 @@ namespace SistemaGestion
                 LEFT JOIN Inventario i ON i.Codigo = p.Codigo
                 LEFT JOIN Empleados  e ON e.Id     = p.IdEmpleado
                 WHERE p.Fecha >= $d AND p.Fecha <= $h
-                ORDER BY p.Fecha DESC, p.Id DESC";
+
+                UNION ALL
+
+                -- Registro de producción por día (módulo actual): una fila por producto
+                -- y día, con el costo de fabricación que quedó en el Kardex (entrada).
+                SELECT -d.Id, d.CodigoProducto,
+                       COALESCE(i.Descripcion,''),
+                       r.Fecha, d.Cantidad,
+                       COALESCE((SELECT m.CostoUnitario FROM MovimientosInventario m
+                                  WHERE m.Referencia = 'PROD-' || r.Fecha
+                                    AND m.CodigoProducto = d.CodigoProducto
+                                    AND m.TipoMovimiento = 'ENTRADA'
+                                    AND COALESCE(m.TipoKardex,'PRODUCTO') = 'PRODUCTO'
+                                  ORDER BY m.IdMovimiento DESC LIMIT 1), 0),
+                       TRIM(COALESCE(r.TipoMaterial,'') || ' ' || COALESCE(d.CodigoMolde,'')),
+                       0, ''
+                FROM DetalleProduccionMolde d
+                JOIN RegistroProduccionDia r ON r.Id = d.IdRegistro
+                LEFT JOIN Inventario i ON i.Codigo = d.CodigoProducto
+                WHERE r.Fecha >= $d AND r.Fecha <= $h AND d.Cantidad > 0
+
+                ORDER BY 4 DESC, 1 DESC";
             cmd.Parameters.AddWithValue("$d", desde.ToString("yyyy-MM-dd"));
             cmd.Parameters.AddWithValue("$h", hasta.ToString("yyyy-MM-dd"));
             using var r = cmd.ExecuteReader();

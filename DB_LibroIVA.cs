@@ -40,6 +40,9 @@ namespace SistemaGestion
                 LEFT JOIN Clientes c ON c.Codigo = f.Codigo
                 WHERE f.Fecha >= $desde
                   AND f.Fecha <= $hasta
+                  -- Libro fiscal: solo facturas vigentes (sin anuladas ni notas de entrega)
+                  AND COALESCE(f.Anulada,0) = 0
+                  AND COALESCE(f.TipoDocumento,'FacturaConIVA') <> 'NotaEntrega'
                 ORDER BY f.Fecha ASC, f.NumeroF ASC";
             cmd.Parameters.AddWithValue("$desde", desde);
             cmd.Parameters.AddWithValue("$hasta", hasta);

@@ -82,7 +82,7 @@ namespace SistemaGestion
             {
                 DropDownStyle = ComboBoxStyle.DropDownList,
                 Width = 110,
-                Location = new Point(40, 10)
+                Location = new Point(50, 10)
             };
             string[] meses = { "Enero","Febrero","Marzo","Abril","Mayo","Junio",
                                 "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre" };
@@ -93,7 +93,7 @@ namespace SistemaGestion
             {
                 Text = "Año:",
                 AutoSize = true,
-                Location = new Point(162, 14),
+                Location = new Point(176, 14),
                 ForeColor = Color.FromArgb(44, 62, 80)
             });
 
@@ -101,7 +101,7 @@ namespace SistemaGestion
             {
                 DropDownStyle = ComboBoxStyle.DropDownList,
                 Width = 80,
-                Location = new Point(190, 10)
+                Location = new Point(216, 10)
             };
             for (int y = DateTime.Today.Year; y >= DateTime.Today.Year - 5; y--)
                 cmbAnio.Items.Add(y.ToString());
@@ -111,7 +111,7 @@ namespace SistemaGestion
             {
                 Text = "Consultar",
                 Size = new Size(90, 28),
-                Location = new Point(284, 8),
+                Location = new Point(312, 8),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Color.FromArgb(41, 128, 185),
                 ForeColor = Color.White,
@@ -126,7 +126,7 @@ namespace SistemaGestion
             {
                 Text = "PDF Ventas",
                 Size = new Size(95, 28),
-                Location = new Point(388, 8),
+                Location = new Point(416, 8),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Color.FromArgb(192, 57, 43),
                 ForeColor = Color.White,
@@ -141,7 +141,7 @@ namespace SistemaGestion
             {
                 Text = "PDF Compras",
                 Size = new Size(100, 28),
-                Location = new Point(494, 8),
+                Location = new Point(522, 8),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Color.FromArgb(142, 68, 173),
                 ForeColor = Color.White,
@@ -208,10 +208,29 @@ namespace SistemaGestion
             btnCerrar.Click += (s, e) => Close();
             pnlFooter.Controls.Add(btnCerrar);
 
+            // Ayuda
+            var btnAyuda = new Button {
+                Text = "? Ayuda", Size = new Size(80, 28), Location = new Point(632, 8),
+                BackColor = Color.FromArgb(80, 50, 150), ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+                Cursor = Cursors.Hand
+            };
+            btnAyuda.FlatAppearance.BorderSize = 0;
+            btnAyuda.Click += (s, e) => AyudaService.Mostrar(this, "FrmLibroIVA");
+            pnlToolbar.Controls.Add(btnAyuda);
+
             this.Controls.Add(tabLibros);
             this.Controls.Add(pnlToolbar);
             this.Controls.Add(pnlHeader);
             this.Controls.Add(pnlFooter);
+
+            // Recordar tamaño y posición de la ventana
+            VentanaPrefs.Restaurar(this);
+            var _vpT = new System.Windows.Forms.Timer { Interval = 800 };
+            _vpT.Tick        += (s, e) => { _vpT.Stop(); VentanaPrefs.Guardar(this); };
+            SizeChanged     += (s, e) => { _vpT.Stop(); _vpT.Start(); };
+            LocationChanged += (s, e) => { _vpT.Stop(); _vpT.Start(); };
+            FormClosed      += (s, e) => { _vpT.Stop(); _vpT.Dispose(); };
         }
 
         // -------------------------------------------------------------------------
@@ -429,31 +448,15 @@ namespace SistemaGestion
             var lBase = new Label { Text = "Base Imponible:", ForeColor = Color.FromArgb(200,220,255), AutoSize = true, Location = new Point(10, 10), Font = new Font("Segoe UI", 8.5f) };
             var vBase = new Label { Text = "$ 0.00", ForeColor = Color.White, AutoSize = true, Location = new Point(120, 10), Font = new Font("Segoe UI", 8.5f, FontStyle.Bold) };
 
-            var lIva = new Label { Text = "IVA:", ForeColor = Color.FromArgb(200,220,255), AutoSize = true, Location = new Point(270, 10), Font = new Font("Segoe UI", 8.5f) };
-            var vIva = new Label { Text = "$ 0.00", ForeColor = Color.White, AutoSize = true, Location = new Point(300, 10), Font = new Font("Segoe UI", 8.5f, FontStyle.Bold) };
+            var lIva = new Label { Text = "IVA:", ForeColor = Color.FromArgb(200,220,255), AutoSize = true, Location = new Point(300, 10), Font = new Font("Segoe UI", 8.5f) };
+            var vIva = new Label { Text = "$ 0.00", ForeColor = Color.White, AutoSize = true, Location = new Point(336, 10), Font = new Font("Segoe UI", 8.5f, FontStyle.Bold) };
 
-            var lTot = new Label { Text = "TOTAL:", ForeColor = Color.FromArgb(200,220,255), AutoSize = true, Location = new Point(450, 10), Font = new Font("Segoe UI", 8.5f) };
-            var vTot = new Label { Text = "$ 0.00", ForeColor = Color.White, AutoSize = true, Location = new Point(500, 10), Font = new Font("Segoe UI", 10f, FontStyle.Bold) };
+            var lTot = new Label { Text = "TOTAL:", ForeColor = Color.FromArgb(200,220,255), AutoSize = true, Location = new Point(510, 10), Font = new Font("Segoe UI", 8.5f) };
+            var vTot = new Label { Text = "$ 0.00", ForeColor = Color.White, AutoSize = true, Location = new Point(566, 10), Font = new Font("Segoe UI", 10f, FontStyle.Bold) };
 
+            // Las etiquetas van DENTRO del panel de totales (antes se agregaban
+            // también al formulario y aparecían encima del título).
             pnl.Controls.AddRange(new Control[] { lBase, vBase, lIva, vIva, lTot, vTot });
-
-            VentanaPrefs.Restaurar(this);
-            var _vpT = new System.Windows.Forms.Timer { Interval = 800 };
-            _vpT.Tick        += (s, e) => { _vpT.Stop(); VentanaPrefs.Guardar(this); };
-            SizeChanged     += (s, e) => { _vpT.Stop(); _vpT.Start(); };
-            LocationChanged += (s, e) => { _vpT.Stop(); _vpT.Start(); };
-            FormClosed      += (s, e) => { _vpT.Stop(); _vpT.Dispose(); };
-
-            
-            var _btnHlp = new Button {
-                Text = "? Ayuda", Size = new Size(80, 28),
-                BackColor = Color.FromArgb(80, 50, 150), ForeColor = Color.White,
-                FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
-                Cursor = Cursors.Hand
-            };
-            _btnHlp.FlatAppearance.BorderSize = 0;
-            _btnHlp.Click += (s, e) => AyudaService.Mostrar(this, "FrmLibroIVA");
-            Controls.AddRange(new Control[] { lBase, vBase, lIva, vIva, lTot, vTot });
 
             lblBase = vBase;
             lblIva  = vIva;

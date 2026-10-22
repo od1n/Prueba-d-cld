@@ -1418,19 +1418,19 @@ namespace SistemaGestion
                 }
             }
 
-            // ── 5. Gastos pendientes ──────────────────────────────────────
-            foreach (var g in ObtenerGastos().Where(g => g.Estado == "Pendiente"))
+            // ── 5. Cuentas por pagar pendientes (egresos a crédito y CxP manuales) ──
+            foreach (var cp in ObtenerCuentasPagar().Where(x => x.Monto - x.Pagado > 0.01m))
             {
-                DateTime fechaGasto = g.Fecha < hoy ? hoy.AddDays(1) : g.Fecha;
-                if ((fechaGasto - hoy).TotalDays > 90) continue;
+                DateTime fv = cp.FechaVence < hoy ? hoy.AddDays(1) : cp.FechaVence;
+                if ((fv - hoy).TotalDays > 90) continue;
                 mov.Add(new MovimientoCaja
                 {
-                    Fecha      = fechaGasto,
+                    Fecha      = fv,
                     Tipo       = "Egreso",
-                    Categoria  = "Gasto",
-                    Concepto   = g.Categoria + " — " + g.Descripcion,
-                    MontoUSD   = g.Monto,
-                    Referencia = g.Id.ToString(),
+                    Categoria  = "Cuenta por pagar",
+                    Concepto   = (cp.Proveedor ?? "") + " — " + (cp.Concepto ?? ""),
+                    MontoUSD   = cp.Monto - cp.Pagado,
+                    Referencia = string.IsNullOrEmpty(cp.NumFactura) ? "CxP " + cp.Id : cp.NumFactura,
                     EsReal     = false
                 });
             }
@@ -3353,11 +3353,20 @@ namespace SistemaGestion
             var list = new List<Gasto>();
             using var c = Conn();
             var cmd = c.CreateCommand();
-            cmd.CommandText = "SELECT * FROM Gastos ORDER BY Id DESC";
+            // Esquema actual de Gastos (egresos): Concepto, MontoUSD, IdCategoria.
+            cmd.CommandText = @"
+                SELECT g.Id, COALESCE(cg.Nombre,''), COALESCE(g.Concepto,''),
+                       COALESCE(g.MontoUSD,0),
+                       COALESCE(g.FechaVencimiento, g.Fecha), COALESCE(g.Proveedor,''),
+                       COALESCE(g.Estado,'')
+                FROM Gastos g
+                LEFT JOIN CategoriasGasto cg ON cg.Id = g.IdCategoria
+                ORDER BY g.Id DESC";
             using var r = cmd.ExecuteReader();
             while (r.Read())
                 list.Add(new Gasto { Id = r.GetInt32(0), Categoria = S(r,1), Descripcion = S(r,2),
-                    Monto = D(r,3), Fecha = DateTime.Parse(r.GetString(4)),
+                    Monto = D(r,3),
+                    Fecha = DateTime.TryParse(S(r,4), out var fg) ? fg : DateTime.Today,
                     Proveedor = S(r,5), Estado = S(r,6) });
             return list;
         }
@@ -4460,6 +4469,7 @@ namespace SistemaGestion
                        SUM(TotalF)
                 FROM Facturas
                 WHERE CAST(strftime('%Y', Fecha) AS INTEGER) IN ({inAnos})
+                  AND COALESCE(Anulada,0) = 0
                 GROUP BY Ano, Mes
                 ORDER BY Ano, Mes";
             using var r = cmd.ExecuteReader();
@@ -4481,14 +4491,19 @@ namespace SistemaGestion
             var cmd = c.CreateCommand();
             cmd.CommandText = @"
                 SELECT
-                    (SELECT COUNT(*) FROM Facturas),
-                    (SELECT COALESCE(SUM(TotalF),0) FROM Facturas),
-                    (SELECT COUNT(*) FROM Compras),
-                    (SELECT COALESCE(SUM(TotalC),0) FROM Compras),
+                    (SELECT COUNT(*) FROM Facturas WHERE COALESCE(Anulada,0)=0),
+                    (SELECT COALESCE(SUM(TotalF),0) FROM Facturas WHERE COALESCE(Anulada,0)=0),
+                    -- Compras = módulo Compras + egresos de materia prima (no anulados)
+                    (SELECT COUNT(*) FROM Compras)
+                      + (SELECT COUNT(*) FROM Gastos g JOIN CategoriasGasto cg ON cg.Id=g.IdCategoria
+                         WHERE COALESCE(cg.EsMateriaPrima,0)=1 AND COALESCE(g.Estado,'')<>'Anulado'),
+                    (SELECT COALESCE(SUM(TotalC),0) FROM Compras)
+                      + (SELECT COALESCE(SUM(g.MontoUSD),0) FROM Gastos g JOIN CategoriasGasto cg ON cg.Id=g.IdCategoria
+                         WHERE COALESCE(cg.EsMateriaPrima,0)=1 AND COALESCE(g.Estado,'')<>'Anulado'),
                     (SELECT COUNT(*) FROM Clientes),
                     (SELECT COUNT(*) FROM Proveedores),
-                    (SELECT COUNT(*) FROM Inventario),
-                    (SELECT COUNT(*) FROM Inventario WHERE Existencia < ExistenMin),
+                    (SELECT COUNT(*) FROM Inventario WHERE COALESCE(Activo,1)=1),
+                    (SELECT COUNT(*) FROM Inventario WHERE COALESCE(Activo,1)=1 AND COALESCE(ExistenMin,0) > 0 AND COALESCE(Existencia,0) < ExistenMin),
                     (SELECT COUNT(*) FROM TbMoldes),
                     (SELECT COUNT(*) FROM TbMoldes
                        WHERE FechaLastMant IS NOT NULL

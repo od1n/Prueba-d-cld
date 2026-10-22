@@ -393,8 +393,7 @@ CargarDatos();
             dgv.DataSource = _filtrados.Select(r => new
             {
                 r.Codigo,
-                Descripcion    = r.Descripcion.Length > 28
-                                 ? r.Descripcion.Substring(0, 28) : r.Descripcion,
+                Descripcion    = r.Descripcion,
                 r.Departamento,
                 Costo          = r.CostoUnitario.ToString("C2"),
                 Precio         = r.PrecioVenta.ToString("C2"),
@@ -409,7 +408,35 @@ CargarDatos();
                 Rotacion       = r.RotacionMeses > 0
                                  ? r.RotacionMeses.ToString("F1") + " m" : "—"
             }).ToList();
+            AjustarColumnas();
             VentanaPrefs.AplicarAnchos(this, dgv);
+        }
+
+        // Anchos proporcionales: la descripción más ancha y los montos alineados
+        // a la derecha, para que no se corten ni se tapen los valores.
+        private void AjustarColumnas()
+        {
+            var pesos = new Dictionary<string, float> {
+                ["Codigo"] = 70, ["Descripcion"] = 200, ["Departamento"] = 70,
+                ["Costo"] = 70, ["Precio"] = 70, ["Margen_U"] = 70, ["Margen_Pct"] = 62,
+                ["Vendidas"] = 62, ["Ingresos"] = 90, ["Costo_Total"] = 90, ["Utilidad"] = 90,
+                ["Stock"] = 58, ["ValInventario"] = 90, ["Rotacion"] = 62 };
+            foreach (DataGridViewColumn c in dgv.Columns)
+            {
+                if (pesos.TryGetValue(c.Name, out var w)) c.FillWeight = w;
+                c.MinimumWidth = 40;
+                if (c.Name != "Codigo" && c.Name != "Descripcion" && c.Name != "Departamento")
+                    c.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
+            }
+            if (dgv.Columns.Contains("Departamento"))
+                dgv.Columns["Departamento"].Visible = _filtrados.Any(r => !string.IsNullOrWhiteSpace(r.Departamento));
+            if (dgv.Columns.Contains("Margen_Pct")) dgv.Columns["Margen_Pct"].HeaderText = "Margen %";
+            if (dgv.Columns.Contains("Margen_U"))   dgv.Columns["Margen_U"].HeaderText   = "Margen $";
+            if (dgv.Columns.Contains("Costo_Total")) dgv.Columns["Costo_Total"].HeaderText = "Costo total";
+            if (dgv.Columns.Contains("ValInventario")) dgv.Columns["ValInventario"].HeaderText = "Valor inventario";
+            if (dgv.Columns.Contains("Rotacion"))   dgv.Columns["Rotacion"].HeaderText   = "Rotación";
+            if (dgv.Columns.Contains("Descripcion")) dgv.Columns["Descripcion"].HeaderText = "Descripción";
+            if (dgv.Columns.Contains("Codigo"))     dgv.Columns["Codigo"].HeaderText     = "Código";
         }
 
         private void ActualizarKpis()

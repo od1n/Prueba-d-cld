@@ -61,8 +61,25 @@ namespace SistemaGestion
             }
         }
 
+        static void AplicarMonedaDolar()
+        {
+            var ci = (System.Globalization.CultureInfo)
+                System.Globalization.CultureInfo.CurrentCulture.Clone();
+            ci.NumberFormat.CurrencySymbol          = "$";
+            ci.NumberFormat.CurrencyPositivePattern = 2;   // $ n
+            ci.NumberFormat.CurrencyNegativePattern = 12;  // $ -n
+            System.Globalization.CultureInfo.DefaultThreadCurrentCulture = ci;
+            System.Globalization.CultureInfo.CurrentCulture              = ci;
+        }
+
         static void MainInterno()
         {
+            // ── Moneda: el sistema trabaja en dólares ────────────────────────
+            //   Se conserva el formato regional de Windows (separadores, fechas)
+            //   pero el símbolo de moneda pasa a ser "$". Así todo ToString("C2")
+            //   (reportes, PDF, grillas) muestra "$ 1.234,56" y no "1.234,56 €".
+            AplicarMonedaDolar();
+
             // ── DPI awareness — antes de EnableVisualStyles ─────────────────
             Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
             Application.EnableVisualStyles();
