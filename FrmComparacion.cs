@@ -38,7 +38,7 @@ namespace SistemaGestion
         private void InitializeComponent()
         {
             this.Text = "Comparacion por Periodo";
-            this.Size = new Size(1050, 680);
+            this.Size = new Size(1100, 680);
             this.StartPosition = FormStartPosition.CenterParent;
             this.MinimumSize = new Size(850, 550);
             this.BackColor = Color.FromArgb(245, 247, 250);
@@ -60,14 +60,14 @@ namespace SistemaGestion
             var pnlP1 = new GroupBox
             {
                 Text = "Periodo 1 (actual)", Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
-                Location = new Point(8, 6), Size = new Size(335, 66),
+                Location = new Point(8, 6), Size = new Size(368, 66),
                 ForeColor = Color.FromArgb(22, 55, 120)
             };
-            pnlP1.Controls.Add(new Label { Text = "Desde:", Location = new Point(8, 24), AutoSize = true });
-            dtpPer1Desde = new DateTimePicker { Location = new Point(55, 20), Size = new Size(115, 24), Format = DateTimePickerFormat.Short };
+            pnlP1.Controls.Add(new Label { Text = "Desde:", Location = new Point(8, 24), AutoSize = true, Font = new Font("Segoe UI", 8.5f), ForeColor = Color.FromArgb(44, 62, 80) });
+            dtpPer1Desde = new DateTimePicker { Location = new Point(62, 20), Size = new Size(118, 24), Format = DateTimePickerFormat.Short, Font = new Font("Segoe UI", 8.5f) };
             pnlP1.Controls.Add(dtpPer1Desde);
-            pnlP1.Controls.Add(new Label { Text = "Hasta:", Location = new Point(178, 24), AutoSize = true });
-            dtpPer1Hasta = new DateTimePicker { Location = new Point(218, 20), Size = new Size(115, 24), Format = DateTimePickerFormat.Short };
+            pnlP1.Controls.Add(new Label { Text = "Hasta:", Location = new Point(190, 24), AutoSize = true, Font = new Font("Segoe UI", 8.5f), ForeColor = Color.FromArgb(44, 62, 80) });
+            dtpPer1Hasta = new DateTimePicker { Location = new Point(240, 20), Size = new Size(118, 24), Format = DateTimePickerFormat.Short, Font = new Font("Segoe UI", 8.5f) };
             pnlP1.Controls.Add(dtpPer1Hasta);
             pnlToolbar.Controls.Add(pnlP1);
 
@@ -75,20 +75,20 @@ namespace SistemaGestion
             var pnlP2 = new GroupBox
             {
                 Text = "Periodo 2 (comparar con)", Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
-                Location = new Point(353, 6), Size = new Size(335, 66),
+                Location = new Point(386, 6), Size = new Size(368, 66),
                 ForeColor = Color.FromArgb(160, 40, 40)
             };
-            pnlP2.Controls.Add(new Label { Text = "Desde:", Location = new Point(8, 24), AutoSize = true });
-            dtpPer2Desde = new DateTimePicker { Location = new Point(55, 20), Size = new Size(115, 24), Format = DateTimePickerFormat.Short };
+            pnlP2.Controls.Add(new Label { Text = "Desde:", Location = new Point(8, 24), AutoSize = true, Font = new Font("Segoe UI", 8.5f), ForeColor = Color.FromArgb(44, 62, 80) });
+            dtpPer2Desde = new DateTimePicker { Location = new Point(62, 20), Size = new Size(118, 24), Format = DateTimePickerFormat.Short, Font = new Font("Segoe UI", 8.5f) };
             pnlP2.Controls.Add(dtpPer2Desde);
-            pnlP2.Controls.Add(new Label { Text = "Hasta:", Location = new Point(178, 24), AutoSize = true });
-            dtpPer2Hasta = new DateTimePicker { Location = new Point(218, 20), Size = new Size(115, 24), Format = DateTimePickerFormat.Short };
+            pnlP2.Controls.Add(new Label { Text = "Hasta:", Location = new Point(190, 24), AutoSize = true, Font = new Font("Segoe UI", 8.5f), ForeColor = Color.FromArgb(44, 62, 80) });
+            dtpPer2Hasta = new DateTimePicker { Location = new Point(240, 20), Size = new Size(118, 24), Format = DateTimePickerFormat.Short, Font = new Font("Segoe UI", 8.5f) };
             pnlP2.Controls.Add(dtpPer2Hasta);
             pnlToolbar.Controls.Add(pnlP2);
 
             btnComparar = new Button
             {
-                Text = "Comparar", Size = new Size(100, 34), Location = new Point(700, 20),
+                Text = "Comparar", Size = new Size(100, 34), Location = new Point(766, 20),
                 FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(41, 128, 185),
                 ForeColor = Color.White, Font = new Font("Segoe UI", 9f, FontStyle.Bold),
                 FlatAppearance = { BorderSize = 0 }, Cursor = Cursors.Hand
@@ -98,7 +98,7 @@ namespace SistemaGestion
 
             btnPdf = new Button
             {
-                Text = "Exportar PDF", Size = new Size(110, 34), Location = new Point(810, 20),
+                Text = "Exportar PDF", Size = new Size(110, 34), Location = new Point(876, 20),
                 FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(192, 57, 43),
                 ForeColor = Color.White, Font = new Font("Segoe UI", 9f, FontStyle.Bold),
                 FlatAppearance = { BorderSize = 0 }, Cursor = Cursors.Hand
@@ -127,7 +127,7 @@ namespace SistemaGestion
 
             // Grid de métricas
             var pnlGridHeader = new Panel { Dock = DockStyle.Top, Height = 28, BackColor = Color.FromArgb(230, 232, 245) };
-            lblTituloPer1 = new Label { Text = "Periodo 1", AutoSize = true, Location = new Point(260, 6),
+            lblTituloPer1 = new Label { Text = "Periodo 1", AutoSize = true, Location = new Point(10, 6),
                 Font = new Font("Segoe UI", 8.5f, FontStyle.Bold), ForeColor = Color.FromArgb(22, 55, 120) };
             lblTituloPer2 = new Label { Text = "Periodo 2", AutoSize = true, Location = new Point(380, 6),
                 Font = new Font("Segoe UI", 8.5f, FontStyle.Bold), ForeColor = Color.FromArgb(160, 40, 40) };
@@ -214,6 +214,9 @@ namespace SistemaGestion
                 lblTituloPer2.Text = $"{dtpPer2Desde.Value:dd/MM/yy} – {dtpPer2Hasta.Value:dd/MM/yy}";
                 dgv.Columns["colPer1"].HeaderText = lblTituloPer1.Text;
                 dgv.Columns["colPer2"].HeaderText = lblTituloPer2.Text;
+                lblTituloPer1.Text = "Periodo 1: " + lblTituloPer1.Text;
+                lblTituloPer2.Text = "Periodo 2: " + lblTituloPer2.Text;
+                lblTituloPer2.Left = lblTituloPer1.Right + 24;
 
                 CargarGrid();
                 pnlGrafica.Invalidate();
@@ -230,8 +233,17 @@ namespace SistemaGestion
             dgv.Rows.Clear();
             if (_data == null) return;
 
-            void Fila(string metrica, decimal v1, decimal v2, bool esDinero = true, bool menorEsMejor = false)
+            void Fila(string metrica, decimal v1, decimal v2, bool esDinero = true, bool menorEsMejor = false, bool esPct = false)
             {
+                if (metrica.StartsWith("──"))
+                {
+                    int rs = dgv.Rows.Add();
+                    dgv.Rows[rs].Cells["colMetrica"].Value = metrica.Replace("──", "").Trim();
+                    dgv.Rows[rs].DefaultCellStyle.BackColor = Color.FromArgb(235, 237, 245);
+                    dgv.Rows[rs].DefaultCellStyle.Font = new Font("Segoe UI", 8.5f, FontStyle.Bold);
+                    dgv.Rows[rs].DefaultCellStyle.ForeColor = Color.FromArgb(50, 50, 120);
+                    return;
+                }
                 decimal dif = v1 - v2;
                 decimal pct = v2 != 0 ? (dif / Math.Abs(v2)) * 100 : (v1 != 0 ? 100 : 0);
                 string tendencia = dif == 0 ? "→" : (dif > 0 ? "↑" : "↓");
@@ -239,9 +251,9 @@ namespace SistemaGestion
 
                 int row = dgv.Rows.Add();
                 dgv.Rows[row].Cells["colMetrica"].Value   = metrica;
-                dgv.Rows[row].Cells["colPer1"].Value      = esDinero ? $"$ {v1:N2}" : v1.ToString("N0");
-                dgv.Rows[row].Cells["colPer2"].Value      = esDinero ? $"$ {v2:N2}" : v2.ToString("N0");
-                dgv.Rows[row].Cells["colDif"].Value       = esDinero ? $"$ {dif:N2}" : dif.ToString("N0");
+                dgv.Rows[row].Cells["colPer1"].Value      = esPct ? $"{v1:N1} %" : esDinero ? $"$ {v1:N2}" : v1.ToString("N0");
+                dgv.Rows[row].Cells["colPer2"].Value      = esPct ? $"{v2:N1} %" : esDinero ? $"$ {v2:N2}" : v2.ToString("N0");
+                dgv.Rows[row].Cells["colDif"].Value       = esPct ? $"{dif:+0.0;-0.0} pts" : esDinero ? $"$ {dif:N2}" : dif.ToString("N0");
                 dgv.Rows[row].Cells["colPct"].Value       = $"{pct:+0.0;-0.0}%";
                 dgv.Rows[row].Cells["colTendencia"].Value = tendencia;
 
@@ -280,7 +292,7 @@ namespace SistemaGestion
 
             Fila("── RESULTADO", 0, 0, true);
             Fila("Utilidad Bruta",         _data.UtilidadPer1,     _data.UtilidadPer2);
-            Fila("Margen Bruto %",         _data.MargenPer1,       _data.MargenPer2);
+            Fila("Margen Bruto %",         _data.MargenPer1,       _data.MargenPer2, esPct: true);
 
             Fila("── NOMINA", 0, 0, true);
             Fila("Total Nomina Pagada",    _data.NominaPer1,       _data.NominaPer2, menorEsMejor: true);
