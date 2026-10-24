@@ -889,12 +889,16 @@ Controls.AddRange(new Control[] { tabs, hdr, footer });
             }).ToList();
             dgv.DataBindingComplete += (s, e) =>
             {
-                for (int idx = 0; idx < dgv.Rows.Count && idx < lista.Count; idx++)
+                // Se colorea según los valores de cada fila (no por posición),
+                // para que los colores sigan correctos al ordenar la grilla.
+                foreach (DataGridViewRow row in dgv.Rows)
                 {
-                    if (lista[idx].Existencia == 0)
-                        dgv.Rows[idx].DefaultCellStyle.BackColor = Color.FromArgb(255, 210, 210);
-                    else if (lista[idx].Existencia < lista[idx].ExistenMin)
-                        dgv.Rows[idx].DefaultCellStyle.BackColor = Color.FromArgb(255, 245, 190);
+                    decimal ex  = Convert.ToDecimal(row.Cells["Existencia"].Value ?? 0m);
+                    decimal min = Convert.ToDecimal(row.Cells["ExistenMin"].Value ?? 0m);
+                    if (ex == 0)
+                        row.DefaultCellStyle.BackColor = Color.FromArgb(255, 210, 210);
+                    else if (ex < min)
+                        row.DefaultCellStyle.BackColor = Color.FromArgb(255, 245, 190);
                 }
             };
 
@@ -1929,6 +1933,7 @@ Controls.AddRange(new Control[] { tabs, hdr, footer });
             g.ColumnHeadersDefaultCellStyle.Font = new Font("Segoe UI", 9f, FontStyle.Bold);
             g.EnableHeadersVisualStyles = false;
             g.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(245, 250, 247);
+            GridOrden.Habilitar(g);   // clic en el encabezado = ordenar por esa columna
             return g;
         }
 

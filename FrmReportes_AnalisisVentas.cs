@@ -146,7 +146,6 @@ namespace SistemaGestion
                 foreach (DataGridViewColumn c in g.Columns)
                 {
                     c.Width = anchos.TryGetValue(c.Name, out var w) ? w : 95;
-                    c.SortMode = DataGridViewColumnSortMode.NotSortable;
                     if (c.Name != "Código" && c.Name != "Descripción" && c.Name != "Mes" && c.Name != "Cliente"
                         && c.Name != "Documento" && c.Name != "Tipo" && c.Name != "Fecha"
                         && c.Name != "Primera" && c.Name != "Última")
