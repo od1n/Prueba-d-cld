@@ -12,7 +12,7 @@ namespace SistemaGestion
     // ══════════════════════════════════════════════════════════════
     //  REPORTES
     // ══════════════════════════════════════════════════════════════
-    public class FrmReportes : FormBase
+    public partial class FrmReportes : FormBase
     {
         // ── Helper async compartido por todos los tabs pesados ─────────────
         // Ejecuta `trabajo` en thread pool con WaitCursor + bloqueo de los
@@ -51,6 +51,7 @@ namespace SistemaGestion
             tabs.TabPages.Add(TabResumen());
             tabs.TabPages.Add(TabClientes());
             tabs.TabPages.Add(TabVentas());
+            tabs.TabPages.Add(TabAnalisisVentas());
             tabs.TabPages.Add(TabPrecios());
             tabs.TabPages.Add(TabVentasCliente());
             tabs.TabPages.Add(TabAbonos());
