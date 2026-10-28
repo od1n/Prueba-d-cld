@@ -2708,16 +2708,65 @@ namespace SistemaGestion
             return list;
         }
 
-        public static void InsertarCliente(Cliente cl)
+        /// <summary>
+        /// Busca un cliente con la misma cédula/RIF (misma clave: sin importar
+        /// la V, los puntos, guiones ni el dígito verificador). Devuelve null si
+        /// no hay, o si el documento viene vacío.
+        /// </summary>
+        public static (string Codigo, string Nombre, string CiRif)? BuscarClientePorDocumento(
+            string ciRif, string excluirCodigo = null)
+        {
+            string clave = ClienteDocumento.Clave(ciRif);
+            if (clave == "") return null;
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = "SELECT Codigo, COALESCE(Descripcion,''), COALESCE(CiRif,'') FROM Clientes WHERE COALESCE(CiRif,'') <> ''";
+            using var r = cmd.ExecuteReader();
+            while (r.Read())
+            {
+                string cod = r.GetString(0);
+                if (excluirCodigo != null && string.Equals(cod, excluirCodigo, StringComparison.OrdinalIgnoreCase)) continue;
+                if (ClienteDocumento.Clave(r.GetString(2)) == clave)
+                    return (cod, r.GetString(1), r.GetString(2));
+            }
+            return null;
+        }
+
+        public static bool ExisteCodigoCliente(string codigo)
         {
             using var c = Conn();
             var cmd = c.CreateCommand();
-            cmd.CommandText = "INSERT OR REPLACE INTO Clientes VALUES ($co,$de,$di,$ci,$es,$cr,$ni,$fa,$t1,$t2,$cred,$ti,$fe,$ob,$dc,$af)";
+            cmd.CommandText = "SELECT COUNT(*) FROM Clientes WHERE Codigo=$c";
+            cmd.Parameters.AddWithValue("$c", codigo ?? "");
+            return Convert.ToInt64(cmd.ExecuteScalar() ?? 0L) > 0;
+        }
+
+        public static void InsertarCliente(Cliente cl)
+        {
+            cl.CiRif = ClienteDocumento.Normalizar(cl.CiRif);
+            if (ExisteCodigoCliente(cl.Codigo))
+                throw new ClienteDuplicadoException(cl.Codigo, "", "",
+                    $"Ya existe un cliente con el código '{cl.Codigo}'.");
+            var dup = BuscarClientePorDocumento(cl.CiRif);
+            if (dup != null)
+                throw new ClienteDuplicadoException(dup.Value.Codigo, dup.Value.Nombre, dup.Value.CiRif);
+            using var c = Conn();
+            var cmd = c.CreateCommand();
+            // Columnas explícitas: la tabla tiene columnas agregadas después
+            // (AceptaFacturaLegal, PinBot, Email, Contacto) que no se deben pisar.
+            cmd.CommandText = @"INSERT INTO Clientes
+                (Codigo,Descripcion,Direccion,Ciudad,Estado,CiRif,Nit,Fax,Telefono,Telefono2,
+                 Credito,TipoCliente,Fecha,Observaciones,Descuento,AFavor)
+                VALUES ($co,$de,$di,$ci,$es,$cr,$ni,$fa,$t1,$t2,$cred,$ti,$fe,$ob,$dc,$af)";
             BindCliente(cmd, cl); cmd.ExecuteNonQuery();
         }
 
         public static void ActualizarCliente(Cliente cl)
         {
+            cl.CiRif = ClienteDocumento.Normalizar(cl.CiRif);
+            var dup = BuscarClientePorDocumento(cl.CiRif, cl.Codigo);
+            if (dup != null)
+                throw new ClienteDuplicadoException(dup.Value.Codigo, dup.Value.Nombre, dup.Value.CiRif);
             using var c = Conn();
             var cmd = c.CreateCommand();
             cmd.CommandText = @"UPDATE Clientes SET Descripcion=$de,Direccion=$di,Ciudad=$ci,
@@ -6616,6 +6665,17 @@ namespace SistemaGestion
     }
 
     // ── Clases remanentes para compatibilidad ────────────────────────────────
+    /// <summary>Ya existe un cliente con ese código o con esa cédula/RIF.</summary>
+    public class ClienteDuplicadoException : Exception
+    {
+        public string CodigoExistente { get; }
+        public string NombreExistente { get; }
+        public string CiRifExistente  { get; }
+        public ClienteDuplicadoException(string codigo, string nombre, string ciRif, string mensaje = null)
+            : base(mensaje ?? $"Ya existe el cliente {nombre} (código {codigo}) con la cédula/RIF {ciRif}.")
+        { CodigoExistente = codigo; NombreExistente = nombre; CiRifExistente = ciRif; }
+    }
+
     public class Gasto
     {
         public int      Id          { get; set; }

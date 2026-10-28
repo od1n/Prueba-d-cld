@@ -129,7 +129,9 @@ async function apiPost(url, body, method = 'POST') {
     if (!res) return null;
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || `Error ${res.status}`);
+        const e = new Error(err.error || `Error ${res.status}`);
+        e.status = res.status; e.data = err;   // datos extra (p. ej. cliente ya existente)
+        throw e;
     }
     try { return await res.json(); } catch { return {}; }
 }

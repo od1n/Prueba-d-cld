@@ -4,6 +4,26 @@ namespace SistemaGestion.Api.Endpoints
 {
     public static class ClientesEndpoints
     {
+        /// <summary>Cliente con la misma cédula/RIF (misma clave), excepto el código indicado.</summary>
+        internal static (string Codigo, string Nombre, string CiRif)? BuscarPorDocumento(
+            Microsoft.Data.Sqlite.SqliteConnection c, string ciRif, string? excluirCodigo,
+            Microsoft.Data.Sqlite.SqliteTransaction? tx = null)
+        {
+            string clave = SistemaGestion.ClienteDocumento.Clave(ciRif);
+            if (clave == "") return null;
+            var cmd = c.CreateCommand(); cmd.Transaction = tx;
+            cmd.CommandText = "SELECT Codigo, COALESCE(Descripcion,''), COALESCE(CiRif,'') FROM Clientes WHERE COALESCE(CiRif,'') <> ''";
+            using var r = cmd.ExecuteReader();
+            while (r.Read())
+            {
+                string cod = r.GetString(0);
+                if (excluirCodigo != null && string.Equals(cod, excluirCodigo.Trim(), StringComparison.OrdinalIgnoreCase)) continue;
+                if (SistemaGestion.ClienteDocumento.Clave(r.GetString(2)) == clave)
+                    return (cod, r.GetString(1), r.GetString(2));
+            }
+            return null;
+        }
+
         public static void MapClientesEndpoints(this WebApplication app)
         {
             app.MapGet("/api/clientes", (HttpContext ctx, string? q) =>
@@ -91,12 +111,20 @@ namespace SistemaGestion.Api.Endpoints
                 if ((long)(chk.ExecuteScalar() ?? 0L) > 0)
                     return Results.Conflict(new { error = $"Ya existe un cliente con código '{req.Codigo.Trim()}'." });
 
+                // La cédula/RIF no se puede repetir (sin importar V, puntos, guiones ni dígito verificador)
+                string rifNorm = SistemaGestion.ClienteDocumento.Normalizar(req.CiRif);
+                var dup = BuscarPorDocumento(c, rifNorm, null);
+                if (dup != null)
+                    return Results.Conflict(new {
+                        error = $"Ya existe el cliente {dup.Value.Nombre} (código {dup.Value.Codigo}) con la cédula/RIF {dup.Value.CiRif}.",
+                        codigoExistente = dup.Value.Codigo, nombreExistente = dup.Value.Nombre });
+
                 var cmd = c.CreateCommand();
                 cmd.CommandText = @"INSERT INTO Clientes (Codigo,Descripcion,CiRif,Telefono,Ciudad,Direccion,Email,Contacto)
                     VALUES($cod,$desc,$rif,$tel,$ciu,$dir,$email,$cont)";
                 cmd.Parameters.AddWithValue("$cod",   req.Codigo.Trim());
                 cmd.Parameters.AddWithValue("$desc",  req.Descripcion.Trim());
-                cmd.Parameters.AddWithValue("$rif",   req.CiRif?.Trim() ?? "");
+                cmd.Parameters.AddWithValue("$rif",   rifNorm);
                 cmd.Parameters.AddWithValue("$tel",   req.Telefono?.Trim() ?? "");
                 cmd.Parameters.AddWithValue("$ciu",   req.Ciudad?.Trim() ?? "");
                 cmd.Parameters.AddWithValue("$dir",   req.Direccion?.Trim() ?? "");
@@ -121,13 +149,20 @@ namespace SistemaGestion.Api.Endpoints
                 if ((long)(chk.ExecuteScalar() ?? 0L) == 0)
                     return Results.NotFound(new { error = "Cliente no encontrado." });
 
+                string rifNorm = SistemaGestion.ClienteDocumento.Normalizar(req.CiRif);
+                var dup = BuscarPorDocumento(c, rifNorm, codigo);
+                if (dup != null)
+                    return Results.Conflict(new {
+                        error = $"Ya existe el cliente {dup.Value.Nombre} (código {dup.Value.Codigo}) con la cédula/RIF {dup.Value.CiRif}.",
+                        codigoExistente = dup.Value.Codigo, nombreExistente = dup.Value.Nombre });
+
                 var cmd = c.CreateCommand();
                 cmd.CommandText = @"UPDATE Clientes SET Descripcion=$desc, CiRif=$rif, Telefono=$tel,
                     Ciudad=$ciu, Direccion=$dir, Email=$email, Contacto=$cont
                     WHERE Codigo=$cod";
                 cmd.Parameters.AddWithValue("$cod",   codigo);
                 cmd.Parameters.AddWithValue("$desc",  req.Descripcion.Trim());
-                cmd.Parameters.AddWithValue("$rif",   req.CiRif?.Trim() ?? "");
+                cmd.Parameters.AddWithValue("$rif",   rifNorm);
                 cmd.Parameters.AddWithValue("$tel",   req.Telefono?.Trim() ?? "");
                 cmd.Parameters.AddWithValue("$ciu",   req.Ciudad?.Trim() ?? "");
                 cmd.Parameters.AddWithValue("$dir",   req.Direccion?.Trim() ?? "");
@@ -176,6 +211,14 @@ namespace SistemaGestion.Api.Endpoints
                             detallesErrores.Add($"Fila sin código o nombre: '{cl.Codigo}'");
                             continue;
                         }
+                        string rifCsv = SistemaGestion.ClienteDocumento.Normalizar(cl.CiRif);
+                        var dupCsv = BuscarPorDocumento(c, rifCsv, cl.Codigo.Trim(), tx);
+                        if (dupCsv != null)
+                        {
+                            errores++;
+                            detallesErrores.Add($"'{cl.Codigo}' no se importó: la cédula/RIF {rifCsv} ya es del cliente {dupCsv.Value.Nombre} (código {dupCsv.Value.Codigo})");
+                            continue;
+                        }
                         try
                         {
                             var cmd = c.CreateCommand(); cmd.Transaction = tx;
@@ -184,7 +227,7 @@ namespace SistemaGestion.Api.Endpoints
                                 VALUES($cod,$desc,$rif,$tel,$ciu,$dir,$email,$cont)";
                             cmd.Parameters.AddWithValue("$cod",   cl.Codigo.Trim());
                             cmd.Parameters.AddWithValue("$desc",  cl.Descripcion.Trim());
-                            cmd.Parameters.AddWithValue("$rif",   cl.CiRif?.Trim() ?? "");
+                            cmd.Parameters.AddWithValue("$rif",   rifCsv);
                             cmd.Parameters.AddWithValue("$tel",   cl.Telefono?.Trim() ?? "");
                             cmd.Parameters.AddWithValue("$ciu",   cl.Ciudad?.Trim() ?? "");
                             cmd.Parameters.AddWithValue("$dir",   cl.Direccion?.Trim() ?? "");

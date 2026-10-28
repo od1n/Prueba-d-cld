@@ -925,6 +925,15 @@ async function guardarClienteRapido() {
         document.getElementById('fCliCod').value = resp.codigo || cod;
     } catch(err) {
         if (btn) { btn.disabled = false; btn.textContent = 'Guardar'; }
+        // Si la cédula/RIF ya pertenece a otro cliente, ofrecer usar ese cliente
+        if (err.status === 409 && err.data && err.data.codigoExistente) {
+            if (confirm(err.message + '\n\n¿Usar ese cliente en la factura?')) {
+                document.getElementById('modalCrearCli')?.remove();
+                document.getElementById('fCliInput').value = err.data.nombreExistente || '';
+                document.getElementById('fCliCod').value = err.data.codigoExistente;
+            }
+            return;
+        }
         alert('Error: ' + err.message);
     }
 }

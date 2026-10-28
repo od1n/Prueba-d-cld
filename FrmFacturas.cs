@@ -1682,6 +1682,16 @@ CargarDatos();
                     dlg.Tag = cod;
                     dlg.DialogResult = DialogResult.OK;
                 }
+                catch (ClienteDuplicadoException dup) when (!string.IsNullOrEmpty(dup.NombreExistente))
+                {
+                    var r = MessageBox.Show(dup.Message + "\n\n¿Usar ese cliente en la factura?",
+                        "Cliente ya registrado", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                    if (r == DialogResult.Yes)
+                    {
+                        dlg.Tag = dup.CodigoExistente;
+                        dlg.DialogResult = DialogResult.OK;
+                    }
+                }
                 catch (Exception ex)
                 {
                     MessageBox.Show("Error al guardar: " + ex.Message, "Error",

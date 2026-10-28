@@ -106,7 +106,13 @@ namespace SistemaGestion
             using var d = new DlgCliente(null, codigoSugerido);
             if (d.ShowDialog() == DialogResult.OK)
             {
-                DatabaseService.InsertarCliente(d.Resultado);
+                try { DatabaseService.InsertarCliente(d.Resultado); }
+                catch (ClienteDuplicadoException ex)
+                {
+                    MessageBox.Show(ex.Message + "\n\nNo se creó el cliente nuevo. Usa el que ya existe.",
+                        "Cliente repetido", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
                 CargarDatos();
             }
         }
@@ -118,7 +124,13 @@ namespace SistemaGestion
             using var d = new DlgCliente(cl, null);
             if (d.ShowDialog() == DialogResult.OK)
             {
-                DatabaseService.ActualizarCliente(d.Resultado);
+                try { DatabaseService.ActualizarCliente(d.Resultado); }
+                catch (ClienteDuplicadoException ex)
+                {
+                    MessageBox.Show(ex.Message + "\n\nNo se guardaron los cambios: la cédula/RIF no se puede repetir.",
+                        "Cliente repetido", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
                 CargarDatos();
             }
         }

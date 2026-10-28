@@ -27,6 +27,11 @@
     <PackageReference Include="SixLabors.ImageSharp" Version="3.1.12" />
   </ItemGroup>
 
+  <!-- Regla común de cédula/RIF de clientes (mismo archivo que la app de escritorio). -->
+  <ItemGroup>
+    <Compile Include="..\ClienteDocumento.cs" Link="Compartido\ClienteDocumento.cs" />
+  </ItemGroup>
+
   <!-- Avisos de ImageSharp revisados y mitigados (ver comentario arriba).
        Al pasar a ImageSharp 4.1.2 o superior, borrar este bloque. -->
   <ItemGroup>
