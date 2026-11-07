@@ -213,6 +213,7 @@ function renderNav(activa) {
         { id: 'produccion', icon: '🏭', label: 'Producción', href: '/pages/digitalizador.html' },
         { id: 'camaras',    icon: '📷', label: 'Cámaras',    href: '/pages/camaras.html' },
         { id: 'abonos',     icon: '💳', label: 'Abonos',     href: '/pages/abonos.html' },
+        { id: 'cxp',        icon: '🧾', label: 'Por pagar',  href: '/pages/cxp.html' },
         { id: 'contenido',  icon: '📣', label: 'Redes',      href: '/pages/contenido.html' },
         { id: 'insights',   icon: '📈', label: 'Insights',   href: '/pages/insights.html' },
     ];

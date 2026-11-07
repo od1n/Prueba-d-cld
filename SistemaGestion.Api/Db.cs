@@ -67,7 +67,9 @@ namespace SistemaGestion.Api
                     "ALTER TABLE ProductosProveedor ADD COLUMN CostoPromedio REAL DEFAULT 0",
                     "ALTER TABLE MovimientosInventario ADD COLUMN TipoKardex TEXT DEFAULT 'PRODUCTO'",
                     "ALTER TABLE MovimientosInventario ADD COLUMN CostoUnitario REAL DEFAULT 0",
-                    "ALTER TABLE CuentasPagar ADD COLUMN IdEgreso INTEGER"
+                    "ALTER TABLE CuentasPagar ADD COLUMN IdEgreso INTEGER",
+                    // Pagos de Cuentas por Pagar registrados desde el portal: foto del comprobante
+                    "ALTER TABLE PagosCxP ADD COLUMN RutaComprobante TEXT DEFAULT ''"
                 };
                 foreach (var sql in fixes)
                 {

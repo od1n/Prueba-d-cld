@@ -406,6 +406,7 @@ app.MapNominaEndpoints();
 app.MapConfigEndpoints();
 app.MapCamarasEndpoints();
 app.MapAbonosEndpoints();
+app.MapCuentasPagarEndpoints();
 app.MapWhatsAppEndpoints();
 app.MapContenidoEndpoints();
 app.MapInsightsEndpoints();

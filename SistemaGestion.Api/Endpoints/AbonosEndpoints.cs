@@ -119,7 +119,7 @@ namespace SistemaGestion.Api.Endpoints
                         "abono_" + DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ext);
                     using var fs = new FileStream(destino, FileMode.Create);
                     await archivo.CopyToAsync(fs);
-                    rutaComprobante = destino;
+                    rutaComprobante = Path.GetFullPath(destino);
                 }
 
                 using var c = Db.Conn();
@@ -130,7 +130,7 @@ namespace SistemaGestion.Api.Endpoints
                          NombreRemitente, RutaComprobante, Observaciones,
                          IdCuentaReceptora, Estado)
                     VALUES
-                        ('', $fe, $mo, $cl, $mp, $ref,
+                        (NULL, $fe, $mo, $cl, $mp, $ref,   -- NULL: abono sin factura (con '' falla la clave foránea a Facturas)
                          $nr, $rc, $obs, $icr, $est)";
                 cmd.Parameters.AddWithValue("$fe",  fecha);
                 cmd.Parameters.AddWithValue("$mo",  (double)monto);

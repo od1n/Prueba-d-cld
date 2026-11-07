@@ -6,6 +6,13 @@ let abonosList = [];
 let clientesList = [];
 let cuentasList = [];
 
+// Fecha local en formato yyyy-MM-dd (toISOString usa UTC y después de las 8 p. m.
+// en Venezuela devolvía el día siguiente).
+function fechaLocalISO(d = new Date()) {
+    const x = new Date(d); x.setMinutes(x.getMinutes() - x.getTimezoneOffset());
+    return x.toISOString().split('T')[0];
+}
+
 async function render() {
     app.innerHTML = `
     ${renderTopbar('Abonos')}
@@ -38,8 +45,8 @@ async function render() {
     ${renderNav('abonos')}`;
 
     const hoy = new Date();
-    document.getElementById('filtHasta').value = hoy.toISOString().split('T')[0];
-    document.getElementById('filtDesde').value = new Date(hoy.getFullYear(), 0, 1).toISOString().split('T')[0];
+    document.getElementById('filtHasta').value = fechaLocalISO(hoy);
+    document.getElementById('filtDesde').value = fechaLocalISO(new Date(hoy.getFullYear(), 0, 1));
 
     await Promise.all([cargarClientes(), cargarCuentas()]);
     await cargarAbonos();
@@ -174,7 +181,7 @@ function abrirNuevoAbono() {
           </select>
         </div>
         <div class="field-group"><label>Fecha</label>
-          <input type="date" id="aboFecha" class="input-field" value="${new Date().toISOString().split('T')[0]}">
+          <input type="date" id="aboFecha" class="input-field" value="${fechaLocalISO()}">
         </div>
         <div class="field-group"><label>Monto ($) *</label>
           <input type="number" id="aboMonto" class="input-field" step="0.01" min="0.01" placeholder="0.00">
