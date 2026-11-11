@@ -5,8 +5,7 @@ using System.IO.Compression;
 using System.Linq;
 using System.Net.Http;
 using System.Threading.Tasks;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.Processing;
+using SkiaSharp;
 
 // ══════════════════════════════════════════════════════════════════════════
 //  ContenidoEndpoints — Estudio de Contenido (redes sociales)
@@ -3042,32 +3041,38 @@ namespace SistemaGestion.Api.Endpoints
             return list;
         }
 
-        // Decodificadores permitidos: SOLO PNG, JPEG y WebP, sin leer metadatos.
-        // Mitiga los avisos de ImageSharp 3.1.x (GHSA-wmxv-xphr-5c9g: BigTIFF;
-        // GHSA-gwg2-r3hj-4w44: perfiles ICC embebidos). Un TIFF renombrado a .jpg
-        // se rechaza en vez de decodificarse, y el perfil ICC nunca se lee.
-        private static readonly SixLabors.ImageSharp.Formats.DecoderOptions _opcionesDecodificacion = new()
-        {
-            Configuration = new Configuration(
-                new SixLabors.ImageSharp.Formats.Png.PngConfigurationModule(),
-                new SixLabors.ImageSharp.Formats.Jpeg.JpegConfigurationModule(),
-                new SixLabors.ImageSharp.Formats.Webp.WebpConfigurationModule()),
-            SkipMetadata = true
-        };
-
-        /// <summary>Redimensiona una imagen a un lado maximo y la re-codifica como JPEG.</summary>
+        /// <summary>
+        /// Redimensiona una imagen a un lado máximo y la re-codifica como JPEG (SkiaSharp, licencia MIT).
+        /// Solo acepta PNG, JPEG y WebP: cualquier otro formato (TIFF, BMP, GIF, etc.) se rechaza
+        /// aunque tenga la extensión cambiada. Las zonas transparentes quedan en blanco.
+        /// </summary>
         private static byte[] RedimensionarJpeg(byte[] datos, int maxLado, int calidad)
         {
-            using var image = Image.Load(_opcionesDecodificacion, datos);
-            int mayor = Math.Max(image.Width, image.Height);
+            using var codec = SKCodec.Create(new MemoryStream(datos))
+                ?? throw new InvalidOperationException("No se reconoce el formato de la imagen.");
+            if (codec.EncodedFormat is not (SKEncodedImageFormat.Png or SKEncodedImageFormat.Jpeg or SKEncodedImageFormat.Webp))
+                throw new InvalidOperationException($"Formato de imagen no permitido: {codec.EncodedFormat}. Usa PNG, JPEG o WebP.");
+            using var original = SKBitmap.Decode(codec)
+                ?? throw new InvalidOperationException("No se pudo leer la imagen.");
+
+            int ancho = original.Width, alto = original.Height;
+            int mayor = Math.Max(ancho, alto);
             if (mayor > maxLado)
             {
                 double r = (double)maxLado / mayor;
-                image.Mutate(x => x.Resize((int)Math.Round(image.Width * r), (int)Math.Round(image.Height * r)));
+                ancho = Math.Max(1, (int)Math.Round(ancho * r));
+                alto  = Math.Max(1, (int)Math.Round(alto * r));
             }
-            using var ms = new MemoryStream();
-            image.Save(ms, new SixLabors.ImageSharp.Formats.Jpeg.JpegEncoder { Quality = calidad });
-            return ms.ToArray();
+            using var lienzo = new SKBitmap(new SKImageInfo(ancho, alto, SKColorType.Rgba8888, SKAlphaType.Opaque));
+            using (var canvas = new SKCanvas(lienzo))
+            using (var img = SKImage.FromBitmap(original))
+            {
+                canvas.Clear(SKColors.White);
+                canvas.DrawImage(img, new SKRect(0, 0, ancho, alto), new SKSamplingOptions(SKCubicResampler.Mitchell));
+            }
+            using var final = SKImage.FromBitmap(lienzo);
+            using var jpg = final.Encode(SKEncodedImageFormat.Jpeg, calidad);
+            return jpg.ToArray();
         }
 
         private static string AsegurarPublicToken(SqliteConnection c, int postId)

@@ -15,31 +15,22 @@
     <!-- DPAPI (ProtectedData) — sólo funciona en Windows pero el ensamblado
          debe estar referenciado para compilar en net8.0 puro. -->
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
-    <!-- Redimensionado de imágenes de referencia (pura .NET, soporta webp). -->
-    <!-- ImageSharp fijado en 3.1.12 (ultima 3.x). Los avisos de seguridad se
-         corrigen recien en 4.1.2, pero la 4.x exige una clave de licencia de
-         Six Labors para compilar. Uso real: solo RedimensionarJpeg en
-         ContenidoEndpoints (PNG/JPEG/WebP -> JPEG). Analisis de exposicion:
-         - GHSA-j3p4-wp97-rph4 (HistogramEqualization): no se usa.
-         - GHSA-j9gm-c75j-xc9q / GHSA-jjfr-hcj7-qf5w (codificador TIFF CCITT): no se codifica TIFF.
-         - GHSA-wmxv-xphr-5c9g (BigTIFF) y GHSA-gwg2-r3hj-4w44 (perfil ICC):
-           mitigados con DecoderOptions (solo PNG/JPEG/WebP, SkipMetadata). -->
-    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.12" />
+    <!-- Redimensionado de imágenes de referencia (PNG/JPEG/WebP -> JPEG) en
+         ContenidoEndpoints.RedimensionarJpeg. SkiaSharp (licencia MIT) reemplaza a
+         SixLabors.ImageSharp: la 3.x tiene avisos de seguridad sin corrección y la
+         4.x no compila en Release sin una clave de licencia de Six Labors. -->
+    <PackageReference Include="SkiaSharp" Version="3.119.4" />
+  </ItemGroup>
+
+  <!-- Biblioteca nativa de SkiaSharp para Linux: solo para compilar y probar fuera
+       de Windows. En Windows (OLIMPO, SERVO) no se usa. -->
+  <ItemGroup Condition="'$(OS)' != 'Windows_NT'">
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="3.119.4" />
   </ItemGroup>
 
   <!-- Regla común de cédula/RIF de clientes (mismo archivo que la app de escritorio). -->
   <ItemGroup>
     <Compile Include="..\ClienteDocumento.cs" Link="Compartido\ClienteDocumento.cs" />
-  </ItemGroup>
-
-  <!-- Avisos de ImageSharp revisados y mitigados (ver comentario arriba).
-       Al pasar a ImageSharp 4.1.2 o superior, borrar este bloque. -->
-  <ItemGroup>
-    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-gwg2-r3hj-4w44" />
-    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-j3p4-wp97-rph4" />
-    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-j9gm-c75j-xc9q" />
-    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-jjfr-hcj7-qf5w" />
-    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-wmxv-xphr-5c9g" />
   </ItemGroup>
 
 </Project>
