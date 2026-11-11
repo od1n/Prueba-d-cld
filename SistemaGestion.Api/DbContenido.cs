@@ -236,6 +236,12 @@ namespace SistemaGestion.Api
             }
             AddCol("Posts", "ModoGen", "TEXT");
             AddCol("Posts", "PublicToken", "TEXT");
+            // Mercado objetivo (ciudad/país), idioma de publicación, hashtags elegidos para
+            // Instagram (máximo 5) y ubicación sugerida para la etiqueta de lugar.
+            AddCol("Posts", "MercadoObjetivo", "TEXT");
+            AddCol("Posts", "IdiomaPublicacion", "TEXT");
+            AddCol("Posts", "HashtagsIG", "TEXT");
+            AddCol("Posts", "UbicacionSugerida", "TEXT");
         }
 
         /// <summary>Siembra las 2 marcas base solo si la tabla está vacía.</summary>

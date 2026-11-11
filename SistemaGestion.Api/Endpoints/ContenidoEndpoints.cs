@@ -273,7 +273,8 @@ namespace SistemaGestion.Api.Endpoints
                                p.CaptionEs, p.CaptionEn, p.Hashtags, p.PromptImagen, p.ModeloUsado,
                                p.PlataformasDestino, p.PrimerComentarioHashtags, p.Estado,
                                p.FechaProgramada, p.CreadoPor, p.AprobadoPor, p.FechaAprobacion,
-                               p.FechaCreacion
+                               p.FechaCreacion, COALESCE(p.MercadoObjetivo,''), COALESCE(p.IdiomaPublicacion,''),
+                               COALESCE(p.HashtagsIG,''), COALESCE(p.UbicacionSugerida,''), COALESCE(p.MensajeError,'')
                         FROM Posts p LEFT JOIN Marcas m ON m.Id = p.MarcaId
                         WHERE p.Id = $id";
                     cmd.Parameters.AddWithValue("$id", id);
@@ -349,9 +350,19 @@ namespace SistemaGestion.Api.Endpoints
                         PlataformasDestino = COALESCE($pl, PlataformasDestino),
                         PrimerComentarioHashtags = COALESCE($pc, PrimerComentarioHashtags),
                         FechaProgramada = COALESCE($fp, FechaProgramada),
+                        MercadoObjetivo = COALESCE($mo, MercadoObjetivo),
+                        IdiomaPublicacion = COALESCE($ip, IdiomaPublicacion),
+                        HashtagsIG = COALESCE($hig, HashtagsIG),
+                        UbicacionSugerida = COALESCE($ub, UbicacionSugerida),
                         FechaActualizacion = datetime('now','localtime')
                     WHERE Id = $id";
                 cmd.Parameters.AddWithValue("$id", id);
+                Bind(cmd, "$mo", req.MercadoObjetivo?.Trim());
+                Bind(cmd, "$ip", req.IdiomaPublicacion is null ? null
+                    : (req.IdiomaPublicacion.Trim().ToLowerInvariant() == "en" ? "en" : "es"));
+                Bind(cmd, "$hig", req.HashtagsIG is null ? null
+                    : HashtagsRedes.Unir(HashtagsRedes.Extraer(req.HashtagsIG, true)));
+                Bind(cmd, "$ub", req.UbicacionSugerida?.Trim());
                 Bind(cmd, "$t", req.Titulo);
                 Bind(cmd, "$f", req.Formato);
                 Bind(cmd, "$ces", req.CaptionEs);
@@ -506,7 +517,16 @@ namespace SistemaGestion.Api.Endpoints
                     if (!string.IsNullOrWhiteSpace(titulo)) { sb.AppendLine(titulo); sb.AppendLine(); }
                     sb.AppendLine("== Caption (ES) =="); sb.AppendLine(capEs);
                     if (!string.IsNullOrWhiteSpace(capEn)) { sb.AppendLine(); sb.AppendLine("== Caption (EN) =="); sb.AppendLine(capEn); }
-                    sb.AppendLine(); sb.AppendLine("== Hashtags =="); sb.AppendLine(hashtags);
+                    sb.AppendLine(); sb.AppendLine("== Hashtags (todos) =="); sb.AppendLine(hashtags);
+                    // Textos listos para pegar en cada red (Instagram: máximo 5 hashtags).
+                    foreach (var (pl, nombreRed) in new[] { ("instagram", "INSTAGRAM"), ("facebook", "FACEBOOK") })
+                    {
+                        var tf = TextoFinal(c, id, pl);
+                        sb.AppendLine(); sb.AppendLine($"== Texto listo para {nombreRed} ==");
+                        sb.AppendLine(tf.Error ?? tf.Res.Caption);
+                        if (pl == "instagram" && !string.IsNullOrWhiteSpace(tf.Ubicacion))
+                        { sb.AppendLine(); sb.AppendLine("Ubicación para Instagram (botón «Agregar ubicación»): " + tf.Ubicacion); }
+                    }
                     var entry = zip.CreateEntry("caption.txt");
                     using (var w = new StreamWriter(entry.Open(), new System.Text.UTF8Encoding(false))) w.Write(sb.ToString());
                     int nImg = 0, nVid = 0;
@@ -640,15 +660,14 @@ namespace SistemaGestion.Api.Endpoints
             {
                 if (!TokenService.EsRedes(ctx.User)) return Results.Forbid();
                 using var c = Db.Conn();
-                int marcaId; string estado, capEs, hashtags;
+                int marcaId; string estado;
                 using (var cmd = c.CreateCommand())
                 {
-                    cmd.CommandText = @"SELECT MarcaId, Estado, COALESCE(CaptionEs,''), COALESCE(Hashtags,'')
-                                        FROM Posts WHERE Id=$id";
+                    cmd.CommandText = @"SELECT MarcaId, Estado FROM Posts WHERE Id=$id";
                     cmd.Parameters.AddWithValue("$id", id);
                     using var r = cmd.ExecuteReader();
                     if (!r.Read()) return Results.NotFound(new { error = "Post no encontrado." });
-                    marcaId = Db.I(r, 0); estado = Db.S(r, 1); capEs = Db.S(r, 2); hashtags = Db.S(r, 3);
+                    marcaId = Db.I(r, 0); estado = Db.S(r, 1);
                 }
                 if (estado is not ("aprobado" or "programado" or "publicado"))
                     return Results.BadRequest(new { error = $"Solo se publica un post aprobado (actual: {estado})." });
@@ -674,7 +693,6 @@ namespace SistemaGestion.Api.Endpoints
                 // Para reel se usa un solo video; las imágenes del carrusel se ignoran en modo reel.
                 var urlsImg = urls.Where((_, i) => tipos[i] != "video").ToList();
                 var videoUrl = esVideo ? urls[idxVideo] : "";
-                var caption = string.IsNullOrWhiteSpace(hashtags) ? capEs : (capEs + "\n\n" + hashtags);
 
                 var plataformas = (req.Plataformas != null && req.Plataformas.Length > 0)
                     ? req.Plataformas : new[] { "instagram" };
@@ -683,6 +701,10 @@ namespace SistemaGestion.Api.Endpoints
                 foreach (var plRaw in plataformas)
                 {
                     var pl = plRaw.Trim().ToLowerInvariant();
+                    // Texto propio de cada red: Instagram con 5 hashtags como máximo.
+                    var tf = TextoFinal(c, id, pl);
+                    if (tf.Error != null) { resultados.Add(new { plataforma = pl, ok = false, error = tf.Error }); continue; }
+                    var caption = tf.Res.Caption;
                     var (igId, pageId, tkAcc) = LeerCuenta(c, marcaId, pl);
                     if (string.IsNullOrWhiteSpace(tkAcc))
                     { resultados.Add(new { plataforma = pl, ok = false, error = "Falta configurar la cuenta y el token en Cuentas." }); continue; }
@@ -698,7 +720,8 @@ namespace SistemaGestion.Api.Endpoints
                                 ? await PublicarFacebook(pageId, tkAcc, urlsImg, caption)
                                 : await PublicarInstagram(igId, tkAcc, urlsImg, caption);
                         RegistrarPublicacion(c, id, pl, res.extId, res.permalink);
-                        resultados.Add(new { plataforma = pl, ok = true, permalink = res.permalink, tipo = esVideo ? "reel" : "imagen" });
+                        resultados.Add(new { plataforma = pl, ok = true, permalink = res.permalink, tipo = esVideo ? "reel" : "imagen",
+                                             hashtags = tf.Res.Hashtags, ubicacion = tf.Ubicacion });
                         algunaOk = true;
                     }
                     catch (Exception ex)
@@ -712,6 +735,35 @@ namespace SistemaGestion.Api.Endpoints
                     upd.ExecuteNonQuery();
                 }
                 return Results.Ok(new { ok = algunaOk, resultados });
+            }).RequireAuthorization();
+
+            // Texto EXACTO que se publicará en una red (el mismo que usa «Publicar ahora»).
+            // Sirve para revisar y copiar: Instagram sale con 5 hashtags como máximo.
+            app.MapGet("/api/contenido/posts/{id:int}/texto-final", (int id, string? plataforma) =>
+            {
+                using var c = Db.Conn();
+                var pl = string.IsNullOrWhiteSpace(plataforma) ? "instagram" : plataforma.Trim().ToLowerInvariant();
+                if (pl is not ("instagram" or "facebook"))
+                    return Results.BadRequest(new { error = "Plataforma inválida (instagram o facebook)." });
+                var tf = TextoFinal(c, id, pl);
+                if (tf.NoExiste) return Results.NotFound(new { error = "Post no encontrado." });
+                return Results.Ok(new
+                {
+                    plataforma = pl, ok = tf.Error == null, error = tf.Error,
+                    caption = tf.Error == null ? tf.Res.Caption : "",
+                    hashtags = tf.Res.Hashtags, cantidad = tf.Res.Hashtags.Count,
+                    maximo = pl == "instagram" ? HashtagsRedes.MaxInstagram : (int?)null,
+                    avisos = tf.Res.Avisos, idioma = tf.Idioma, ubicacion = tf.Ubicacion
+                });
+            }).RequireAuthorization();
+
+            // Adapta el post al mercado objetivo con IA: idioma, 5 hashtags para Instagram,
+            // hashtags locales para Facebook y ubicación sugerida.
+            app.MapPost("/api/contenido/posts/{id:int}/mercado", async (int id, HttpContext ctx) =>
+            {
+                if (!TokenService.EsRedes(ctx.User)) return Results.Forbid();
+                var (datos, err) = await CompletarMercadoAsync(id);
+                return err != null ? Results.Json(new { error = err }, statusCode: 500) : Results.Ok(datos);
             }).RequireAuthorization();
 
             // ════════════════════════ MÉTRICAS (Insights) ════════════════════════
@@ -1048,14 +1100,14 @@ namespace SistemaGestion.Api.Endpoints
             {
                 if (!TokenService.EsRedes(ctx.User)) return Results.Forbid();
                 using var c = Db.Conn();
-                int marcaId; string titulo;
+                int marcaId; string titulo, mercado;
                 using (var cmd = c.CreateCommand())
                 {
-                    cmd.CommandText = "SELECT MarcaId, COALESCE(Titulo,'') FROM Posts WHERE Id=$id";
+                    cmd.CommandText = "SELECT MarcaId, COALESCE(Titulo,''), COALESCE(MercadoObjetivo,'') FROM Posts WHERE Id=$id";
                     cmd.Parameters.AddWithValue("$id", id);
                     using var r = cmd.ExecuteReader();
                     if (!r.Read()) return Results.NotFound(new { error = "Post no encontrado." });
-                    marcaId = Db.I(r, 0); titulo = Db.S(r, 1);
+                    marcaId = Db.I(r, 0); titulo = Db.S(r, 1); mercado = Db.S(r, 2).Trim();
                 }
                 var idea = (req?.Idea ?? "").Trim();
                 bool analizar = req?.AnalizarVideo ?? false;
@@ -1091,7 +1143,7 @@ namespace SistemaGestion.Api.Endpoints
                 if (string.IsNullOrWhiteSpace(idea) && !videoUsado)
                     return Results.BadRequest(new { error = "Escribe una idea o adjunta un video para analizar." });
 
-                var (capEs, capEn, hashtags, errGen) = await GenerarTextoPostAsync(marcaId, titulo, idea, vidB64, vidMime);
+                var (capEs, capEn, hashtags, errGen) = await GenerarTextoPostAsync(marcaId, titulo, idea, vidB64, vidMime, mercado);
                 if (errGen != null) return Results.Json(new { error = errGen }, statusCode: 500);
 
                 var htStr = hashtags != null && hashtags.Count > 0 ? string.Join(" ", hashtags) : "";
@@ -1109,7 +1161,23 @@ namespace SistemaGestion.Api.Endpoints
                     upd.Parameters.AddWithValue("$id", id);
                     upd.ExecuteNonQuery();
                 }
-                return Results.Ok(new { ok = true, captionEs = capEs, captionEn = capEn, hashtags = htStr, videoAnalizado = videoUsado, aviso = avisoVideo });
+                // Adaptar al mercado: idioma, 5 hashtags para Instagram, locales y ubicación.
+                var (merc, errMerc) = await CompletarMercadoAsync(id);
+                string? hig = null, ubic = null, idiomaPub = null;
+                if (merc != null)
+                {
+                    using var q = c.CreateCommand();
+                    q.CommandText = "SELECT COALESCE(HashtagsIG,''), COALESCE(UbicacionSugerida,''), COALESCE(IdiomaPublicacion,''), COALESCE(Hashtags,''), COALESCE(CaptionEn,'') FROM Posts WHERE Id=$id";
+                    q.Parameters.AddWithValue("$id", id);
+                    using var r = q.ExecuteReader();
+                    if (r.Read()) { hig = Db.S(r, 0); ubic = Db.S(r, 1); idiomaPub = Db.S(r, 2); htStr = Db.S(r, 3); capEn = Db.S(r, 4); }
+                }
+                var avisoTotal = string.Join(" ", new[] { avisoVideo,
+                    errMerc != null ? "No se pudieron elegir los hashtags de Instagram (" + errMerc + "); al publicar se usarán los primeros 5." : null }
+                    .Where(s => !string.IsNullOrWhiteSpace(s)));
+                return Results.Ok(new { ok = true, captionEs = capEs, captionEn = capEn, hashtags = htStr, hashtagsIG = hig,
+                                        ubicacion = ubic, idiomaPublicacion = idiomaPub, videoAnalizado = videoUsado,
+                                        aviso = avisoTotal == "" ? null : avisoTotal });
             }).RequireAuthorization();
 
             // ════════════════════ BANDEJA (mensajes / comentarios) ══════════════
@@ -1555,6 +1623,9 @@ namespace SistemaGestion.Api.Endpoints
                     upd.Parameters.AddWithValue("$id", req.PostId);
                     upd.ExecuteNonQuery();
                 }
+                // Texto nuevo: elegir en segundo plano los 5 hashtags de Instagram según el mercado.
+                if (aplicarTexto && (req.Caption?.Es != null || req.Hashtags != null))
+                    _ = Task.Run(async () => { try { await CompletarMercadoAsync(req.PostId); } catch { } });
                 return Results.Ok(new { ok = true, assets = orden });
             });
 
@@ -1885,7 +1956,9 @@ namespace SistemaGestion.Api.Endpoints
             modeloUsado = Db.S(r, 10), plataformasDestino = Db.S(r, 11),
             primerComentarioHashtags = Db.I(r, 12) == 1, estado = Db.S(r, 13),
             fechaProgramada = Db.S(r, 14), creadoPor = Db.I(r, 15), aprobadoPor = Db.I(r, 16),
-            fechaAprobacion = Db.S(r, 17), fechaCreacion = Db.S(r, 18)
+            fechaAprobacion = Db.S(r, 17), fechaCreacion = Db.S(r, 18),
+            mercadoObjetivo = Db.S(r, 19), idiomaPublicacion = Db.S(r, 20),
+            hashtagsIG = Db.S(r, 21), ubicacionSugerida = Db.S(r, 22), mensajeError = Db.S(r, 23)
         };
 
         private static string? EstadoActual(SqliteConnection c, int id)
@@ -2164,7 +2237,9 @@ namespace SistemaGestion.Api.Endpoints
         }
 
         // ── Video IA con Veo (image-to-video via la API de Gemini) ───────────
-        private const string GeminiBase = "https://generativelanguage.googleapis.com/v1beta/";
+        // SG_GEMINI_BASE solo para pruebas (servidor falso); en producción no se define.
+        private static readonly string GeminiBase =
+            Environment.GetEnvironmentVariable("SG_GEMINI_BASE") is { Length: > 0 } gm ? gm.TrimEnd('/') + "/" : "https://generativelanguage.googleapis.com/v1beta/";
 
         // Lee la imagen base de un post (la elegida o la primera) redimensionada como JPEG base64.
         private static (string? b64, string? mime, string? ruta) LeerImagenBasePost(SqliteConnection c, int postId, int? assetId)
@@ -2330,9 +2405,173 @@ namespace SistemaGestion.Api.Endpoints
             return ideas;
         }
 
+        // ── Texto final por red (Instagram: máximo 5 hashtags) ───────────────
+        private record TextoRed(HashtagsRedes.Resultado Res, string Idioma, string Ubicacion, string? Error, bool NoExiste = false);
+
+        private static TextoRed TextoFinal(SqliteConnection c, int postId, string plataforma)
+        {
+            var vacio = new HashtagsRedes.Resultado("", new List<string>(), new List<string>());
+            string capEs, capEn, ht, htIG, idioma, ubic, mercado, htBase;
+            using (var cmd = c.CreateCommand())
+            {
+                cmd.CommandText = @"SELECT COALESCE(p.CaptionEs,''), COALESCE(p.CaptionEn,''), COALESCE(p.Hashtags,''),
+                                           COALESCE(p.HashtagsIG,''), COALESCE(p.IdiomaPublicacion,''),
+                                           COALESCE(p.UbicacionSugerida,''), COALESCE(p.MercadoObjetivo,''),
+                                           COALESCE(m.HashtagsBase,'')
+                                    FROM Posts p LEFT JOIN Marcas m ON m.Id = p.MarcaId WHERE p.Id=$id";
+                cmd.Parameters.AddWithValue("$id", postId);
+                using var r = cmd.ExecuteReader();
+                if (!r.Read()) return new TextoRed(vacio, "", "", "Post no encontrado.", true);
+                capEs = Db.S(r, 0); capEn = Db.S(r, 1); ht = Db.S(r, 2); htIG = Db.S(r, 3);
+                idioma = Db.S(r, 4) == "en" ? "en" : "es"; ubic = Db.S(r, 5); mercado = Db.S(r, 6); htBase = Db.S(r, 7);
+            }
+            var cuerpo = idioma == "en" ? capEn : capEs;
+            if (string.IsNullOrWhiteSpace(cuerpo))
+                return new TextoRed(vacio, idioma, ubic, idioma == "en"
+                    ? "El post se publica en inglés" + (mercado != "" ? $" (mercado: {mercado})" : "") + " pero el caption en inglés está vacío. Genera el texto o escríbelo."
+                    : "El caption en español está vacío.");
+            var res = plataforma == "facebook"
+                ? HashtagsRedes.ParaFacebook(cuerpo, htIG, ht)
+                : HashtagsRedes.ParaInstagram(cuerpo, htIG, ht, htBase);
+            return new TextoRed(res, idioma, plataforma == "facebook" ? "" : ubic, null);
+        }
+
+        // Llama a Gemini con un prompt de texto y devuelve el JSON de la respuesta.
+        private static async Task<(string? json, string? err)> GeminiJsonAsync(string prompt)
+        {
+            var key = GeminiKey();
+            if (string.IsNullOrEmpty(key)) return (null, "Falta SG_GEMINI_KEY en el servidor.");
+            var body = new { contents = new[] { new { parts = new object[] { new { text = prompt } } } } };
+            using var reqMsg = new HttpRequestMessage(HttpMethod.Post, $"{GeminiBase}models/gemini-flash-latest:generateContent")
+            { Content = new StringContent(System.Text.Json.JsonSerializer.Serialize(body), System.Text.Encoding.UTF8, "application/json") };
+            reqMsg.Headers.Add("x-goog-api-key", key);
+            try
+            {
+                var resp = await _http.SendAsync(reqMsg);
+                var txt = await resp.Content.ReadAsStringAsync();
+                if (!resp.IsSuccessStatusCode)
+                    return (null, $"Gemini {(int)resp.StatusCode}: {(txt.Length > 300 ? txt.Substring(0, 300) : txt)}");
+                using var doc = System.Text.Json.JsonDocument.Parse(txt);
+                var ans = doc.RootElement.GetProperty("candidates")[0].GetProperty("content").GetProperty("parts")[0].GetProperty("text").GetString() ?? "";
+                int a = ans.IndexOf('{'), b = ans.LastIndexOf('}');
+                return a >= 0 && b > a ? (ans.Substring(a, b - a + 1), null) : (null, "La IA no devolvió JSON. Reintenta.");
+            }
+            catch (Exception ex) { return (null, ex.Message); }
+        }
+
+        /// <summary>
+        /// Adapta el post a su mercado objetivo (ciudad/país): idioma de publicación,
+        /// hashtags para Instagram (máximo 5: marca, ciudad/región, cultura ecuestre local,
+        /// oficio), hashtags locales que se suman a la lista general (Facebook) y la
+        /// ubicación sugerida. Sin mercado, elige los 5 mejores para un público general.
+        /// </summary>
+        private static async Task<(object? datos, string? err)> CompletarMercadoAsync(int postId)
+        {
+            string nombre = "", pilares = "", htBase = "", capEs = "", capEn = "", ht = "", mercado = "", titulo = "";
+            using (var c = Db.Conn())
+            using (var cmd = c.CreateCommand())
+            {
+                cmd.CommandText = @"SELECT COALESCE(m.Nombre,''), COALESCE(m.Pilares,''), COALESCE(m.HashtagsBase,''),
+                                           COALESCE(p.CaptionEs,''), COALESCE(p.CaptionEn,''), COALESCE(p.Hashtags,''),
+                                           COALESCE(p.MercadoObjetivo,''), COALESCE(p.Titulo,'')
+                                    FROM Posts p LEFT JOIN Marcas m ON m.Id = p.MarcaId WHERE p.Id=$id";
+                cmd.Parameters.AddWithValue("$id", postId);
+                using var r = cmd.ExecuteReader();
+                if (!r.Read()) return (null, "Post no encontrado.");
+                nombre = Db.S(r, 0); pilares = Db.S(r, 1); htBase = Db.S(r, 2); capEs = Db.S(r, 3);
+                capEn = Db.S(r, 4); ht = Db.S(r, 5); mercado = Db.S(r, 6).Trim(); titulo = Db.S(r, 7);
+            }
+            if (string.IsNullOrWhiteSpace(capEs) && string.IsNullOrWhiteSpace(capEn))
+                return (null, "Primero genera o escribe el texto del post.");
+            bool hayMercado = mercado != "";
+
+            var prompt =
+                "Eres especialista en redes sociales de la marca \"" + nombre + "\"" +
+                (string.IsNullOrWhiteSpace(pilares) ? "" : " (pilares de contenido: " + pilares + ")") + ".\n" +
+                (string.IsNullOrWhiteSpace(titulo) ? "" : "Tema del post: " + titulo + "\n") +
+                "Texto del post (ES): " + capEs + "\n" +
+                (string.IsNullOrWhiteSpace(capEn) ? "" : "Texto del post (EN): " + capEn + "\n") +
+                (string.IsNullOrWhiteSpace(ht) ? "" : "Hashtags propuestos: " + ht + "\n") +
+                (string.IsNullOrWhiteSpace(htBase) ? "" : "Hashtags base de la marca: " + htBase + "\n") +
+                (hayMercado
+                    ? "MERCADO OBJETIVO: \"" + mercado + "\". La publicacion debe llegar a personas de esa ciudad y su region.\n"
+                    : "No hay mercado especifico: publico internacional del mundo ecuestre y la talabarteria.\n") +
+                "Tareas:\n" +
+                "1) idioma: \"es\" si en el mercado se habla espanol; \"en\" en cualquier otro caso" + (hayMercado ? "" : " (sin mercado usa \"es\")") + ".\n" +
+                "2) hashtagsInstagram: entre 3 y " + HashtagsRedes.MaxInstagram + " hashtags (Instagram permite como MAXIMO " + HashtagsRedes.MaxInstagram + "). " +
+                "Orden: primero el hashtag principal de la marca; " +
+                (hayMercado
+                    ? "luego 1 o 2 de la ciudad o la region del mercado (sin acentos ni espacios, por ejemplo #Medellin); luego 1 de la cultura ecuestre propia de esa zona (disciplina, raza de caballo o actividad tipica alli); al final 1 del oficio o producto. "
+                    : "luego los mas relevantes del oficio, el producto y el publico ecuestre. ") +
+                "Escritos en el idioma del mercado. Solo hashtags reales que la gente de ese lugar usa de verdad; nada inventado ni demasiado generico (#love, #instagood).\n" +
+                "3) hashtagsLocales: " + (hayMercado ? "de 3 a 6 hashtags adicionales del mercado (ciudad, region, cultura ecuestre local) para Facebook." : "lista vacia.") + "\n" +
+                "4) ubicacion: " + (hayMercado ? "nombre del lugar tal como aparece en la etiqueta de ubicacion de Instagram (por ejemplo \"Medellin, Antioquia, Colombia\")." : "texto vacio.") + "\n" +
+                "5) captionEn: SOLO si idioma es \"en\" y no hay texto en ingles arriba, escribe el texto del post en ingles natural (no traduccion literal), " +
+                (hayMercado ? "mencionando con naturalidad la ciudad o region; " : "") + "si no, texto vacio.\n" +
+                "No incluyas RIF ni datos legales. Responde UNICAMENTE en JSON valido: " +
+                "{\"idioma\":\"es\",\"hashtagsInstagram\":[\"#...\"],\"hashtagsLocales\":[\"#...\"],\"ubicacion\":\"...\",\"captionEn\":\"...\"}";
+
+            var (json, err) = await GeminiJsonAsync(prompt);
+            if (err != null) return (null, err);
+
+            string idioma = "es", ubic = "", capEnNuevo = "";
+            var ig = new List<string>(); var locales = new List<string>();
+            try
+            {
+                using var j = System.Text.Json.JsonDocument.Parse(json!);
+                var root = j.RootElement;
+                string Str(string n) => root.TryGetProperty(n, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String ? (v.GetString() ?? "").Trim() : "";
+                List<string> Lista(string n)
+                {
+                    var l = new List<string>();
+                    if (root.TryGetProperty(n, out var arr) && arr.ValueKind == System.Text.Json.JsonValueKind.Array)
+                        foreach (var it in arr.EnumerateArray())
+                            if (it.ValueKind == System.Text.Json.JsonValueKind.String) l.Add(it.GetString() ?? "");
+                    return l;
+                }
+                idioma = Str("idioma").ToLowerInvariant() == "en" ? "en" : "es";
+                if (!hayMercado) idioma = "es";
+                ubic = hayMercado ? Str("ubicacion") : "";
+                capEnNuevo = Str("captionEn");
+                ig = Lista("hashtagsInstagram");
+                locales = hayMercado ? Lista("hashtagsLocales") : new List<string>();
+            }
+            catch { return (null, "La IA devolvió un formato inesperado. Reintenta."); }
+
+            // El hashtag principal de la marca siempre va primero en Instagram.
+            var marcaPrincipal = HashtagsRedes.Extraer(htBase, true).FirstOrDefault();
+            var igLista = HashtagsRedes.Extraer(HashtagsRedes.Unir(ig), true);
+            if (marcaPrincipal != null && !igLista.Contains(marcaPrincipal, StringComparer.OrdinalIgnoreCase))
+                igLista.Insert(0, marcaPrincipal);
+            var htIG = HashtagsRedes.Unir(igLista, HashtagsRedes.MaxInstagram);
+            var htGeneral = HashtagsRedes.Unir(HashtagsRedes.Extraer(ht, true).Concat(locales));
+            bool ponerEn = idioma == "en" && string.IsNullOrWhiteSpace(capEn) && !string.IsNullOrWhiteSpace(capEnNuevo);
+
+            using (var c = Db.Conn())
+            using (var upd = c.CreateCommand())
+            {
+                upd.CommandText = @"UPDATE Posts SET IdiomaPublicacion=$id2, HashtagsIG=$hig, Hashtags=$ht,
+                                        UbicacionSugerida=$ub, CaptionEn = CASE WHEN $cen IS NULL THEN CaptionEn ELSE $cen END,
+                                        FechaActualizacion=datetime('now','localtime')
+                                    WHERE Id=$id";
+                upd.Parameters.AddWithValue("$id2", idioma);
+                upd.Parameters.AddWithValue("$hig", htIG);
+                upd.Parameters.AddWithValue("$ht", htGeneral);
+                upd.Parameters.AddWithValue("$ub", ubic);
+                upd.Parameters.AddWithValue("$cen", ponerEn ? capEnNuevo : (object)DBNull.Value);
+                upd.Parameters.AddWithValue("$id", postId);
+                upd.ExecuteNonQuery();
+            }
+            return (new
+            {
+                ok = true, mercado, idioma, hashtagsIG = htIG, hashtags = htGeneral, ubicacion = ubic,
+                captionEn = ponerEn ? capEnNuevo : capEn
+            }, null);
+        }
+
         // Genera caption ES (+EN si la marca exporta) y hashtags desde una idea y/o un video.
         private static async Task<(string? capEs, string? capEn, List<string>? hashtags, string? err)>
-            GenerarTextoPostAsync(int marcaId, string titulo, string idea, string? vidB64, string? vidMime)
+            GenerarTextoPostAsync(int marcaId, string titulo, string idea, string? vidB64, string? vidMime, string mercado = "")
         {
             var key = GeminiKey();
             if (string.IsNullOrEmpty(key)) return (null, null, null, "Falta SG_GEMINI_KEY en el servidor.");
@@ -2350,7 +2589,8 @@ namespace SistemaGestion.Api.Endpoints
                     guia = Db.S(r, 3); htBase = Db.S(r, 4); pilares = Db.S(r, 5);
                 }
             }
-            bool conEn = (idiomas ?? "es").ToLowerInvariant().Contains("en");
+            // Con mercado objetivo siempre se genera también la versión en inglés (puede ser un mercado angloparlante).
+            bool conEn = (idiomas ?? "es").ToLowerInvariant().Contains("en") || !string.IsNullOrWhiteSpace(mercado);
 
             var prompt =
                 "Eres redactor de redes sociales de la marca \"" + nombre + "\".\n" +
@@ -2361,6 +2601,7 @@ namespace SistemaGestion.Api.Endpoints
                 (string.IsNullOrWhiteSpace(titulo) ? "" : "Titulo/tema del post: " + titulo + "\n") +
                 (vidB64 != null ? "Se adjunta un VIDEO corto del contenido: analiza lo que se ve (producto, escena, accion) y basa el texto en ello.\n" : "") +
                 (string.IsNullOrWhiteSpace(idea) ? "" : "Idea o indicacion del usuario: \"" + idea + "\"\n") +
+                (string.IsNullOrWhiteSpace(mercado) ? "" : "El post esta dirigido al publico de " + mercado + ": menciona con naturalidad la ciudad o la region y su cultura ecuestre cuando venga al caso, sin forzarlo.\n") +
                 "Escribe el texto del post para Instagram/Facebook: un caption atractivo, natural y breve (2 a 5 lineas), " +
                 "con una llamada a la accion suave al final. Espanol NEUTRAL, NUNCA argentino. " +
                 (conEn ? "Incluye tambien la version en INGLES natural (no traduccion literal). " : "Deja captionEn vacio. ") +
@@ -2875,7 +3116,9 @@ namespace SistemaGestion.Api.Endpoints
             ins.ExecuteNonQuery();
         }
 
-        private const string GraphBase = "https://graph.facebook.com/v21.0/";
+        // SG_GRAPH_BASE solo para pruebas (servidor falso de Meta); en producción no se define.
+        private static readonly string GraphBase =
+            Environment.GetEnvironmentVariable("SG_GRAPH_BASE") is { Length: > 0 } gb ? gb.TrimEnd('/') + "/" : "https://graph.facebook.com/v21.0/";
 
         private static async Task<string> GraphPost(string path, Dictionary<string, string> form)
         {
@@ -3134,7 +3377,9 @@ namespace SistemaGestion.Api.Endpoints
         string? PlataformasDestino);
     record ContPostEditarReq(string? Titulo, string? Formato, string? CaptionEs, string? CaptionEn,
         string? Hashtags, string? PromptImagen, string? PlataformasDestino,
-        bool? PrimerComentarioHashtags, string? FechaProgramada);
+        bool? PrimerComentarioHashtags, string? FechaProgramada,
+        string? MercadoObjetivo = null, string? IdiomaPublicacion = null,
+        string? HashtagsIG = null, string? UbicacionSugerida = null);
     record ContEstadoReq(string Estado);
     record ContRechazoReq(string? Nota);
     record ContOrdenReq(int[]? Ids);

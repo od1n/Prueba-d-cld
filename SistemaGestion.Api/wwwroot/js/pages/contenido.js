@@ -304,8 +304,10 @@ window.abrirPost = async (id) => {
     catch (err) { modal.innerHTML = `<div class="modal-sheet"><div class="msg show error">${esh(err.message)}</div></div>`; return; }
     const p = data.post, assets = data.assets || [];
     State.postActual = { id, assets };
-    const conEn = (marcaActual().idiomas || 'es').indexOf('en') >= 0;
+    const conEn = (marcaActual().idiomas || 'es').indexOf('en') >= 0
+        || p.idiomaPublicacion === 'en' || !!(p.mercadoObjetivo || '').trim();
     const cb = Date.now();
+    const platsPost = (p.plataformasDestino || 'instagram').split(',').map(s => s.trim().toLowerCase());
     const imgs = assets.length ? assets.map((a, idx) => `
         <div class="asset-item">
             <div class="asset-bar">
@@ -337,14 +339,15 @@ window.abrirPost = async (id) => {
           <div>
             <div class="text-dim text-sm" style="margin-bottom:4px">Paso 2 · Copia el texto al portapapeles</div>
             <div style="display:flex;flex-wrap:wrap;gap:6px">
-              <button class="btn btn-sm btn-cyan" onclick="copiarContenido('todo',${id})">📋 Caption + hashtags</button>
+              <button class="btn btn-sm btn-cyan" onclick="copiarTextoRed(${id},'instagram')" title="Texto + máximo 5 hashtags, igual al que se publica">📋 Texto para Instagram</button>
+              <button class="btn btn-sm btn-cyan" onclick="copiarTextoRed(${id},'facebook')">📋 Texto para Facebook</button>
               <button class="btn btn-sm" onclick="copiarContenido('es',${id})">Solo caption ES</button>
               ${conEn ? `<button class="btn btn-sm" onclick="copiarContenido('en',${id})">Caption EN</button>` : ''}
               <button class="btn btn-sm" onclick="copiarContenido('ht',${id})">Solo hashtags</button>
             </div>
           </div>
           <div>
-            <div class="text-dim text-sm" style="margin-bottom:4px">Paso 3 · Abre la red, pega el texto y sube las imágenes del zip</div>
+            <div class="text-dim text-sm" style="margin-bottom:4px">Paso 3 · Abre la red, pega el texto y sube las imágenes del zip${p.ubicacionSugerida ? ` · en Instagram toca <strong>Agregar ubicación</strong> y elige «${esh(p.ubicacionSugerida)}»` : ''}</div>
             <div style="display:flex;flex-wrap:wrap;gap:6px">
               <button class="btn btn-sm" onclick="window.open('https://www.instagram.com/','_blank')">Abrir Instagram ↗</button>
               <button class="btn btn-sm" onclick="window.open('https://business.facebook.com/latest/composer','_blank')">Abrir Facebook ↗</button>
@@ -358,7 +361,13 @@ window.abrirPost = async (id) => {
           </div>
           <div style="border-top:1px solid var(--borde);padding-top:8px;margin-top:2px">
             <div class="text-dim text-sm" style="margin-bottom:4px">O publica automáticamente (requiere cuentas configuradas en ⚙ Cuentas)${esVideoPost ? ' · este post se publicará como <strong>Reel/Video</strong>' : ''}:</div>
-            <button class="btn btn-sm" style="background:#7c3aed;color:#fff" onclick="publicarAhora(${id},'${p.plataformasDestino || 'instagram'}',${esVideoPost})">🚀 Publicar ${esVideoPost ? 'reel' : 'ahora'} (auto)</button>
+            <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:center;margin-bottom:6px;font-size:13px">
+              <label style="display:flex;align-items:center;gap:5px"><input type="checkbox" id="pubIG" ${platsPost.includes('instagram') ? 'checked' : ''}> Instagram</label>
+              <label style="display:flex;align-items:center;gap:5px"><input type="checkbox" id="pubFB" ${platsPost.includes('facebook') ? 'checked' : ''}> Facebook</label>
+              <button class="btn btn-sm" onclick="verTextoFinal(${id})">👁 Ver texto final</button>
+            </div>
+            <div id="textoFinalBox"></div>
+            <button class="btn btn-sm" style="background:#7c3aed;color:#fff" onclick="publicarAhora(${id},null,${esVideoPost})">🚀 Publicar ${esVideoPost ? 'reel' : 'ahora'} (auto)</button>
           </div>
           <div style="border-top:1px solid var(--borde);padding-top:8px;margin-top:2px">
             <div class="text-dim text-sm" style="margin-bottom:4px">Seguimiento · visualizaciones e interacción</div>
@@ -398,8 +407,33 @@ window.abrirPost = async (id) => {
             <textarea class="input-field" id="pCapEs" rows="4">${esh(p.captionEs || '')}</textarea></div>
         ${conEn ? `<div class="input-group"><label class="input-label">Caption (EN)</label>
             <textarea class="input-field" id="pCapEn" rows="4">${esh(p.captionEn || '')}</textarea></div>` : ''}
-        <div class="input-group"><label class="input-label">Hashtags</label>
+        <div style="border:1px solid var(--borde);border-radius:10px;padding:10px;margin-bottom:10px">
+          <strong style="font-size:13px">🎯 Mercado objetivo (opcional)</strong>
+          <p class="text-dim text-sm" style="margin:4px 0 8px">Ciudad y país al que quieres llegar. La IA elige el idioma, los 5 hashtags de Instagram (marca · ciudad/región · cultura ecuestre local · oficio), hashtags locales para Facebook y la ubicación que conviene etiquetar.</p>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end">
+            <div class="input-group" style="flex:1;min-width:200px;margin:0"><label class="input-label">Ciudad, país</label>
+              <input class="input-field" id="pMercado" list="dlMercados" placeholder="Ej: Medellín, Colombia" value="${eshA(p.mercadoObjetivo || '')}">
+              <datalist id="dlMercados">
+                <option value="Medellín, Colombia"><option value="Bogotá, Colombia"><option value="Wagga Wagga, Australia">
+                <option value="Guadalajara, México"><option value="Monterrey, México"><option value="San José, Costa Rica">
+                <option value="Fort Worth, Texas, Estados Unidos"><option value="Calgary, Canadá"><option value="Caracas, Venezuela">
+              </datalist></div>
+            <div class="input-group" style="width:150px;margin:0"><label class="input-label">Idioma de publicación</label>
+              <select class="input-field" id="pIdioma">
+                <option value="es" ${p.idiomaPublicacion !== 'en' ? 'selected' : ''}>Español</option>
+                <option value="en" ${p.idiomaPublicacion === 'en' ? 'selected' : ''}>Inglés</option>
+              </select></div>
+            <button class="btn btn-sm btn-cyan" id="btnMercado" onclick="adaptarMercado(${id})">🎯 Adaptar al mercado (IA)</button>
+          </div>
+        </div>
+        <div class="input-group"><label class="input-label">Hashtags para Instagram <span id="pHashIGCont" class="text-dim"></span></label>
+            <input class="input-field" id="pHashIG" value="${eshA(p.hashtagsIG || '')}" oninput="contarHashIG()" placeholder="Máximo 5. Si lo dejas vacío se usan los 5 primeros de la lista general (los de la marca primero).">
+            <div class="text-dim text-sm" style="margin-top:3px">Instagram acepta como máximo 5 hashtags por publicación (contando los que estén dentro del texto).</div></div>
+        <div class="input-group"><label class="input-label">Hashtags generales (Facebook y copia)</label>
             <input class="input-field" id="pHash" value="${eshA(p.hashtags || '')}"></div>
+        <div class="input-group"><label class="input-label">Ubicación para Instagram</label>
+            <input class="input-field" id="pUbic" value="${eshA(p.ubicacionSugerida || '')}" placeholder="Ej: Medellín, Antioquia, Colombia">
+            <div class="text-dim text-sm" style="margin-top:3px">Pesa más que un hashtag de ciudad. Se agrega a mano en Instagram (botón «Agregar ubicación» al publicar, o «Editar» en una publicación ya hecha).</div></div>
         <div class="input-group"><label class="input-label">Programar publicación (opcional)</label>
             <input class="input-field" id="pFecha" type="datetime-local" value="${eshA(fechaVal)}"></div>
         <div class="acciones-gen">
@@ -417,6 +451,97 @@ window.abrirPost = async (id) => {
         </div>
         ${seccionPublicar}
       </div>`;
+    contarHashIG();
+};
+
+// ── Mercado objetivo y hashtags por red ──────────────────────────────────
+const MAX_HASH_IG = 5;   // Instagram: máximo 5 hashtags por publicación o reel
+
+function plataformasElegidas() {
+    const ig = document.getElementById('pubIG'), fb = document.getElementById('pubFB');
+    if (!ig && !fb) return null;              // la sección de publicar no está visible
+    const l = [];
+    if (ig && ig.checked) l.push('instagram');
+    if (fb && fb.checked) l.push('facebook');
+    return l.join(',');
+}
+
+function contarTags(txt) {
+    const m = (txt || '').match(/#[\p{L}\p{N}_]+/gu) || [];
+    return new Set(m.map(t => t.toLowerCase())).size;
+}
+
+window.contarHashIG = () => {
+    const inp = document.getElementById('pHashIG'), lab = document.getElementById('pHashIGCont');
+    if (!inp || !lab) return;
+    const n = contarTags(inp.value);
+    lab.textContent = `(${n}/${MAX_HASH_IG})`;
+    lab.style.color = n > MAX_HASH_IG ? '#ef4444' : '';
+    inp.style.borderColor = n > MAX_HASH_IG ? '#ef4444' : '';
+};
+
+function aplicarCamposMercado(res) {
+    if (!res) return;
+    const set = (idc, v) => { const el = document.getElementById(idc); if (el && v != null) el.value = v; };
+    set('pHashIG', res.hashtagsIG);
+    set('pUbic', res.ubicacion);
+    if (res.hashtags != null) set('pHash', res.hashtags);
+    if (res.idiomaPublicacion || res.idioma) set('pIdioma', res.idiomaPublicacion || res.idioma);
+    const capEn = document.getElementById('pCapEn');
+    if (capEn && res.captionEn && !capEn.value.trim()) capEn.value = res.captionEn;
+    contarHashIG();
+}
+
+window.adaptarMercado = async (id) => {
+    const btn = document.getElementById('btnMercado'); setLoading(btn, true);
+    const conEnAntes = !!document.getElementById('pCapEn');
+    await guardarSilencioso(id);
+    showMsg('Adaptando al mercado…', 'ok', '#msgPost');
+    try {
+        const res = await apiPost(`/api/contenido/posts/${id}/mercado`, {});
+        // Si el mercado es en inglés y no había campo de caption EN, se vuelve a abrir el post para mostrarlo.
+        if (res.idioma === 'en' && !conEnAntes) { await abrirPost(id); showMsg('Listo: el mercado es en inglés; revisa el caption EN.', 'ok', '#msgPost'); return; }
+        aplicarCamposMercado(res);
+        showMsg(`Listo. Idioma: ${res.idioma === 'en' ? 'inglés' : 'español'} · Instagram: ${res.hashtagsIG || '(sin hashtags)'}${res.ubicacion ? ' · Ubicación: ' + res.ubicacion : ''}. Revisa y guarda.`, 'ok', '#msgPost');
+    } catch (err) { showMsg(err.message, 'error', '#msgPost'); }
+    setLoading(btn, false);
+};
+
+async function textoFinal(id, plataforma) {
+    await guardarSilencioso(id);
+    return await apiGet(`/api/contenido/posts/${id}/texto-final?plataforma=${plataforma}`);
+}
+
+window.verTextoFinal = async (id) => {
+    const box = document.getElementById('textoFinalBox');
+    const plats = (plataformasElegidas() || '').split(',').filter(Boolean);
+    if (!plats.length) { showMsg('Marca al menos una red (Instagram o Facebook).', 'error', '#msgPost'); return; }
+    box.innerHTML = '<div class="loading-msg"><div class="spinner"></div></div>';
+    const partes = [];
+    for (const pl of plats) {
+        try {
+            const t = await textoFinal(id, pl);
+            const nombre = pl === 'instagram' ? 'Instagram' : 'Facebook';
+            const cuenta = pl === 'instagram' ? `${t.cantidad}/${t.maximo} hashtags` : `${t.cantidad} hashtags`;
+            partes.push(`<div style="background:#0d1117;border:1px solid var(--borde);border-radius:8px;padding:8px;margin-bottom:6px">
+                <strong>${nombre}</strong> <span class="text-dim text-sm">· ${t.idioma === 'en' ? 'inglés' : 'español'} · ${cuenta}${t.ubicacion ? ' · ubicación: ' + esh(t.ubicacion) : ''}</span>
+                ${t.ok ? `<pre style="white-space:pre-wrap;margin:6px 0 0;font-family:inherit;font-size:13px">${esh(t.caption)}</pre>`
+                       : `<div class="msg show error" style="margin-top:6px">${esh(t.error)}</div>`}
+                ${(t.avisos || []).map(a => `<div class="text-dim text-sm" style="margin-top:4px">⚠ ${esh(a)}</div>`).join('')}
+            </div>`);
+        } catch (err) { partes.push(`<div class="msg show error">${esh(err.message)}</div>`); }
+    }
+    box.innerHTML = partes.join('');
+};
+
+window.copiarTextoRed = async (id, plataforma) => {
+    try {
+        const t = await textoFinal(id, plataforma);
+        if (!t.ok) { showMsg(t.error, 'error', '#msgPost'); return; }
+        await navigator.clipboard.writeText(t.caption);
+        showMsg(`Texto para ${plataforma === 'instagram' ? 'Instagram' : 'Facebook'} copiado (${t.cantidad} hashtags).`
+            + (t.ubicacion ? ` Al publicar, toca «Agregar ubicación» y elige «${t.ubicacion}».` : ''), 'ok', '#msgPost');
+    } catch (err) { showMsg('No se pudo copiar: ' + err.message, 'error', '#msgPost'); }
 };
 
 function recolectarPost() {
@@ -426,6 +551,11 @@ function recolectarPost() {
         captionEs: document.getElementById('pCapEs').value,
         captionEn: capEn ? capEn.value : null,
         hashtags: document.getElementById('pHash').value,
+        hashtagsIG: document.getElementById('pHashIG') ? document.getElementById('pHashIG').value : null,
+        mercadoObjetivo: document.getElementById('pMercado') ? document.getElementById('pMercado').value : null,
+        idiomaPublicacion: document.getElementById('pIdioma') ? document.getElementById('pIdioma').value : null,
+        ubicacionSugerida: document.getElementById('pUbic') ? document.getElementById('pUbic').value : null,
+        plataformasDestino: plataformasElegidas() || null,
         fechaProgramada: fecha ? fecha.replace('T', ' ') + ':00' : null,
     };
 }
@@ -473,6 +603,10 @@ window.marcarPublicado = async (id) => {
 };
 
 window.publicarAhora = async (id, plataformasStr, esVideo) => {
+    if (!plataformasStr) {
+        plataformasStr = plataformasElegidas();
+        if (!plataformasStr) { showMsg('Marca al menos una red (Instagram o Facebook).', 'error', '#msgPost'); return; }
+    }
     const msgConf = esVideo
         ? '¿Publicar AHORA el video como Reel en las redes configuradas? El procesamiento del video puede tardar hasta ~4 min.'
         : '¿Publicar AHORA automáticamente en las redes configuradas? Se subirá la imagen y el texto.';
@@ -482,8 +616,11 @@ window.publicarAhora = async (id, plataformasStr, esVideo) => {
     const plats = (plataformasStr || 'instagram').split(',').map(s => s.trim()).filter(Boolean);
     try {
         const res = await apiPost(`/api/contenido/posts/${id}/publicar`, { plataformas: plats });
-        const lineas = (res.resultados || []).map(r => `${r.plataforma}: ${r.ok ? 'OK ' + (r.permalink || '') : 'ERROR: ' + (r.error || '')}`).join(' · ');
-        if (res.ok) { showMsg('Publicado. ' + lineas, 'ok', '#msgPost'); setTimeout(() => { closeModal('modalPost'); cargarPosts(); }, 2000); }
+        const lineas = (res.resultados || []).map(r => `${r.plataforma}: ${r.ok
+            ? 'OK ' + (r.permalink || '') + (r.hashtags ? ` (${r.hashtags.length} hashtags: ${r.hashtags.join(' ')})` : '')
+              + (r.ubicacion ? ` · agrega la ubicación «${r.ubicacion}» con «Editar» en Instagram` : '')
+            : 'ERROR: ' + (r.error || '')}`).join(' · ');
+        if (res.ok) { showMsg('Publicado. ' + lineas, 'ok', '#msgPost'); setTimeout(() => { closeModal('modalPost'); cargarPosts(); }, 6000); }
         else showMsg('No se pudo publicar. ' + lineas, 'error', '#msgPost');
     } catch (err) { showMsg(err.message, 'error', '#msgPost'); }
 };
@@ -797,12 +934,14 @@ window.generarTextoPost = async (id) => {
     const analizar = document.getElementById('pAnalizarVid')?.checked || false;
     if (!idea && !analizar) { showMsg('Escribe una idea o marca "Analizar el video".', 'error', '#msgPost'); return; }
     const btn = document.getElementById('btnGenTexto'); setLoading(btn, true);
+    await guardarSilencioso(id);   // el servidor lee el mercado objetivo guardado
     showMsg(analizar ? 'Generando texto (analizando video)…' : 'Generando texto…', 'ok', '#msgPost');
     try {
         const res = await apiPost(`/api/contenido/posts/${id}/texto`, { idea, analizarVideo: analizar });
         const capEs = document.getElementById('pCapEs'); if (capEs) capEs.value = res.captionEs || '';
         const capEn = document.getElementById('pCapEn'); if (capEn && res.captionEn) capEn.value = res.captionEn;
         const hash = document.getElementById('pHash'); if (hash) hash.value = res.hashtags || '';
+        aplicarCamposMercado(res);
         const extra = res.videoAnalizado ? ' (con análisis de video)' : '';
         showMsg('Texto generado' + extra + '. Revísalo y guarda.' + (res.aviso ? ' ' + res.aviso : ''), 'ok', '#msgPost');
     } catch (err) { showMsg(err.message, 'error', '#msgPost'); }
