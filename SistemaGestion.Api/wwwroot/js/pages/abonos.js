@@ -113,7 +113,7 @@ function renderLista() {
             <span class="badge ${estadoClass}">${esh(a.estado)}</span>
           </div>
           <div class="card-row" style="margin-top:4px">
-            <span style="color:var(--muted)">${esh(a.fecha)} · ${esh(a.metodoPago)}</span>
+            <span style="color:var(--muted)">${esh(a.fecha)} · ${esh(a.metodoPago)}${a.numeroF ? ' · <strong>' + esh(a.numeroF) + '</strong>' : ''}</span>
             <strong style="font-size:1.05rem">$ ${a.monto.toFixed(2)}</strong>
           </div>
           ${a.referencia ? `<div style="font-size:.85rem;color:var(--muted)">Ref: ${esh(a.referencia)} ${cuenta ? '· ' + esh(cuenta.nombre) : ''}</div>` : ''}
@@ -135,6 +135,7 @@ function verDetalle(id) {
       </div>
       <div class="drawer-body">
         <div class="field-group"><label>Cliente</label><div>${esh(a.clienteNombre)} [${esh(a.cliente)}]</div></div>
+        ${a.numeroF ? `<div class="field-group"><label>Factura</label><div><strong>${esh(a.numeroF)}</strong></div></div>` : ''}
         <div class="field-group"><label>Fecha</label><div>${esh(a.fecha)}</div></div>
         <div class="field-group"><label>Monto</label><div><strong>$ ${a.monto.toFixed(2)}</strong></div></div>
         <div class="field-group"><label>Método</label><div>${esh(a.metodoPago)}</div></div>
@@ -167,7 +168,10 @@ async function cambiarEstado(id, estado) {
 }
 
 // ── Nuevo Abono ──────────────────────────────────────────────────────────
+let cxcPendientesCliente = [];
+
 function abrirNuevoAbono() {
+    const cliPre = document.getElementById('filtCliente')?.value || '';
     const drawer = document.getElementById('drawerAbono');
     drawer.innerHTML = `
       <div class="drawer-header">
@@ -176,9 +180,16 @@ function abrirNuevoAbono() {
       </div>
       <div class="drawer-body">
         <div class="field-group"><label>Cliente *</label>
-          <select id="aboCliente" class="input-field">
-            ${clientesList.map(c => `<option value="${eshA(c.codigo)}">${esh(c.nombre)} [${esh(c.codigo)}]</option>`).join('')}
+          <select id="aboCliente" class="input-field" onchange="cargarCxcClienteAbono()">
+            ${clientesList.map(c => `<option value="${eshA(c.codigo)}" ${c.codigo === cliPre ? 'selected' : ''}>${esh(c.nombre)} [${esh(c.codigo)}]</option>`).join('')}
           </select>
+        </div>
+        <div class="field-group"><label>Aplicar a Cuenta por Cobrar</label>
+          <select id="aboCxc" class="input-field" onchange="cxcAbonoChanged()">
+            <option value="auto">Automático (más antigua primero — FIFO)</option>
+            <option value="none">Solo abono general (sin descontar CxC)</option>
+          </select>
+          <div id="aboCxcHint" style="font-size:.8rem;color:var(--muted);margin-top:4px"></div>
         </div>
         <div class="field-group"><label>Fecha</label>
           <input type="date" id="aboFecha" class="input-field" value="${fechaLocalISO()}">
@@ -195,7 +206,7 @@ function abrirNuevoAbono() {
           </select>
         </div>
         <div class="field-group"><label>Cuenta destino</label>
-          <select id="aboCuenta" class="input-field">
+          <select id="aboCuenta" class="input-field" disabled>
             <option value="0">— No especificada —</option>
             ${cuentasList.filter(c => c.activa).map(c => `<option value="${c.id}">${esh(c.nombre)} (${esh(c.titular)})</option>`).join('')}
           </select>
@@ -230,6 +241,47 @@ function abrirNuevoAbono() {
     });
 
     openModal('modalAbono');
+    cargarCxcClienteAbono();
+}
+
+async function cargarCxcClienteAbono() {
+    const cli = document.getElementById('aboCliente')?.value;
+    const sel = document.getElementById('aboCxc');
+    const hint = document.getElementById('aboCxcHint');
+    if (!sel) return;
+    cxcPendientesCliente = [];
+    sel.innerHTML = '<option value="auto">Cargando cuentas por cobrar...</option>';
+    if (hint) hint.textContent = '';
+    if (!cli) return;
+    try {
+        cxcPendientesCliente = await apiGet(`/api/cxc?cliente=${encodeURIComponent(cli)}&soloPendientes=true`) || [];
+        const totalDeuda = cxcPendientesCliente.reduce((s, c) => s + (c.saldo || 0), 0);
+        let opts = `<option value="auto">Automático (más antigua primero — FIFO)</option>`;
+        for (const c of cxcPendientesCliente) {
+            const tag = c.estaVencida ? ' [VENCIDA]' : '';
+            opts += `<option value="${c.id}">${esh(c.concepto)} — Saldo: $${Number(c.saldo || 0).toFixed(2)} (Vence ${formatFecha(c.fechaVence)})${tag}</option>`;
+        }
+        opts += `<option value="none">Solo abono general (sin descontar CxC)</option>`;
+        sel.innerHTML = opts;
+        if (hint) {
+            hint.textContent = cxcPendientesCliente.length > 0
+                ? `${cxcPendientesCliente.length} cuenta(s) pendiente(s) — Deuda total: $${totalDeuda.toFixed(2)}`
+                : 'Este cliente no tiene CxC pendientes.';
+        }
+    } catch {
+        sel.innerHTML = `<option value="auto">Automático (más antigua primero — FIFO)</option>
+                         <option value="none">Solo abono general (sin descontar CxC)</option>`;
+    }
+}
+
+function cxcAbonoChanged() {
+    const val = document.getElementById('aboCxc')?.value;
+    const id = parseInt(val, 10);
+    if (!isNaN(id) && id > 0) {
+        const c = cxcPendientesCliente.find(x => x.id === id);
+        const inpMonto = document.getElementById('aboMonto');
+        if (c && inpMonto) inpMonto.value = Number(c.saldo || 0).toFixed(2);
+    }
 }
 
 function metodoChanged() {
@@ -243,6 +295,7 @@ function metodoChanged() {
 
 async function guardarAbono() {
     const cliente = document.getElementById('aboCliente')?.value;
+    const cxcSel = document.getElementById('aboCxc')?.value || 'auto';
     const fecha = document.getElementById('aboFecha')?.value;
     const monto = document.getElementById('aboMonto')?.value;
     const metodo = document.getElementById('aboMetodo')?.value;
@@ -267,6 +320,14 @@ async function guardarAbono() {
     fd.append('remitente', remit);
     fd.append('observaciones', obs);
     fd.append('estado', 'Confirmado');
+    if (cxcSel === 'none') {
+        fd.append('aplicarCxC', 'false');
+    } else if (cxcSel !== 'auto' && parseInt(cxcSel, 10) > 0) {
+        fd.append('idCuentaCobrar', cxcSel);
+        fd.append('aplicarCxC', 'true');
+    } else {
+        fd.append('aplicarCxC', 'true');
+    }
     if (archivo) fd.append('comprobante', archivo);
 
     const btn = document.getElementById('btnGuardarAbono');
@@ -275,12 +336,12 @@ async function guardarAbono() {
         const res = await fetch('/api/abonos', {
             method: 'POST', credentials: 'include', body: fd
         });
+        const data = await res.json().catch(() => ({}));
         if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || `Error ${res.status}`);
+            throw new Error(data.error || `Error ${res.status}`);
         }
         closeModal('modalAbono');
-        showMsg('Abono registrado.', 'ok');
+        showMsg(data.mensaje || 'Abono registrado.', 'ok');
         await cargarAbonos();
     } catch (err) {
         showMsg('Error: ' + err.message, 'error', '#drawerAbono .msg');

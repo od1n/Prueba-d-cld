@@ -117,12 +117,13 @@ namespace SistemaGestion
 
         private void CargarDatos()
         {
+            DatabaseService.SincronizarCxCYFacturas();
             var lista = DatabaseService.ObtenerCuentas();
             // Actualizar vencidas automaticamente
-            foreach (var cc in lista.Where(x => x.Estado == "Vigente" && x.FechaVence < DateTime.Today))
+            foreach (var cc in lista.Where(x => x.Estado == "Vigente" && x.FechaVence < DateTime.Today && x.Saldo > 0.005m))
             { cc.Estado = "Vencida"; DatabaseService.ActualizarCuenta(cc); }
 
-            _cuentas = DatabaseService.ObtenerCuentas();
+            _cuentas = DatabaseService.ObtenerCuentas().Where(x => x.Estado != "Anulada").ToList();
             Rebind();
         }
 
@@ -219,16 +220,30 @@ namespace SistemaGestion
             int id = (int)dgv.CurrentRow.Cells["Id"].Value;
             var cc = DatabaseService.ObtenerCuentas().Find(x => x.Id == id);
             if (cc == null) return;
-            if (cc.Estado == "Saldada") { MessageBox.Show("Esta cuenta ya esta saldada.", "Info", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+            if (cc.Estado == "Saldada" || cc.Estado == "Pagada" || cc.Saldo <= 0.005m)
+            {
+                MessageBox.Show("Esta cuenta ya está saldada.", "Info", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
 
             using var dlg = new DlgPago(cc.Saldo);
-            if (dlg.ShowDialog() == DialogResult.OK)
+            if (dlg.ShowDialog(this) == DialogResult.OK && dlg.MontoPago > 0)
             {
-                cc.Pagado += dlg.MontoPago;
-                if (cc.Pagado >= cc.Monto) { cc.Pagado = cc.Monto; cc.Estado = "Saldada"; }
-                DatabaseService.ActualizarCuenta(cc);
-                CargarDatos();
-                MessageBox.Show($"Pago de {dlg.MontoPago:C2} registrado.", "Pago Registrado", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                try
+                {
+                    var (aplicado, saldoRest, saldada) = DatabaseService.RegistrarPagoCxC(
+                        cc.Id, dlg.MontoPago, dlg.MetodoPago, dlg.Referencia, dlg.Observaciones);
+                    CargarDatos();
+                    string msg = saldada
+                        ? $"Pago de {aplicado:C2} registrado. La cuenta y su factura quedaron saldadas."
+                        : $"Pago de {aplicado:C2} registrado. Saldo restante: {saldoRest:C2}.";
+                    MessageBox.Show(this, msg, "Pago Registrado", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(this, "Error al registrar el pago:\n" + ex.Message,
+                        "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
             }
         }
     }
@@ -305,29 +320,88 @@ namespace SistemaGestion
 
     public class DlgPago : FormBase
     {
-        public decimal MontoPago { get; private set; }
+        public decimal MontoPago     { get; private set; }
+        public string  MetodoPago    { get; private set; } = "Efectivo";
+        public string  Referencia    { get; private set; } = "";
+        public string  Observaciones { get; private set; } = "";
+
         public DlgPago(decimal saldo)
         {
-            Text = "Registrar Pago"; Size = new Size(320, 180);
+            Text = "Registrar Pago";
+            ClientSize = new Size(390, 255);
             StartPosition = FormStartPosition.CenterParent;
-            FormBorderStyle = FormBorderStyle.Sizable; MaximizeBox = true; MinimizeBox = false;
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            MaximizeBox = false;
+            MinimizeBox = false;
             BackColor = Color.FromArgb(240, 244, 250);
 
-            Controls.Add(new Label { Text = $"Saldo pendiente: {saldo:C2}", Location = new Point(20, 20), AutoSize = true, Font = new Font("Segoe UI", 10f, FontStyle.Bold) });
-            Controls.Add(new Label { Text = "Monto a pagar:", Location = new Point(20, 55), AutoSize = true, Font = new Font("Segoe UI", 9f) });
-            var num = new NumericUpDown { Location = new Point(150, 52), Size = new Size(130, 25), Maximum = saldo, Minimum = 0, Value = saldo, DecimalPlaces = 2 };
-            Controls.Add(num);
+            int y = 18;
+            Controls.Add(new Label {
+                Text = $"Saldo pendiente: {saldo:C2}",
+                Location = new Point(20, y), AutoSize = true,
+                Font = new Font("Segoe UI", 11f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(26, 74, 138)
+            });
+            y += 38;
 
-            var bOk = new Button { Text = "Registrar", Location = new Point(60, 100), Size = new Size(100, 32),
-                BackColor = Color.FromArgb(30, 130, 70), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
+            Controls.Add(new Label { Text = "Monto a pagar:", Location = new Point(20, y + 3), AutoSize = true, Font = new Font("Segoe UI", 9.5f) });
+            var num = new NumericUpDown {
+                Location = new Point(150, y), Size = new Size(215, 26),
+                Maximum = Math.Max(saldo, 0.01m), Minimum = 0.01m,
+                Value = Math.Max(saldo, 0.01m), DecimalPlaces = 2,
+                Font = new Font("Segoe UI", 9.5f)
+            };
+            Controls.Add(num);
+            y += 38;
+
+            Controls.Add(new Label { Text = "Método de pago:", Location = new Point(20, y + 3), AutoSize = true, Font = new Font("Segoe UI", 9.5f) });
+            var cmbMetodo = new ComboBox {
+                Location = new Point(150, y), Size = new Size(215, 26),
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Font = new Font("Segoe UI", 9.5f)
+            };
+            cmbMetodo.Items.AddRange(new object[] { "Efectivo", "Zelle", "TransfNac", "PagoMovil" });
+            cmbMetodo.SelectedIndex = 0;
+            Controls.Add(cmbMetodo);
+            y += 38;
+
+            Controls.Add(new Label { Text = "Referencia:", Location = new Point(20, y + 3), AutoSize = true, Font = new Font("Segoe UI", 9.5f) });
+            var txtRef = new TextBox {
+                Location = new Point(150, y), Size = new Size(215, 26),
+                Font = new Font("Segoe UI", 9.5f)
+            };
+            Controls.Add(txtRef);
+            y += 48;
+
+            var bOk = new Button {
+                Text = "Registrar", Location = new Point(150, y), Size = new Size(102, 34),
+                BackColor = Color.FromArgb(30, 130, 70), ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
+                Cursor = Cursors.Hand
+            };
             bOk.FlatAppearance.BorderSize = 0;
-            var bCan = new Button { Text = "Cancelar", DialogResult = DialogResult.Cancel, Location = new Point(175, 100), Size = new Size(100, 32),
-                BackColor = Color.FromArgb(160, 50, 50), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
+            var bCan = new Button {
+                Text = "Cancelar", DialogResult = DialogResult.Cancel,
+                Location = new Point(263, y), Size = new Size(102, 34),
+                BackColor = Color.FromArgb(160, 50, 50), ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
+                Cursor = Cursors.Hand
+            };
             bCan.FlatAppearance.BorderSize = 0;
-            bOk.Click += (s, e) => { MontoPago = num.Value; DialogResult = DialogResult.OK; };
-            
-            // Recordar posición y tamaño
-            VentanaPrefs.Restaurar(this);
+            bOk.Click += (s, e) =>
+            {
+                if (num.Value <= 0)
+                {
+                    MessageBox.Show(this, "El monto debe ser mayor a cero.", "Validación", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+                MontoPago  = num.Value;
+                MetodoPago = cmbMetodo.SelectedItem?.ToString() ?? "Efectivo";
+                Referencia = txtRef.Text.Trim();
+                DialogResult = DialogResult.OK;
+            };
+            AcceptButton = bOk;
+            CancelButton = bCan;
             Controls.AddRange(new Control[] { bOk, bCan });
         }
     }

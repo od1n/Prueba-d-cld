@@ -23,7 +23,9 @@ namespace SistemaGestion.Api.Endpoints
 
                     // CxC vencidas
                     cmd = c.CreateCommand();
-                    cmd.CommandText = "SELECT COUNT(*) FROM CuentasCobrar WHERE Estado!='Pagada' AND FechaVence<$h AND (Monto-Pagado)>0";
+                    cmd.CommandText = @"SELECT COUNT(*) FROM CuentasCobrar
+                        WHERE COALESCE(Estado,'Vigente') NOT IN ('Pagada','Saldada','Pagado','Anulada')
+                          AND substr(FechaVence,1,10)<$h AND (Monto-COALESCE(Pagado,0))>0.005";
                     cmd.Parameters.AddWithValue("$h", hoy);
                     int cxcVencidas = Convert.ToInt32(cmd.ExecuteScalar());
 
@@ -109,8 +111,10 @@ namespace SistemaGestion.Api.Endpoints
                                 actual=Db.D(r,2), minimo=Db.D(r,3), faltante=Db.D(r,3)-Db.D(r,2) });
 
                     cmd = c.CreateCommand();
-                    cmd.CommandText = @"SELECT Cliente,Concepto,Monto-Pagado,FechaVence
-                        FROM CuentasCobrar WHERE Estado!='Pagada' AND FechaVence<$h AND (Monto-Pagado)>0
+                    cmd.CommandText = @"SELECT Cliente,Concepto,Monto-COALESCE(Pagado,0),FechaVence
+                        FROM CuentasCobrar
+                        WHERE COALESCE(Estado,'Vigente') NOT IN ('Pagada','Saldada','Pagado','Anulada')
+                          AND substr(FechaVence,1,10)<$h AND (Monto-COALESCE(Pagado,0))>0.005
                         ORDER BY FechaVence ASC LIMIT 20";
                     cmd.Parameters.AddWithValue("$h", hoy);
                     using (var r = cmd.ExecuteReader())

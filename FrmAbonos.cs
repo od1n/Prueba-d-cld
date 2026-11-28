@@ -292,8 +292,18 @@ namespace SistemaGestion
                 DatabaseService.ObtenerCuentasReceptoras());
             if (dlg.ShowDialog(this) == DialogResult.OK && dlg.AbonoCreado != null)
             {
-                DatabaseService.InsertarAbonoExtendido(dlg.AbonoCreado);
-                CargarAbonos();
+                try
+                {
+                    string resumen = DatabaseService.RegistrarAbonoYActualizarCxC(
+                        dlg.AbonoCreado, dlg.IdCuentaCobrarSeleccionada, dlg.AplicarACxC);
+                    CargarAbonos();
+                    MessageBox.Show(this, resumen, "Abono Registrado", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(this, "Error al registrar abono:\n" + ex.Message,
+                        "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
             }
         }
 
@@ -379,7 +389,7 @@ namespace SistemaGestion
 
     public class DlgNuevoAbono : FormBase
     {
-        private ComboBox   _cboCliente = null!, _cboMetodo = null!, _cboCuenta = null!;
+        private ComboBox   _cboCliente = null!, _cboCxC = null!, _cboMetodo = null!, _cboCuenta = null!;
         private TextBox    _txtMonto = null!, _txtReferencia = null!,
                            _txtRemitente = null!, _txtObs = null!, _txtComprobante = null!;
         private DateTimePicker _dtFecha = null!;
@@ -387,8 +397,11 @@ namespace SistemaGestion
 
         private readonly List<(string cod, string nombre)> _clientes;
         private readonly List<CuentaReceptora> _cuentas;
+        private List<CuentaCobrar> _cxcPendientes = new();
 
         public Abono? AbonoCreado { get; private set; }
+        public int?   IdCuentaCobrarSeleccionada { get; private set; }
+        public bool   AplicarACxC { get; private set; } = true;
 
         private static readonly string[] MetodosPago =
             { "Efectivo", "Zelle", "TransfNac", "PagoMovil" };
@@ -401,7 +414,7 @@ namespace SistemaGestion
             _cuentas = cuentas;
 
             Text = "Nuevo Abono";
-            ClientSize = new Size(520, 560);
+            ClientSize = new Size(520, 600);
             StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false; MinimizeBox = false;
@@ -422,7 +435,17 @@ namespace SistemaGestion
             foreach (var (cod, nombre) in _clientes)
                 _cboCliente.Items.Add($"{nombre}  [{cod}]");
             if (_cboCliente.Items.Count > 0) _cboCliente.SelectedIndex = 0;
+            _cboCliente.SelectedIndexChanged += (s, e) => CargarCxCCliente();
             pnl.Controls.Add(_cboCliente);
+            y += 38;
+
+            // Cuenta por Cobrar destino
+            pnl.Controls.Add(new Label { Text = "Aplicar a CxC", Font = UITheme.BodyBold,
+                Location = new Point(xLbl, y + 3), AutoSize = true });
+            _cboCxC = new ComboBox { Location = new Point(xCtrl, y), Width = wCtrl,
+                DropDownStyle = ComboBoxStyle.DropDownList };
+            _cboCxC.SelectedIndexChanged += (s, e) => CxCChanged();
+            pnl.Controls.Add(_cboCxC);
             y += 38;
 
             // Fecha
@@ -536,6 +559,34 @@ namespace SistemaGestion
 
             Controls.Add(pnl);
             Controls.Add(footer);
+            CargarCxCCliente();
+        }
+
+        private void CargarCxCCliente()
+        {
+            _cboCxC.Items.Clear();
+            _cxcPendientes.Clear();
+            _cboCxC.Items.Add("Automático (más antigua primero — FIFO)");
+            if (_cboCliente.SelectedIndex >= 0 && _cboCliente.SelectedIndex < _clientes.Count)
+            {
+                var (cod, _) = _clientes[_cboCliente.SelectedIndex];
+                _cxcPendientes = DatabaseService.ObtenerCuentasPendientesPorCliente(cod);
+                foreach (var cc in _cxcPendientes)
+                    _cboCxC.Items.Add($"{cc.Concepto} — Saldo: {cc.Saldo:C2} (Vence {cc.FechaVence:dd/MM/yy})");
+            }
+            _cboCxC.Items.Add("Solo abono general (sin descontar CxC)");
+            _cboCxC.SelectedIndex = 0;
+        }
+
+        private void CxCChanged()
+        {
+            int idx = _cboCxC.SelectedIndex;
+            if (idx >= 1 && idx <= _cxcPendientes.Count)
+            {
+                var cc = _cxcPendientes[idx - 1];
+                if (_txtMonto != null)
+                    _txtMonto.Text = cc.Saldo.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
+            }
         }
 
         private void MetodoChanged()
@@ -626,9 +677,26 @@ namespace SistemaGestion
             if (_cboCuenta.SelectedIndex > 0)
                 idCuenta = _cuentas[_cboCuenta.SelectedIndex - 1].Id;
 
+            int cxcIdx = _cboCxC.SelectedIndex;
+            if (cxcIdx == _cboCxC.Items.Count - 1)
+            {
+                AplicarACxC = false;
+                IdCuentaCobrarSeleccionada = null;
+            }
+            else if (cxcIdx >= 1 && cxcIdx <= _cxcPendientes.Count)
+            {
+                AplicarACxC = true;
+                IdCuentaCobrarSeleccionada = _cxcPendientes[cxcIdx - 1].Id;
+            }
+            else
+            {
+                AplicarACxC = true;
+                IdCuentaCobrarSeleccionada = null;
+            }
+
             AbonoCreado = new Abono
             {
-                NumeroF           = "",  // abono libre, no ligado a factura específica
+                NumeroF           = "",
                 Fecha             = _dtFecha.Value.Date,
                 Monto             = monto,
                 Cliente           = cod,

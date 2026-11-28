@@ -76,22 +76,28 @@ namespace SistemaGestion.Api.Endpoints
 
                 var hoy = DateTime.Today.ToString("yyyy-MM-dd");
                 var cmd2 = c.CreateCommand();
-                cmd2.CommandText = @"SELECT Id,Cliente,Concepto,Monto,Pagado,FechaEmision,FechaVence,Estado
-                    FROM CuentasCobrar WHERE (Cliente=$cod OR Cliente=$nom) ORDER BY FechaVence";
-                cmd2.Parameters.AddWithValue("$cod", codigo);
-                cmd2.Parameters.AddWithValue("$nom", nombreCliente);
+                cmd2.CommandText = @"SELECT Id,Cliente,Concepto,Monto,COALESCE(Pagado,0),FechaEmision,FechaVence,COALESCE(Estado,'Vigente')
+                    FROM CuentasCobrar
+                    WHERE (Cliente=$cod OR Cliente=$nom OR Cliente LIKE $pref)
+                      AND COALESCE(Estado,'Vigente') != 'Anulada'
+                    ORDER BY FechaVence";
+                cmd2.Parameters.AddWithValue("$cod",  codigo);
+                cmd2.Parameters.AddWithValue("$nom",  nombreCliente);
+                cmd2.Parameters.AddWithValue("$pref", codigo + " - %");
                 var cuentas = new List<object>();
                 decimal saldoTotal = 0, vencido = 0;
                 using var r2 = cmd2.ExecuteReader();
                 while (r2.Read())
                 {
                     decimal monto=Db.D(r2,3); decimal pagado=Db.D(r2,4);
-                    decimal saldo=monto-pagado; string estado=Db.S(r2,7);
+                    decimal saldo=Math.Max(0, monto-pagado); string estado=Db.S(r2,7);
                     string fv=Db.S(r2,6);
-                    bool esVenc = estado!="Pagada" && string.Compare(fv,hoy)<0 && saldo>0;
-                    if (estado!="Pagada") { saldoTotal+=saldo; if(esVenc) vencido+=saldo; }
+                    bool cerrada = AbonosEndpoints.EsEstadoCerrado(estado) || saldo <= AbonosEndpoints.TOLERANCIA;
+                    bool esVenc = !cerrada && !string.IsNullOrEmpty(fv) && string.Compare(fv[..Math.Min(10, fv.Length)], hoy) < 0;
+                    if (!cerrada) { saldoTotal+=saldo; if(esVenc) vencido+=saldo; }
                     cuentas.Add(new { id=Db.I(r2,0), concepto=Db.S(r2,2), monto, pagado, saldo,
-                        estado, emision=Db.S(r2,5), vence=fv, estaVencida=esVenc });
+                        estado = cerrada ? "Saldada" : (esVenc ? "Vencida" : "Vigente"),
+                        emision=Db.S(r2,5), vence=fv, estaVencida=esVenc });
                 }
                 return Results.Ok(new { cliente, saldoTotal, vencido, cuentas });
             }).RequireAuthorization();
@@ -324,7 +330,12 @@ namespace SistemaGestion.Api.Endpoints
                     where.Add("f.Abono < f.TotalF");
 
                 cmd.CommandText = @"SELECT f.NumeroF, f.Fecha, f.Codigo, f.TotalF, f.Abono,
-                        f.FormaDePago, COALESCE(cl.Descripcion, f.Codigo) AS NombreCliente
+                        f.FormaDePago, COALESCE(cl.Descripcion, f.Codigo) AS NombreCliente,
+                        COALESCE(f.DiasCreditoF, 0) AS DiasCreditoF,
+                        (SELECT cc.FechaVence FROM CuentasCobrar cc
+                          WHERE LOWER(TRIM(cc.Concepto)) = LOWER('Factura ' || TRIM(f.NumeroF))
+                            AND COALESCE(cc.Estado,'') != 'Anulada'
+                          ORDER BY cc.Id DESC LIMIT 1) AS FechaVenceCxC
                     FROM Facturas f
                     LEFT JOIN Clientes cl ON cl.Codigo = f.Codigo
                     WHERE " + string.Join(" AND ", where) + @"
@@ -336,9 +347,15 @@ namespace SistemaGestion.Api.Endpoints
                 while (r.Read())
                 {
                     decimal total=Db.D(r,3), abono=Db.D(r,4);
-                    lista.Add(new { numeroF=Db.S(r,0), fecha=Db.S(r,1), cliente=Db.S(r,2),
-                        total, abono, saldo=total-abono, formaDePago=Db.S(r,5),
-                        pagada=abono>=total, nombreCliente=Db.S(r,6) });
+                    string fechaStr = Db.S(r,1);
+                    string fpStr    = Db.S(r,5);
+                    int diasCred    = Db.I(r,7);
+                    string fvCxC    = Db.S(r,8);
+                    string fechaVence = CalcularFechaVence(fechaStr, fpStr, diasCred, fvCxC);
+                    lista.Add(new { numeroF=Db.S(r,0), fecha=fechaStr, cliente=Db.S(r,2),
+                        total, abono, saldo=Math.Max(0, total-abono), formaDePago=fpStr,
+                        diasCredito=diasCred, fechaVence,
+                        pagada=(total - abono) <= AbonosEndpoints.TOLERANCIA, nombreCliente=Db.S(r,6) });
                 }
                 return Results.Ok(lista);
             }).RequireAuthorization();
@@ -372,18 +389,32 @@ namespace SistemaGestion.Api.Endpoints
             {
                 using var c = Db.Conn();
                 var cmd = c.CreateCommand();
-                cmd.CommandText = @"SELECT NumeroF,Fecha,Codigo,TotalF,Abono,IvaF,
-                    FormaDePago,Observaciones,rowid,Descuento,DiasCreditoF
-                    FROM Facturas WHERE NumeroF=$n";
+                cmd.CommandText = @"SELECT f.NumeroF,f.Fecha,f.Codigo,f.TotalF,f.Abono,f.IvaF,
+                    f.FormaDePago,f.Observaciones,f.rowid,f.Descuento,COALESCE(f.DiasCreditoF,0),
+                    (SELECT cc.FechaVence FROM CuentasCobrar cc
+                      WHERE LOWER(TRIM(cc.Concepto)) = LOWER('Factura ' || TRIM(f.NumeroF))
+                        AND COALESCE(cc.Estado,'') != 'Anulada'
+                      ORDER BY cc.Id DESC LIMIT 1),
+                    (SELECT cc.Id FROM CuentasCobrar cc
+                      WHERE LOWER(TRIM(cc.Concepto)) = LOWER('Factura ' || TRIM(f.NumeroF))
+                        AND COALESCE(cc.Estado,'') != 'Anulada'
+                      ORDER BY cc.Id DESC LIMIT 1)
+                    FROM Facturas f WHERE f.NumeroF=$n";
                 cmd.Parameters.AddWithValue("$n", numero);
                 using var r = cmd.ExecuteReader();
                 if (!r.Read()) return Results.NotFound(new { error = "Factura no encontrada." });
                 decimal total=Db.D(r,3), abono=Db.D(r,4);
                 int rowid=Db.I(r,8);
-                var fact = new { numeroF=Db.S(r,0), fecha=Db.S(r,1), cliente=Db.S(r,2),
-                    total, abono, saldo=total-abono, iva=Db.D(r,5),
-                    formaDePago=Db.S(r,6), observaciones=Db.S(r,7), pagada=abono>=total,
-                    descuento=Db.D(r,9), diasCredito=Db.I(r,10) };
+                string fechaStr = Db.S(r,1), fpStr = Db.S(r,6);
+                int diasCred = Db.I(r,10);
+                string fvCxC = Db.S(r,11);
+                int idCxC    = Db.I(r,12);
+                string fechaVence = CalcularFechaVence(fechaStr, fpStr, diasCred, fvCxC);
+                var fact = new { numeroF=Db.S(r,0), fecha=fechaStr, cliente=Db.S(r,2),
+                    total, abono, saldo=Math.Max(0, total-abono), iva=Db.D(r,5),
+                    formaDePago=fpStr, observaciones=Db.S(r,7),
+                    pagada=(total - abono) <= AbonosEndpoints.TOLERANCIA,
+                    descuento=Db.D(r,9), diasCredito=diasCred, fechaVence, idCxC };
                 r.Close();
 
                 var lineas = new List<object>();
@@ -478,6 +509,21 @@ namespace SistemaGestion.Api.Endpoints
                     catch { /* sin tabla o sin tasa: se guarda en 0 */ }
 
                     // Insertar cabecera
+                    bool esCreditoApi = (req.FormaDePago ?? "").StartsWith("Credito", StringComparison.OrdinalIgnoreCase);
+                    int diasCredApi = 0;
+                    if (esCreditoApi)
+                    {
+                        diasCredApi = req.DiasCredito > 0 ? req.DiasCredito : 30;
+                        if (req.DiasCredito <= 0)
+                        {
+                            var parts = (req.FormaDePago ?? "").Split(' ');
+                            if (parts.Length > 1 && int.TryParse(parts[1], out int d) && d > 0) diasCredApi = d;
+                        }
+                    }
+                    decimal abonoInicial = esCreditoApi
+                        ? Math.Clamp(req.AbonoInicial ?? 0m, 0m, total)
+                        : total;
+
                     var ins = c.CreateCommand(); ins.Transaction = tx;
                     string tipoDoc = req.PctIva > 0 ? "FacturaConIVA" : "NotaEntrega";
                     ins.CommandText = @"INSERT INTO Facturas
@@ -489,9 +535,9 @@ namespace SistemaGestion.Api.Endpoints
                     ins.Parameters.AddWithValue("$cl",  req.CodigoCliente ?? "");
                     ins.Parameters.AddWithValue("$desc",(double)req.Descuento);
                     ins.Parameters.AddWithValue("$fp",  req.FormaDePago ?? "Contado");
-                    ins.Parameters.AddWithValue("$ab",  (double)(req.FormaDePago=="Contado"?total:0));
+                    ins.Parameters.AddWithValue("$ab",  (double)abonoInicial);
                     ins.Parameters.AddWithValue("$iva", (double)ivaMonto);
-                    ins.Parameters.AddWithValue("$dc",  req.DiasCredito);
+                    ins.Parameters.AddWithValue("$dc",  diasCredApi);
                     ins.Parameters.AddWithValue("$tot", (double)total);
                     ins.Parameters.AddWithValue("$obs", req.Observaciones ?? "");
                     ins.Parameters.AddWithValue("$tipo", tipoDoc);
@@ -540,52 +586,60 @@ namespace SistemaGestion.Api.Endpoints
                         mv.ExecuteNonQuery();
                     }
 
-                    tx.Commit();
-
-                    // Auto-crear CxC si es factura a crédito
-                    bool esCreditoApi = (req.FormaDePago ?? "").StartsWith("Credito", StringComparison.OrdinalIgnoreCase);
+                    // Auto-crear CxC dentro de la MISMA transacción si es factura a crédito
                     bool avisoMora = false;
+                    int? idCxCCreada = null;
                     if (esCreditoApi && total > 0)
                     {
-                        // Calcular días de crédito desde el campo o desde el valor de FormaDePago ("Credito 30")
-                        int diasCredApi = req.DiasCredito > 0 ? req.DiasCredito : 30;
-                        if (req.DiasCredito <= 0)
-                        {
-                            var parts = (req.FormaDePago ?? "").Split(' ');
-                            if (parts.Length > 1 && int.TryParse(parts[1], out int d)) diasCredApi = d;
-                        }
                         DateTime fechaFact = DateTime.TryParse(fecha, out var ff) ? ff : DateTime.Today;
+                        string fechaVenceStr = fechaFact.AddDays(diasCredApi).ToString("yyyy-MM-dd");
+                        string estadoCxC = (total - abonoInicial) <= AbonosEndpoints.TOLERANCIA
+                            ? "Saldada"
+                            : (fechaFact.AddDays(diasCredApi) < DateTime.Today ? "Vencida" : "Vigente");
 
-                        using var c2 = Db.Conn();
-                        var cxc = c2.CreateCommand();
+                        var cxc = c.CreateCommand(); cxc.Transaction = tx;
                         cxc.CommandText = @"INSERT INTO CuentasCobrar (Cliente,Concepto,Monto,Pagado,FechaEmision,FechaVence,Estado)
-                            VALUES ($cl,$co,$m,0,$fe,$fv,'Vigente')";
-                        cxc.Parameters.AddWithValue("$cl", req.CodigoCliente ?? "");
-                        cxc.Parameters.AddWithValue("$co", $"Factura {numF}");
-                        cxc.Parameters.AddWithValue("$m",  (double)total);
-                        cxc.Parameters.AddWithValue("$fe", fechaFact.ToString("yyyy-MM-dd"));
-                        cxc.Parameters.AddWithValue("$fv", fechaFact.AddDays(diasCredApi).ToString("yyyy-MM-dd"));
-                        cxc.ExecuteNonQuery();
+                            VALUES ($cl,$co,$m,$p,$fe,$fv,$est);
+                            SELECT last_insert_rowid();";
+                        cxc.Parameters.AddWithValue("$cl",  req.CodigoCliente ?? "");
+                        cxc.Parameters.AddWithValue("$co",  $"Factura {numF}");
+                        cxc.Parameters.AddWithValue("$m",   (double)total);
+                        cxc.Parameters.AddWithValue("$p",   (double)abonoInicial);
+                        cxc.Parameters.AddWithValue("$fe",  fechaFact.ToString("yyyy-MM-dd"));
+                        cxc.Parameters.AddWithValue("$fv",  fechaVenceStr);
+                        cxc.Parameters.AddWithValue("$est", estadoCxC);
+                        idCxCCreada = Convert.ToInt32(cxc.ExecuteScalar());
 
-                        // Comprobar morosidad del cliente (solo advertencia, no bloquea)
-                        using var c3 = Db.Conn();
-                        var chkMora = c3.CreateCommand();
-                        chkMora.CommandText = @"SELECT COUNT(*), COALESCE(SUM(Monto-Pagado),0)
+                        if (abonoInicial > 0)
+                        {
+                            AbonosEndpoints.InsertarRegistroAbonoTx(c, tx, numF, fechaFact.ToString("yyyy-MM-dd"),
+                                abonoInicial, req.CodigoCliente ?? "", "Efectivo", "", "", "",
+                                $"Abono inicial factura {numF}", 0, "Confirmado");
+                        }
+
+                        // Comprobar morosidad previa del cliente (solo advertencia, no bloquea)
+                        var chkMora = c.CreateCommand(); chkMora.Transaction = tx;
+                        chkMora.CommandText = @"SELECT COUNT(*)
                             FROM CuentasCobrar
-                            WHERE Cliente LIKE $cod
-                              AND Estado NOT IN ('Pagada','Saldada')
-                              AND FechaVence < $hoy
-                              AND (Monto-Pagado) > 0";
-                        chkMora.Parameters.AddWithValue("$cod", $"%{req.CodigoCliente ?? ""}%");
-                        chkMora.Parameters.AddWithValue("$hoy", DateTime.Today.ToString("yyyy-MM-dd"));
-                        using var rm = chkMora.ExecuteReader();
-                        if (rm.Read() && !rm.IsDBNull(0) && Convert.ToInt32(rm[0]) > 0)
+                            WHERE (Cliente = $cod OR Cliente LIKE $pref)
+                              AND Id != $nuevaId
+                              AND COALESCE(Estado,'Vigente') NOT IN ('Pagada','Saldada','Pagado','Anulada')
+                              AND substr(FechaVence,1,10) < $hoy
+                              AND (Monto - COALESCE(Pagado,0)) > 0.005";
+                        chkMora.Parameters.AddWithValue("$cod",     req.CodigoCliente ?? "");
+                        chkMora.Parameters.AddWithValue("$pref",    (req.CodigoCliente ?? "") + " - %");
+                        chkMora.Parameters.AddWithValue("$nuevaId", idCxCCreada.Value);
+                        chkMora.Parameters.AddWithValue("$hoy",     DateTime.Today.ToString("yyyy-MM-dd"));
+                        if (Convert.ToInt32(chkMora.ExecuteScalar() ?? 0) > 0)
                             avisoMora = true;
                     }
+
+                    tx.Commit();
 
                     return Results.Created($"/api/facturas/{Uri.EscapeDataString(numF)}",
                         new { numeroF=numF, total, iva=ivaMonto,
                               cxcCreada=esCreditoApi && total > 0,
+                              idCxC=idCxCCreada,
                               avisoMorosidad=avisoMora });
                 }
                 catch (Exception ex)
@@ -595,26 +649,78 @@ namespace SistemaGestion.Api.Endpoints
                 }
             }).AddEndpointFilter(RequireRole.Of(TokenService.PuedeEscribirFacturas)).RequireAuthorization();
 
-            // ── POST pago parcial / abono ─────────────────────────────────
-            app.MapPost("/api/facturas/{numero}/pago", (string numero, AbonoRequest req) =>
+            // ── POST pago parcial / abono sobre factura ───────────────────
+            // Acepta JSON ({ monto, fecha, metodoPago, referencia, remitente, idCuenta, observaciones })
+            // o multipart/form-data (incluyendo comprobante opcional).
+            // Actualiza Facturas.Abono + CuentasCobrar.Pagado/Estado + inserta en Abonos.
+            app.MapPost("/api/facturas/{numero}/pago", async (string numero, HttpContext ctx) =>
             {
-                if (req.Monto <= 0) return Results.BadRequest(new { error = "Monto inválido." });
+                decimal monto = 0;
+                string fecha = DateTime.Today.ToString("yyyy-MM-dd");
+                string metodo = "Efectivo", referencia = "", remitente = "", observaciones = "", rutaComp = "";
+                int idCuenta = 0;
+
+                if (ctx.Request.HasFormContentType)
+                {
+                    var form = await ctx.Request.ReadFormAsync();
+                    string montoStr = form["monto"].ToString();
+                    if (!decimal.TryParse(montoStr, System.Globalization.NumberStyles.Any,
+                        System.Globalization.CultureInfo.InvariantCulture, out monto) || monto <= 0)
+                        return Results.BadRequest(new { error = "Monto inválido." });
+                    if (!string.IsNullOrWhiteSpace(form["fecha"].ToString())) fecha = form["fecha"].ToString();
+                    if (!string.IsNullOrWhiteSpace(form["metodoPago"].ToString())) metodo = form["metodoPago"].ToString();
+                    referencia    = form["referencia"].ToString();
+                    remitente     = form["remitente"].ToString();
+                    observaciones = form["observaciones"].ToString();
+                    int.TryParse(form["idCuenta"].ToString(), out idCuenta);
+
+                    var archivo = form.Files.GetFile("comprobante") ?? form.Files.GetFile("imagen");
+                    var (ruta, errArch) = await AbonosEndpoints.GuardarComprobanteArchivoAsync(archivo, "abonos", $"pago_{numero}");
+                    if (errArch != null) return Results.BadRequest(new { error = errArch });
+                    rutaComp = ruta;
+                }
+                else
+                {
+                    var req = await ctx.Request.ReadFromJsonAsync<AbonoRequest>();
+                    if (req == null || req.Monto <= 0)
+                        return Results.BadRequest(new { error = "Monto inválido." });
+                    monto         = req.Monto;
+                    fecha         = string.IsNullOrWhiteSpace(req.Fecha) ? fecha : req.Fecha!;
+                    metodo        = string.IsNullOrWhiteSpace(req.MetodoPago) ? "Efectivo" : req.MetodoPago!;
+                    referencia    = req.Referencia ?? "";
+                    remitente     = req.Remitente ?? "";
+                    observaciones = req.Observaciones ?? "";
+                    idCuenta      = req.IdCuenta;
+                }
+
                 using var c = Db.Conn();
-                var cmd = c.CreateCommand();
-                cmd.CommandText = "SELECT TotalF,Abono FROM Facturas WHERE NumeroF=$n";
-                cmd.Parameters.AddWithValue("$n", numero);
-                using var r = cmd.ExecuteReader();
-                if (!r.Read()) return Results.NotFound(new { error = "Factura no encontrada." });
-                decimal total=Db.D(r,0), abonoAnt=Db.D(r,1);
-                r.Close();
-                decimal nuevoAbono = Math.Min(total, abonoAnt + req.Monto);
-                var upd = c.CreateCommand();
-                upd.CommandText = "UPDATE Facturas SET Abono=$a WHERE NumeroF=$n";
-                upd.Parameters.AddWithValue("$a",(double)nuevoAbono);
-                upd.Parameters.AddWithValue("$n",numero);
-                upd.ExecuteNonQuery();
-                return Results.Ok(new { abono=nuevoAbono, saldo=total-nuevoAbono, pagada=nuevoAbono>=total });
-            }).AddEndpointFilter(RequireRole.Of(TokenService.PuedeEscribirFacturas)).RequireAuthorization();
+                using var tx = c.BeginTransaction();
+                try
+                {
+                    var res = AbonosEndpoints.AplicarPagoAFacturaTx(
+                        c, tx, numero, monto, fecha, metodo, referencia, remitente,
+                        rutaComp, observaciones, idCuenta, insertarAbono: true);
+                    if (!res.Encontrada) { tx.Rollback(); return Results.NotFound(new { error = res.Error }); }
+                    if (res.Error != null) { tx.Rollback(); return Results.BadRequest(new { error = res.Error }); }
+                    tx.Commit();
+                    return Results.Ok(new
+                    {
+                        ok             = true,
+                        idAbono        = res.IdAbono,
+                        abono          = res.AbonoTotal,
+                        montoAplicado  = res.MontoAplicado,
+                        saldo          = res.SaldoRestante,
+                        pagada         = res.Pagada,
+                        cxcActualizada = res.CxcActualizada,
+                        idCxC          = res.IdCxC
+                    });
+                }
+                catch (Exception ex)
+                {
+                    tx.Rollback();
+                    return Results.Problem(ex.Message);
+                }
+            }).AddEndpointFilter(RequireRole.Of(TokenService.PuedeEscribirFacturas)).RequireAuthorization().DisableAntiforgery();
 
 
             // ── GET página imprimible ─────────────────────────────────────
@@ -911,6 +1017,21 @@ namespace SistemaGestion.Api.Endpoints
             }).RequireAuthorization();
         }
 
+        private static string CalcularFechaVence(string fecha, string formaPago, int diasCredito, string fechaVenceCxC)
+        {
+            if (!string.IsNullOrWhiteSpace(fechaVenceCxC))
+                return fechaVenceCxC.Length >= 10 ? fechaVenceCxC[..10] : fechaVenceCxC;
+            if (!DateTime.TryParse(fecha, out var dt)) return fecha;
+            int dias = diasCredito;
+            if (dias <= 0 && (formaPago ?? "").StartsWith("Credito", StringComparison.OrdinalIgnoreCase))
+            {
+                var parts = (formaPago ?? "").Split(' ');
+                if (parts.Length > 1 && int.TryParse(parts[1], out int d) && d > 0) dias = d;
+                else dias = 30;
+            }
+            return dias > 0 ? dt.AddDays(dias).ToString("yyyy-MM-dd") : dt.ToString("yyyy-MM-dd");
+        }
+
         private static string H(string? s) => System.Web.HttpUtility.HtmlEncode(s ?? "");
     }
 
@@ -924,6 +1045,14 @@ namespace SistemaGestion.Api.Endpoints
         decimal  Descuento,
         int      DiasCredito,
         string?  Observaciones,
-        List<FacturaItemRequest>? Items);
-    public record AbonoRequest(decimal Monto, string? Fecha);
+        List<FacturaItemRequest>? Items,
+        decimal? AbonoInicial = null);
+    public record AbonoRequest(
+        decimal Monto,
+        string? Fecha = null,
+        string? MetodoPago = null,
+        string? Referencia = null,
+        string? Remitente = null,
+        int IdCuenta = 0,
+        string? Observaciones = null);
 }

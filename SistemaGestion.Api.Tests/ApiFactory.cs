@@ -121,38 +121,93 @@ public class ApiFactory : WebApplicationFactory<Program>
                 Descripcion TEXT NOT NULL DEFAULT '',
                 CiRif       TEXT DEFAULT '',
                 Telefono    TEXT DEFAULT '',
-                Ciudad      TEXT DEFAULT ''
+                Ciudad      TEXT DEFAULT '',
+                Direccion   TEXT DEFAULT '',
+                Email       TEXT DEFAULT '',
+                Contacto    TEXT DEFAULT '',
+                AFavor      REAL DEFAULT 0
             );
 
-            -- Facturas (requerido por /api/dashboard y /api/clientes/{codigo})
+            -- Facturas (requerido por /api/dashboard, /api/facturas y /api/clientes/{codigo})
             CREATE TABLE IF NOT EXISTS Facturas (
-                NumeroF   TEXT PRIMARY KEY,
-                Fecha     TEXT NOT NULL,
-                Cliente   TEXT DEFAULT '',
-                TotalF    REAL DEFAULT 0,
-                Estado    TEXT DEFAULT 'Activa'
+                NumeroF           TEXT PRIMARY KEY,
+                Fecha             TEXT NOT NULL,
+                Codigo            TEXT DEFAULT '',
+                Descuento         REAL DEFAULT 0,
+                Transporte        TEXT DEFAULT '',
+                Observaciones     TEXT DEFAULT '',
+                FormaDePago       TEXT DEFAULT 'Contado',
+                Abono             REAL DEFAULT 0,
+                IvaF              REAL DEFAULT 0,
+                DiasCreditoF      INTEGER DEFAULT 0,
+                TotalF            REAL DEFAULT 0,
+                TipoDocumento     TEXT DEFAULT 'FacturaConIVA',
+                Anulada           INTEGER DEFAULT 0,
+                IdTasaCambio      INTEGER DEFAULT 0,
+                TasaBCVUsada      REAL DEFAULT 0,
+                TasaParaleloUsada REAL DEFAULT 0
             );
 
-            -- Detalles de factura (requerido por /api/clientes/{codigo})
+            -- Detalles de factura
             CREATE TABLE IF NOT EXISTS DetallesFactura (
-                Id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                NumeroF       TEXT,
-                CodigoProducto TEXT,
-                Descripcion   TEXT DEFAULT '',
-                Cantidad      REAL DEFAULT 0,
-                PrecioUnit    REAL DEFAULT 0,
-                Total         REAL DEFAULT 0
+                IdFactura  INTEGER,
+                Codigo     TEXT,
+                Cantidad   REAL DEFAULT 0,
+                PrecioUnit REAL DEFAULT 0,
+                PRIMARY KEY(IdFactura, Codigo)
             );
 
-            -- Cuentas por cobrar (requerido por /api/dashboard y /api/clientes/{codigo})
+            -- Abonos
+            CREATE TABLE IF NOT EXISTS Abonos (
+                NumAbono          INTEGER PRIMARY KEY AUTOINCREMENT,
+                NumeroF           TEXT,
+                Fecha             TEXT NOT NULL,
+                Monto             REAL DEFAULT 0,
+                Cliente           TEXT DEFAULT '',
+                MetodoPago        TEXT DEFAULT 'Efectivo',
+                Referencia        TEXT DEFAULT '',
+                NombreRemitente   TEXT DEFAULT '',
+                RutaComprobante   TEXT DEFAULT '',
+                Observaciones     TEXT DEFAULT '',
+                IdCuentaReceptora INTEGER DEFAULT 0,
+                Estado            TEXT DEFAULT 'Confirmado',
+                FOREIGN KEY(NumeroF) REFERENCES Facturas(NumeroF)
+            );
+
+            -- ComprobantesFactura
+            CREATE TABLE IF NOT EXISTS ComprobantesFactura (
+                Id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                NumeroF           TEXT NOT NULL,
+                MetodoPago        TEXT NOT NULL,
+                Monto             REAL DEFAULT 0,
+                Referencia        TEXT DEFAULT '',
+                RutaImagen        TEXT DEFAULT '',
+                IdCuentaReceptora INTEGER DEFAULT 0,
+                Fecha             TEXT NOT NULL,
+                Observaciones     TEXT DEFAULT ''
+            );
+
+            -- CuentasReceptoras
+            CREATE TABLE IF NOT EXISTS CuentasReceptoras (
+                Id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                Nombre    TEXT NOT NULL,
+                Banco     TEXT NOT NULL,
+                Tipo      TEXT NOT NULL,
+                Titular   TEXT NOT NULL,
+                Documento TEXT NOT NULL,
+                Activa    INTEGER DEFAULT 1
+            );
+
+            -- Cuentas por cobrar (requerido por /api/dashboard, /api/cxc y /api/clientes/{codigo})
             CREATE TABLE IF NOT EXISTS CuentasCobrar (
-                Id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                NumeroF     TEXT,
-                Cliente     TEXT DEFAULT '',
-                Monto       REAL DEFAULT 0,
-                Pagado      REAL DEFAULT 0,
-                FechaVence  TEXT,
-                Estado      TEXT DEFAULT 'Pendiente'
+                Id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                Cliente      TEXT NOT NULL DEFAULT '',
+                Concepto     TEXT NOT NULL DEFAULT '',
+                Monto        REAL NOT NULL DEFAULT 0,
+                Pagado       REAL DEFAULT 0,
+                FechaEmision TEXT NOT NULL DEFAULT '',
+                FechaVence   TEXT NOT NULL DEFAULT '',
+                Estado       TEXT NOT NULL DEFAULT 'Vigente'
             );
 
             -- Tasa de cambio (requerido por /api/dashboard)
@@ -187,6 +242,10 @@ public class ApiFactory : WebApplicationFactory<Program>
                 (Codigo, Descripcion, Unidad, Existencia, ExistenMin, ExistenMax, Precio, CostoActual)
             VALUES ('PROD-001', 'Producto de prueba', 'Kg', 100, 10, 500, 25.50, 18.00);
 
+            INSERT OR IGNORE INTO Inventario
+                (Codigo, Descripcion, Unidad, Existencia, ExistenMin, ExistenMax, Precio, CostoActual)
+            VALUES ('PROD-CXC-001', 'Producto prueba CxC', 'Und', 500, 10, 1000, 50.00, 30.00);
+
             INSERT OR IGNORE INTO Clientes
                 (Codigo, Descripcion, CiRif, Telefono, Ciudad)
             VALUES ('CLI-001', 'Cliente de prueba', 'J-12345678-9', '0414-1234567', 'Caracas');
@@ -206,3 +265,6 @@ public class ApiFactory : WebApplicationFactory<Program>
         return Convert.ToHexString(sha.ComputeHash(bytes)).ToLower();
     }
 }
+
+[Xunit.CollectionDefinition("ApiIntegration")]
+public class ApiIntegrationCollection : Xunit.ICollectionFixture<ApiFactory> { }

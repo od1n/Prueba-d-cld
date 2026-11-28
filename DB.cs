@@ -1353,9 +1353,22 @@ namespace SistemaGestion
                 });
             }
 
-            // ── 2. Cuentas por cobrar ─────────────────────────────────────
-            foreach (var c in ObtenerCuentas().Where(c => c.Estado != "Pagado" && c.Saldo > 0))
+            // ── 2. Cuentas por cobrar manuales (evitar doble conteo con facturas del paso 1) ──
+            var numsFacturas = new HashSet<string>(
+                mov.Where(m => m.Categoria == "CxC Factura").Select(m => m.Referencia),
+                StringComparer.OrdinalIgnoreCase);
+            foreach (var c in ObtenerCuentas().Where(c =>
+                !string.Equals(c.Estado, "Pagado",  StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(c.Estado, "Pagada",  StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(c.Estado, "Saldada", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(c.Estado, "Anulada", StringComparison.OrdinalIgnoreCase) &&
+                c.Saldo > 0.005m))
             {
+                if (c.Concepto != null && c.Concepto.StartsWith("Factura ", StringComparison.OrdinalIgnoreCase))
+                {
+                    var nf = c.Concepto.Substring("Factura ".Length).Trim();
+                    if (numsFacturas.Contains(nf)) continue;
+                }
                 if ((c.FechaVence - hoy).TotalDays > 90) continue;
                 DateTime vence = c.FechaVence < hoy ? hoy.AddDays(1) : c.FechaVence;
                 mov.Add(new MovimientoCaja
@@ -3166,6 +3179,12 @@ namespace SistemaGestion
                 ("$f", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")),
                 ("$u", usuario ?? "desconocido"),
                 ("$n", numero));
+            // Marcar también como Anulada la Cuenta por Cobrar vinculada (si existe)
+            Exec(c, @"UPDATE CuentasCobrar
+                      SET Estado = 'Anulada'
+                      WHERE LOWER(TRIM(Concepto)) = LOWER($conc)
+                        AND COALESCE(Estado,'') != 'Anulada'",
+                ("$conc", $"Factura {numero.Trim()}"));
             RegistrarAuditoria("FACTURA_ANULADA", "Facturas",
                 $"Factura {numero} anulada por {usuario}. Motivo: {motivo.Trim()}");
         }
@@ -3183,6 +3202,16 @@ namespace SistemaGestion
                           FechaAnulacion   = NULL,
                           UsuarioAnulacion = NULL
                       WHERE NumeroF = $n", ("$n", numero));
+            // Restaurar estado de la Cuenta por Cobrar vinculada si estaba Anulada
+            Exec(c, @"UPDATE CuentasCobrar
+                      SET Estado = CASE
+                          WHEN (Monto - COALESCE(Pagado,0)) <= 0.005 THEN 'Saldada'
+                          WHEN substr(FechaVence,1,10) < $hoy THEN 'Vencida'
+                          ELSE 'Vigente' END
+                      WHERE LOWER(TRIM(Concepto)) = LOWER($conc)
+                        AND Estado = 'Anulada'",
+                ("$hoy", DateTime.Today.ToString("yyyy-MM-dd")),
+                ("$conc", $"Factura {numero.Trim()}"));
             RegistrarAuditoria("FACTURA_REACTIVADA", "Facturas",
                 $"Factura {numero} reactivada por {usuario}");
         }
@@ -4473,17 +4502,20 @@ namespace SistemaGestion
         public static List<CuentaCobrar> ObtenerCuentasFiltrado(
             string codCliente = null, bool soloPendientes = false)
         {
+            SincronizarCxCYFacturas();
             var list = new List<CuentaCobrar>();
             using var c = Conn();
             var cmd = c.CreateCommand();
             cmd.CommandText = @"
-                SELECT Id, Cliente, Concepto, Monto, Pagado, FechaEmision, FechaVence, Estado
+                SELECT Id, Cliente, Concepto, Monto, COALESCE(Pagado,0), FechaEmision, FechaVence, COALESCE(Estado,'Vigente')
                 FROM CuentasCobrar
-                WHERE ($cod IS NULL OR Cliente = $cod)
-                  AND ($pend = 0 OR (Monto - COALESCE(Pagado,0)) > 0)
+                WHERE ($cod IS NULL OR Cliente = $cod OR Cliente LIKE $codPref)
+                  AND COALESCE(Estado,'Vigente') != 'Anulada'
+                  AND ($pend = 0 OR (COALESCE(Estado,'Vigente') NOT IN ('Pagada','Saldada','Pagado','Anulada') AND (Monto - COALESCE(Pagado,0)) > 0.005))
                 ORDER BY FechaVence";
-            cmd.Parameters.AddWithValue("$cod",  (object)codCliente ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("$pend", soloPendientes ? 1 : 0);
+            cmd.Parameters.AddWithValue("$cod",     (object)codCliente ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$codPref", codCliente != null ? codCliente + " - %" : (object)DBNull.Value);
+            cmd.Parameters.AddWithValue("$pend",    soloPendientes ? 1 : 0);
             using var r = cmd.ExecuteReader();
             while (r.Read())
                 list.Add(new CuentaCobrar {

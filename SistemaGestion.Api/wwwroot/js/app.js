@@ -175,8 +175,12 @@ function formatFecha(str) {
 
 function estaVencida(fechaVence) {
     if (!fechaVence) return false;
-    const fv = new Date(fechaVence.includes('T') ? fechaVence : fechaVence + 'T00:00:00');
-    return fv < new Date();
+    const soloFecha = String(fechaVence).slice(0, 10);
+    const fv = new Date(soloFecha + 'T00:00:00');
+    if (isNaN(fv.getTime())) return false;
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+    return fv < hoy;
 }
 
 // ── Topbar + nav ─────────────────────────────────────────────────────────

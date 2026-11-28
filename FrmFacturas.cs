@@ -437,30 +437,24 @@ CargarDatos();
                     }
 
                     // Auto-crear CxC si la factura es a crédito
-                    if (dlg.Resultado.FormaDePago == "Credito")
+                    if ((dlg.Resultado.FormaDePago ?? "").StartsWith("Credito", StringComparison.OrdinalIgnoreCase)
+                        && dlg.Resultado.TotalF > 0)
                     {
-                        decimal saldoCxC = dlg.Resultado.TotalF - dlg.Resultado.Abono;
-                        if (saldoCxC > 0)
-                        {
-                            var cli = DatabaseService.ObtenerClientes()
-                                .Find(c => c.Codigo == dlg.Resultado.Codigo);
-                            string nombreCli = cli != null
-                                ? $"{cli.Codigo} - {cli.Descripcion}"
-                                : dlg.Resultado.Codigo;
-                            int diasCred = dlg.Resultado.DiasCreditoF > 0
-                                ? dlg.Resultado.DiasCreditoF : 30;
+                        decimal abonoIni = Math.Min(dlg.Resultado.TotalF, Math.Max(0, dlg.Resultado.Abono));
+                        int diasCred = dlg.Resultado.DiasCreditoF > 0
+                            ? dlg.Resultado.DiasCreditoF : 30;
+                        bool saldadaIni = (dlg.Resultado.TotalF - abonoIni) <= 0.005m;
 
-                            DatabaseService.InsertarCuenta(new CuentaCobrar
-                            {
-                                Cliente      = nombreCli,
-                                Concepto     = $"Factura {dlg.Resultado.NumeroF}",
-                                Monto        = saldoCxC,
-                                Pagado       = 0,
-                                FechaEmision = dlg.Resultado.Fecha,
-                                FechaVence   = dlg.Resultado.Fecha.AddDays(diasCred),
-                                Estado       = "Vigente"
-                            });
-                        }
+                        DatabaseService.InsertarCuenta(new CuentaCobrar
+                        {
+                            Cliente      = dlg.Resultado.Codigo,
+                            Concepto     = $"Factura {dlg.Resultado.NumeroF}",
+                            Monto        = dlg.Resultado.TotalF,
+                            Pagado       = abonoIni,
+                            FechaEmision = dlg.Resultado.Fecha,
+                            FechaVence   = dlg.Resultado.Fecha.AddDays(diasCred),
+                            Estado       = saldadaIni ? "Saldada" : "Vigente"
+                        });
                     }
 
                     CargarDatos();

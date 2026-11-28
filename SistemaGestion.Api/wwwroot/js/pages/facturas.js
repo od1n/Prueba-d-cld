@@ -107,7 +107,7 @@ function renderListaFact(lista) {
         ${lista.map((f,ix) => {
             const pagTag = f.pagada
                 ? '<span class="tag tag-verde">Pagada</span>'
-                : estaVencida(f.fecha)
+                : estaVencida(f.fechaVence)
                     ? '<span class="tag tag-rojo">Vencida</span>'
                     : '<span class="tag tag-naranja">Pendiente</span>';
             return `
@@ -144,7 +144,7 @@ async function verDetalle(fact) {
         const nombreCli = resp.nombreCliente || f.cliente || '';
         const pagTag = f.pagada
             ? '<span class="tag tag-verde">Pagada</span>'
-            : estaVencida(f.fecha)
+            : estaVencida(f.fechaVence)
                 ? '<span class="tag tag-rojo">Vencida</span>'
                 : '<span class="tag tag-naranja">Pendiente</span>';
         drawer.innerHTML = `
@@ -156,6 +156,7 @@ async function verDetalle(fact) {
         <div class="text-dim text-sm mb-16">
           ${esh(nombreCli)} &middot; ${formatFecha(f.fecha)} &middot; ${esh(f.formaDePago || '')}
           ${f.diasCredito > 0 ? ' &middot; '+f.diasCredito+' dias credito' : ''}
+          ${!f.pagada && f.fechaVence ? ' &middot; Vence: '+formatFecha(f.fechaVence) : ''}
         </div>
         ${lineas.length ? `
         <div class="card" style="margin-bottom:12px;padding:0">
@@ -200,22 +201,68 @@ async function verDetalle(fact) {
 }
 
 // -- Abono ----------------------------------------------------------------
-function abonarFactura(numero, saldoPendiente) {
+function fechaLocalISOFact(d = new Date()) {
+    const x = new Date(d); x.setMinutes(x.getMinutes() - x.getTimezoneOffset());
+    return x.toISOString().split('T')[0];
+}
+
+async function abonarFactura(numero, saldoPendiente) {
+    const cuentas = await cargarCuentasComprobante();
+    const opsCuenta = cuentas.filter(c => c.activa !== false)
+        .map(c => `<option value="${c.id}">${esh(c.nombre)} (${esh(c.titular || '')})</option>`).join('');
     const drawer = document.getElementById('drawerAbono');
     drawer.innerHTML = `
     <div class="modal-handle"></div>
     <div class="modal-title">Registrar Abono</div>
-    <div class="text-dim text-sm mb-12">Factura: <strong>${esh(numero)}</strong></div>
+    <div class="text-dim text-sm mb-12">Factura: <strong>${esh(numero)}</strong> (actualiza Factura, CxC y Abonos)</div>
     <div class="card mb-12" style="padding:12px">
       <div class="flex-between">
         <span class="text-dim">Saldo pendiente</span>
         <span class="mono bold" style="color:var(--naranja)">${formatUSD(saldoPendiente)}</span>
       </div>
     </div>
+    <div class="form-grid-2 mb-8">
+      <div class="form-group">
+        <label class="form-label">Monto del abono (USD) *</label>
+        <input id="abonoMonto" type="number" class="input-field" min="0.01"
+          max="${saldoPendiente}" step="0.01" value="${Number(saldoPendiente).toFixed(2)}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Fecha</label>
+        <input id="abonoFecha" type="date" class="input-field" value="${fechaLocalISOFact()}">
+      </div>
+    </div>
+    <div class="form-grid-2 mb-8">
+      <div class="form-group">
+        <label class="form-label">Método de pago</label>
+        <select id="abonoMetodo" class="input-field" onchange="onAbonoMetodoChange()">
+          <option value="Efectivo">Efectivo</option>
+          <option value="Zelle">Zelle</option>
+          <option value="TransfNac">Transferencia Nacional</option>
+          <option value="PagoMovil">Pago Móvil</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Cuenta destino</label>
+        <select id="abonoCuenta" class="input-field" disabled>
+          <option value="0">— No aplica —</option>
+          ${opsCuenta}
+        </select>
+      </div>
+    </div>
+    <div class="form-grid-2 mb-8">
+      <div class="form-group">
+        <label class="form-label">Referencia</label>
+        <input id="abonoRef" type="text" class="input-field" placeholder="Nro. confirmación">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Comprobante (opcional)</label>
+        <input id="abonoImg" type="file" accept="image/*,.pdf" class="input-field" style="padding:6px">
+      </div>
+    </div>
     <div class="form-group mb-12">
-      <label class="form-label">Monto del abono (USD)</label>
-      <input id="abonoMonto" type="number" class="input-field" min="0.01"
-        max="${saldoPendiente}" step="0.01" value="${saldoPendiente}">
+      <label class="form-label">Observaciones</label>
+      <input id="abonoObs" type="text" class="input-field" placeholder="Opcional">
     </div>
     <div id="abonoMsg"></div>
     <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px">
@@ -227,17 +274,49 @@ function abonarFactura(numero, saldoPendiente) {
     document.getElementById('abonoMonto')?.focus();
 }
 
+function onAbonoMetodoChange() {
+    const met = document.getElementById('abonoMetodo')?.value || 'Efectivo';
+    const cta = document.getElementById('abonoCuenta');
+    if (cta) {
+        cta.disabled = (met === 'Efectivo');
+        if (met === 'Efectivo') cta.value = '0';
+    }
+}
+
 async function guardarAbono(numero) {
     const monto = parseFloat(document.getElementById('abonoMonto')?.value) || 0;
     if (monto <= 0) { alert('El monto debe ser mayor a 0.'); return; }
+    const fecha  = document.getElementById('abonoFecha')?.value || fechaLocalISOFact();
+    const metodo = document.getElementById('abonoMetodo')?.value || 'Efectivo';
+    const cuenta = document.getElementById('abonoCuenta')?.value || '0';
+    const ref    = document.getElementById('abonoRef')?.value?.trim() || '';
+    const obs    = document.getElementById('abonoObs')?.value?.trim() || '';
+    const img    = document.getElementById('abonoImg')?.files?.[0] || null;
+
     const btn = document.getElementById('btnGuardarAbono');
     if (btn) { btn.disabled = true; btn.textContent = 'Procesando...'; }
     try {
-        const resp = await apiPost(`/api/facturas/${encodeURIComponent(numero)}/pago`, { monto });
+        const fd = new FormData();
+        fd.append('monto', monto.toString());
+        fd.append('fecha', fecha);
+        fd.append('metodoPago', metodo);
+        fd.append('idCuenta', cuenta);
+        fd.append('referencia', ref);
+        fd.append('observaciones', obs);
+        if (img) fd.append('comprobante', img);
+
+        const res = await fetch(`/api/facturas/${encodeURIComponent(numero)}/pago`, {
+            method: 'POST', credentials: 'include', body: fd
+        });
+        const resp = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(resp.error || `Error ${res.status}`);
+
         closeModal('modalAbono');
         await cargarFacturas();
-        if (resp.pagada) alert('Factura '+numero+' pagada en su totalidad.');
-        else alert('Abono registrado. Saldo restante: $'+(resp.saldo||0).toFixed(2));
+        if (resp.pagada)
+            alert('Factura ' + numero + ' pagada en su totalidad.' + (resp.cxcActualizada ? '\nLa Cuenta por Cobrar quedó Saldada.' : ''));
+        else
+            alert('Abono registrado. Saldo restante: $' + (resp.saldo || 0).toFixed(2) + (resp.cxcActualizada ? '\nCuenta por Cobrar actualizada.' : ''));
     } catch(err) {
         if (btn) { btn.disabled=false; btn.textContent='Confirmar abono'; }
         alert('Error: '+err.message);
@@ -265,7 +344,7 @@ function abrirNueva() {
     itemsFactura = [];
     precioAjustadoBcv = false;
     comprobantesFactura = [];
-    const hoy = new Date().toISOString().slice(0,10);
+    const hoy = fechaLocalISOFact();
     const drawer = document.getElementById('drawerForm');
     drawer.innerHTML = `
     <div class="modal-handle"></div>
@@ -392,9 +471,9 @@ function onFormaPagoChange() {
         const inp = document.getElementById('fDiasCredito');
         if (inp) inp.value = dias;
     } else { wrap.style.display = 'none'; }
-    // Mostrar/ocultar sección de comprobantes
+    // Mostrar siempre sección de comprobantes (Contado: respaldo de pago; Crédito: abono inicial que rebaja CxC)
     const sec = document.getElementById('seccionComprobantes');
-    if (sec) sec.style.display = (fp !== 'Contado') ? 'block' : 'none';
+    if (sec) sec.style.display = 'block';
 }
 
 // -- Autocomplete clientes ------------------------------------------------

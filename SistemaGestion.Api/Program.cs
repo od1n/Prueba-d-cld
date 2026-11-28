@@ -374,6 +374,9 @@ try
     // Asegurar tablas del módulo Estudio de Contenido (redes sociales).
     DbContenido.EnsureContenido();
 
+    // Reconciliar desincronizaciones históricas entre Facturas y CuentasCobrar.
+    AbonosEndpoints.SincronizarCxCYFacturasEnArranque();
+
     // Limpieza inicial de sesiones expiradas hace > 24h.
     var limpiadas = SistemaGestion.Api.Auth.SesionesActivas.LimpiarExpiradas();
     if (limpiadas > 0)

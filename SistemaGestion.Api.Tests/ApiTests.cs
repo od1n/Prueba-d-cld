@@ -12,7 +12,8 @@ namespace SistemaGestion.Api.Tests;
 ///
 /// Ejecutar: dotnet test SistemaGestion.Api.Tests/SistemaGestion.Api.Tests.csproj
 /// </summary>
-public class ApiTests : IClassFixture<ApiFactory>
+[Collection("ApiIntegration")]
+public class ApiTests
 {
     private readonly HttpClient _http;
     private readonly ApiFactory _factory;

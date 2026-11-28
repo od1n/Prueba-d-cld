@@ -164,14 +164,17 @@ async function eliminarCliente(codigo) {
 }
 
 // -- CxC del cliente ------------------------------------------------------
+let _cxcClienteActual = '';
+
 async function verCxc(codigo) {
+    _cxcClienteActual = codigo;
     closeModal('modalCliente');
     const drawer = document.getElementById('drawerCxc');
     drawer.innerHTML = `<div class="modal-handle"></div>
         <div class="modal-title">Cuentas por cobrar</div><div class="spinner"></div>`;
     openModal('modalCxc');
     try {
-        const cxc = await apiGet(`/api/cxc?cliente=${encodeURIComponent(codigo)}`) || [];
+        const cxc = await apiGet(`/api/cxc?cliente=${encodeURIComponent(codigo)}&soloPendientes=true`) || [];
         if (cxc.length === 0) {
             drawer.innerHTML = `<div class="modal-handle"></div>
                 <div class="modal-title">Cuentas por cobrar</div>
@@ -184,7 +187,7 @@ async function verCxc(codigo) {
             <div class="modal-title">Cuentas por cobrar</div>
             <div class="card mb-12" style="padding:12px">
               <div class="flex-between">
-                <span class="text-dim">Total deuda</span>
+                <span class="text-dim">Total deuda pendiente</span>
                 <span class="mono bold" style="color:var(--naranja)">${formatUSD(totalDeuda)}</span>
               </div>
             </div>
@@ -192,13 +195,15 @@ async function verCxc(codigo) {
               ${cxc.map(c => `
               <div class="list-item" style="padding:10px 14px;border-bottom:1px solid var(--borde)">
                 <div class="list-item-main">
-                  <div class="list-item-title">${esh(c.numeroFactura||'')}</div>
-                  <div class="list-item-sub">${formatFecha(c.fecha)} &middot; Vence: ${formatFecha(c.fechaVence)}</div>
+                  <div class="list-item-title">${esh(c.concepto || c.numeroFactura || '')}</div>
+                  <div class="list-item-sub">${formatFecha(c.fechaEmision || c.fecha)} &middot; Vence: ${formatFecha(c.fechaVence)}</div>
+                  <div class="text-dim text-sm">Pagado: ${formatUSD(c.pagado||0)} de ${formatUSD(c.monto||0)}</div>
                 </div>
-                <div style="text-align:right;flex-shrink:0">
-                  <div class="mono">${formatUSD(c.monto||0)}</div>
-                  <div class="text-dim text-sm">Saldo: ${formatUSD(c.saldo||0)}</div>
-                  ${estaVencida(c.fechaVence) ? '<span class="tag tag-rojo" style="font-size:8pt">Vencida</span>' : ''}
+                <div style="text-align:right;flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;gap:4px">
+                  <div class="mono bold" style="color:var(--naranja)">${formatUSD(c.saldo||0)}</div>
+                  ${c.estaVencida ? '<span class="tag tag-rojo" style="font-size:8pt">Vencida</span>' : '<span class="tag tag-naranja" style="font-size:8pt">Vigente</span>'}
+                  <button class="btn btn-sm btn-primary" style="padding:3px 10px;font-size:11px"
+                    onclick="abonarCxCCliente(${c.id}, '${esh(c.concepto||'')}', ${Number(c.saldo||0).toFixed(2)})">Abonar</button>
                 </div>
               </div>`).join('')}
             </div>
@@ -207,6 +212,22 @@ async function verCxc(codigo) {
         drawer.innerHTML = `<div class="modal-handle"></div>
             <div class="alert-banner">Error: ${esh(err.message)}</div>
             <button class="btn btn-ghost btn-full" onclick="closeModal('modalCxc')">Cerrar</button>`;
+    }
+}
+
+async function abonarCxCCliente(idCxC, concepto, saldo) {
+    const val = prompt(`Registrar abono a ${concepto}\nSaldo pendiente: $${Number(saldo).toFixed(2)}\n\nMonto a abonar (USD):`, Number(saldo).toFixed(2));
+    if (val === null) return;
+    const monto = parseFloat(val.replace(',', '.')) || 0;
+    if (monto <= 0) { alert('Monto inválido.'); return; }
+    try {
+        const resp = await apiPost(`/api/cxc/${idCxC}/pago`, { monto });
+        alert(resp.saldada
+            ? `${concepto} saldada en su totalidad.`
+            : `Abono de $${(resp.montoAplicado||monto).toFixed(2)} registrado. Saldo restante: $${(resp.saldo||0).toFixed(2)}.`);
+        await verCxc(_cxcClienteActual);
+    } catch(err) {
+        alert('Error: ' + err.message);
     }
 }
 

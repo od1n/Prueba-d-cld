@@ -178,21 +178,24 @@ namespace SistemaGestion.Api.Endpoints
                 using (var cmd = c.CreateCommand())
                 {
                     cmd.CommandText = @"
-                        SELECT Concepto, Monto, Pagado, FechaEmision, FechaVence, Estado
+                        SELECT Concepto, Monto, COALESCE(Pagado,0), FechaEmision, FechaVence, COALESCE(Estado,'Vigente')
                         FROM CuentasCobrar
-                        WHERE (Cliente = $cod OR Cliente = $nom) AND Estado != 'Saldada'
+                        WHERE (Cliente = $cod OR Cliente = $nom OR Cliente LIKE $pref)
+                          AND COALESCE(Estado,'Vigente') NOT IN ('Saldada','Pagada','Pagado','Anulada')
+                          AND (Monto - COALESCE(Pagado,0)) > 0.005
                         ORDER BY FechaVence";
-                    cmd.Parameters.AddWithValue("$cod", codigoCliente);
-                    cmd.Parameters.AddWithValue("$nom", nombre);
+                    cmd.Parameters.AddWithValue("$cod",  codigoCliente);
+                    cmd.Parameters.AddWithValue("$nom",  nombre);
+                    cmd.Parameters.AddWithValue("$pref", codigoCliente + " - %");
                     using var r = cmd.ExecuteReader();
                     while (r.Read())
                     {
                         decimal monto  = Db.D(r, 1);
                         decimal pagado = Db.D(r, 2);
-                        decimal saldo  = monto - pagado;
+                        decimal saldo  = Math.Max(0, monto - pagado);
                         string  estado = Db.S(r, 5);
                         string  fv     = Db.S(r, 4);
-                        bool vencida   = estado != "Pagada" && string.Compare(fv, hoy) < 0 && saldo > 0;
+                        bool vencida   = !AbonosEndpoints.EsEstadoCerrado(estado) && string.Compare(fv, hoy) < 0 && saldo > 0.005m;
                         totalDeuda += saldo;
                         facturas.Add(new
                         {

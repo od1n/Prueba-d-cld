@@ -100,18 +100,19 @@ namespace SistemaGestion
 
             // ------------------------------------------------------------------
             // 2. CUENTAS POR COBRAR VENCIDAS
-            //    FechaVence < hoy  Y  Estado != 'Pagada'  Y  Saldo > 0
+            //    FechaVence < hoy  Y  Estado no cerrado  Y  Saldo > 0
             // ------------------------------------------------------------------
+            DatabaseService.SincronizarCxCYFacturas();
             string hoy = DateTime.Today.ToString("yyyy-MM-dd");
             using (var cmd = conn.CreateCommand())
             {
                 cmd.CommandText = @"
-                    SELECT Id, Cliente, Concepto, Monto, Pagado,
+                    SELECT Id, Cliente, Concepto, Monto, COALESCE(Pagado,0) AS Pagado,
                            FechaEmision, FechaVence, Estado
                     FROM CuentasCobrar
-                    WHERE Estado != 'Pagada'
-                      AND FechaVence < $hoy
-                      AND (Monto - Pagado) > 0
+                    WHERE COALESCE(Estado,'Vigente') NOT IN ('Pagada','Saldada','Pagado','Anulada')
+                      AND substr(FechaVence,1,10) < $hoy
+                      AND (Monto - COALESCE(Pagado,0)) > 0.005
                     ORDER BY FechaVence ASC";
                 cmd.Parameters.AddWithValue("$hoy", hoy);
 
@@ -139,13 +140,13 @@ namespace SistemaGestion
             using (var cmd = conn.CreateCommand())
             {
                 cmd.CommandText = @"
-                    SELECT Id, Cliente, Concepto, Monto, Pagado,
+                    SELECT Id, Cliente, Concepto, Monto, COALESCE(Pagado,0) AS Pagado,
                            FechaEmision, FechaVence, Estado
                     FROM CuentasCobrar
-                    WHERE Estado NOT IN ('Pagada','Saldada')
-                      AND FechaVence >= $hoy
-                      AND FechaVence <= $en3
-                      AND (Monto - Pagado) > 0
+                    WHERE COALESCE(Estado,'Vigente') NOT IN ('Pagada','Saldada','Pagado','Anulada')
+                      AND substr(FechaVence,1,10) >= $hoy
+                      AND substr(FechaVence,1,10) <= $en3
+                      AND (Monto - COALESCE(Pagado,0)) > 0.005
                     ORDER BY FechaVence ASC";
                 cmd.Parameters.AddWithValue("$hoy", hoy);
                 cmd.Parameters.AddWithValue("$en3", en3dias);
